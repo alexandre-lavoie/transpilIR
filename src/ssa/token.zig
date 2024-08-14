@@ -51,20 +51,20 @@ pub const TokenType = enum(u8) {
     debug_location,
     double,
     env,
-    export_,
+    @"export",
     function,
     long,
     section,
     single,
     thread,
-    type_,
+    type,
     word_unsigned,
     word,
     zero,
 
     // Operations
     addition,
-    align_,
+    @"align",
     allocate1,
     allocate16,
     allocate2,
@@ -127,7 +127,7 @@ pub const TokenType = enum(u8) {
     phi,
     remainder_unsigned,
     remainder,
-    return_,
+    @"return",
     shift_left,
     shift_right,
     single_all_nan,
@@ -165,10 +165,10 @@ pub const TokenType = enum(u8) {
     word_to_single,
 };
 
-pub const LONGEST_RESERVED_WORD = 10;
-pub const RESERVED_WORDS = std.StaticStringMap(TokenType).initComptime(.{
+pub const longest_reserved_word = 10;
+pub const reserved_words = std.StaticStringMap(TokenType).initComptime(.{
     .{ "add", .addition },
-    .{ "align", .align_ },
+    .{ "align", .@"align" },
     .{ "alloc1", .allocate1 },
     .{ "alloc16", .allocate16 },
     .{ "alloc2", .allocate2 },
@@ -225,7 +225,7 @@ pub const RESERVED_WORDS = std.StaticStringMap(TokenType).initComptime(.{
     .{ "dtosi", .double_to_word },
     .{ "dtoui", .double_to_word_unsigned },
     .{ "env", .env },
-    .{ "export", .export_ },
+    .{ "export", .@"export" },
     .{ "exts", .single_to_double },
     .{ "extsb", .byte_to_word },
     .{ "extsh", .half_word_to_word },
@@ -254,7 +254,7 @@ pub const RESERVED_WORDS = std.StaticStringMap(TokenType).initComptime(.{
     .{ "or", .bitwise_or },
     .{ "phi", .phi },
     .{ "rem", .remainder },
-    .{ "ret", .return_ },
+    .{ "ret", .@"return" },
     .{ "s", .single },
     .{ "sar", .arthimetic_shift_right },
     .{ "sb", .byte },
@@ -276,7 +276,7 @@ pub const RESERVED_WORDS = std.StaticStringMap(TokenType).initComptime(.{
     .{ "swtof", .word_to_single },
     .{ "thread", .thread },
     .{ "truncd", .double_to_single },
-    .{ "type", .type_ },
+    .{ "type", .type },
     .{ "ub", .byte_unsigned },
     .{ "udiv", .divide_unsigned },
     .{ "uh", .half_word_unsigned },
