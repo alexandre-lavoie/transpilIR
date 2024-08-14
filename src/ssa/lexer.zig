@@ -58,7 +58,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                     '$' => self.global_identifier(),
                     '%' => self.temporary_identifier(),
                     '@' => self.label_identifier(),
-                    ':' => self.token_typeidentifier(),
+                    ':' => self.type_identifier(),
                     '"' => self.string_literal(),
                     ',' => self.punctuation(.comma),
                     '(' => self.punctuation(.open_parenthesis),
@@ -126,8 +126,8 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             return self.identifier('@', .label_identifier);
         }
 
-        fn token_typeidentifier(self: *Self) !token.Token {
-            return self.identifier(':', .token_typeidentifier);
+        fn type_identifier(self: *Self) !token.Token {
+            return self.identifier(':', .type_identifier);
         }
 
         fn string_literal(self: *Self) !token.Token {
