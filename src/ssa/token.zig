@@ -1,26 +1,15 @@
 const std = @import("std");
 
+const common = @import("../common.zig");
+
 pub const Token = struct {
     token_type: TokenType,
-    span: TokenSpan = TokenSpan{},
+    span: common.SourceSpan = common.SourceSpan{},
 
     const Self = @This();
 
     pub fn init(token_type: TokenType) Self {
         return Self{ .token_type = token_type };
-    }
-};
-
-// The span of a Token inside a source ssa file.
-// start is inclusive and end is exclusive -> [start, end)
-pub const TokenSpan = struct {
-    start: usize = 0,
-    end: usize = 0,
-
-    const Self = @This();
-
-    fn size(self: *const Self) usize {
-        return self.end - self.start;
     }
 };
 

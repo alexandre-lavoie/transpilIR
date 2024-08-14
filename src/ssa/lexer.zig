@@ -42,10 +42,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         pub fn lex(self: *Self) !void {
-            try self.append(token.Token{
-                .token_type = .module_start,
-                .span = token.TokenSpan{ .start = 0, .end = 0 },
-            });
+            try self.append(token.Token.init(.module_start));
 
             _ = self.next();
 
