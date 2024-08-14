@@ -16,6 +16,12 @@ pub const Token = struct {
 pub const TokenSpan = struct {
     start: usize = 0,
     end: usize = 0,
+
+    const Self = @This();
+
+    fn size(self: *const Self) usize {
+        return self.end - self.start;
+    }
 };
 
 pub const TokenType = enum(u8) {
