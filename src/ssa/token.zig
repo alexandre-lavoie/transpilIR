@@ -59,6 +59,8 @@ pub const TokenType = enum(u8) {
     open_curly_brace,
     close_curly_brace,
     variable_arguments,
+    plus,
+    assign,
     word_assign,
     long_assign,
     single_assign,

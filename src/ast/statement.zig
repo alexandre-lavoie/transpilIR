@@ -36,7 +36,7 @@ pub const StatementType = enum {
 
     data_definition,
     typed_data,
-    zero_data,
+    offset,
 
     // Type
 
@@ -115,8 +115,9 @@ pub const StatementData = union(StatementType) {
     // Data
 
     data_definition: struct {
+        thread: bool = false,
         identifier: StatementIndex,
-        values: StatementIndex,
+        values: ?StatementIndex,
     },
 
     typed_data: struct {
@@ -124,15 +125,16 @@ pub const StatementData = union(StatementType) {
         value: StatementIndex,
     },
 
-    zero_data: struct {
-        length: StatementIndex,
+    offset: struct {
+        identifier: StatementIndex,
+        value: StatementIndex,
     },
 
     // Type
 
     array_type: struct {
         item: StatementIndex,
-        count: usize,
+        count: StatementIndex,
     },
 
     env_type: void,
@@ -140,7 +142,7 @@ pub const StatementData = union(StatementType) {
     primitive_type: PrimitiveType,
 
     struct_type: struct {
-        alignment: usize,
+        alignment: ?StatementIndex,
         members: StatementIndex,
     },
 
@@ -192,7 +194,7 @@ pub const StatementData = union(StatementType) {
 
     allocate: struct {
         data_type: StatementIndex,
-        size: usize,
+        size: StatementIndex,
     },
 
     assignment: struct {
@@ -201,7 +203,7 @@ pub const StatementData = union(StatementType) {
     },
 
     blit: struct {
-        size: usize,
+        size: StatementIndex,
         source: StatementIndex,
         target: StatementIndex,
     },

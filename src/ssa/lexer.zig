@@ -53,6 +53,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                     ')' => self.punctuation(.close_parenthesis),
                     '{' => self.punctuation(.open_curly_brace),
                     '}' => self.punctuation(.close_curly_brace),
+                    '+' => self.punctuation(.plus),
                     '=' => self.assign(),
                     '.' => self.variableArguments(),
                     'a'...'z' => self.reservedWordOrFloatingLiteral(),
@@ -170,6 +171,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                 'l' => .long_assign,
                 's' => .single_assign,
                 'w' => .word_assign,
+                ' ', '\t', '\n', '\r', '\x00' => .assign,
                 else => return error.AssignInvalidType,
             };
 
@@ -379,8 +381,8 @@ test "integerLiteral" {
 
 test "assign" {
     // Arrange
-    const file = "=w =s";
-    const expected = [_]token.TokenType{ .module_start, .word_assign, .single_assign, .module_end };
+    const file = "=w =s =";
+    const expected = [_]token.TokenType{ .module_start, .word_assign, .single_assign, .assign, .module_end };
 
     // Act + Assert
     try assertLex(file, &expected);

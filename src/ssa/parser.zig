@@ -39,18 +39,20 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             };
         }
 
-        pub fn parse(self: *Self) !void {
+        pub fn parse(self: *Self) !usize {
             _ = self.reader_readToken();
 
-            _ = try self.module();
+            return try self.module();
         }
 
         fn module(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .module_start) return error.ParseModuleStartTokenError;
+            if (self.previous.token_type != .module_start) return error.ParseMissingModule;
 
             _ = self.reader_readToken();
 
             var functions: ?ast.StatementIndex = undefined;
+            var data_definitions: ?ast.StatementIndex = undefined;
+            const type_definitions: ?ast.StatementIndex = undefined;
 
             const start = self.previous.span.start;
             while (true) {
@@ -68,8 +70,21 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                             } },
                         ));
                     },
+                    .data, .thread => {
+                        const data_start = self.previous.span.start;
+                        const next_data = try self.dataDefinition();
+                        const data_end = self.previous.span.end;
+
+                        data_definitions = try self.collection_append(ast.Statement.init(
+                            .{ .start = data_start, .end = data_end },
+                            .{ .node = .{
+                                .value = next_data,
+                                .next = data_definitions,
+                            } },
+                        ));
+                    },
                     .module_end => break,
-                    else => return error.ParseModuleTokenError,
+                    else => return error.ParseModuleInvalidToken,
                 }
             }
             const end = self.previous.span.end;
@@ -78,12 +93,14 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .module = .{
                     .functions = functions,
+                    .data = data_definitions,
+                    .types = type_definitions,
                 } },
             ));
         }
 
         fn localIdentifier(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .local_identifier) return error.ParseLocalIdentifierError;
+            if (self.previous.token_type != .local_identifier) return error.ParseMissingLocalIdentifier;
 
             const start = self.previous.span.start + 1;
             const end = self.previous.span.end;
@@ -97,7 +114,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn globalIdentifier(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .global_identifier) return error.ParseGlobalIdentifierError;
+            if (self.previous.token_type != .global_identifier) return error.ParseMissingGlobalIdentifier;
 
             const start = self.previous.span.start + 1;
             const end = self.previous.span.end;
@@ -111,7 +128,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn typeIdentifier(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .type_identifier) return error.ParseTypeIdentifierError;
+            if (self.previous.token_type != .type_identifier) return error.ParseMissingTypeIdentifier;
 
             const start = self.previous.span.start + 1;
             const end = self.previous.span.end;
@@ -125,7 +142,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn block(self: *Self) !?ast.StatementIndex {
-            if (self.previous.token_type != .open_curly_brace) return error.ParseBlockStartTokenError;
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
 
             _ = self.reader_readToken();
 
@@ -134,6 +151,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             while (true) {
                 switch (self.previous.token_type) {
                     .close_curly_brace => break,
+                    // TODO: support for block lines.
                     else => return error.TODO,
                 }
             }
@@ -141,6 +159,14 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             _ = self.reader_readToken();
 
             return lines;
+        }
+
+        fn stackAlignment(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .@"align") return error.ParseMissingAlign;
+
+            _ = self.reader_readToken();
+
+            return try self.integer();
         }
 
         fn primitiveType(self: *Self) !ast.StatementIndex {
@@ -154,7 +180,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .single => .single,
                 .word_unsigned => .word_unsigned,
                 .word => .word,
-                else => return error.ParsePrimitiveTypeError,
+                else => return error.ParseInvalidPrimitiveType,
             };
 
             const start = self.previous.span.start;
@@ -176,7 +202,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn envType(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .env) return error.ParseEnvTypeError;
+            if (self.previous.token_type != .env) return error.ParseMissingEnv;
 
             const start = self.previous.span.start;
             const end = self.previous.span.end;
@@ -186,6 +212,184 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try self.collection_append(ast.Statement.init(
                 .{ .start = start, .end = end },
                 .{ .env_type = undefined },
+            ));
+        }
+
+        fn integer(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .integer_literal) return error.ParseMissingIntegerLiteral;
+
+            const span = self.previous.span;
+            _ = self.reader_readToken();
+
+            return try self.collection_append(ast.Statement.init(
+                span,
+                .{ .literal = .{
+                    .type = .integer,
+                } },
+            ));
+        }
+
+        fn single(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .single_literal) return error.ParseMissingSingleLiteral;
+
+            const span = self.previous.span;
+            _ = self.reader_readToken();
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = span.start + 2, .end = span.end },
+                .{ .literal = .{
+                    .type = .float,
+                } },
+            ));
+        }
+
+        fn double(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .double_literal) return error.ParseMissingDoubleLiteral;
+
+            const span = self.previous.span;
+            _ = self.reader_readToken();
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = span.start + 2, .end = span.end },
+                .{ .literal = .{
+                    .type = .float,
+                } },
+            ));
+        }
+
+        fn string(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .string_literal) return error.ParseMissingStringLiteral;
+
+            const span = self.previous.span;
+            _ = self.reader_readToken();
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = span.start + 1, .end = span.end - 1 },
+                .{ .literal = .{
+                    .type = .float,
+                } },
+            ));
+        }
+
+        fn dataDefinition(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            var thread = false;
+            switch (self.previous.token_type) {
+                .thread => {
+                    if (self.reader_readToken().token_type != .data) return error.ParseMissingData;
+
+                    thread = true;
+                },
+                .data => {},
+                else => return error.ParseMissingData,
+            }
+
+            _ = self.reader_readToken();
+
+            const identifier = try self.globalIdentifier();
+
+            if (self.previous.token_type != .assign) return error.ParseMissingEqual;
+
+            _ = self.reader_readToken();
+
+            var alignment: ?ast.StatementIndex = undefined;
+            switch (self.previous.token_type) {
+                .@"align" => alignment = try self.stackAlignment(),
+                else => {},
+            }
+
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+
+            _ = self.reader_readToken();
+
+            var values: ?ast.StatementIndex = undefined;
+
+            var first = true;
+            while (self.previous.token_type != .close_curly_brace) {
+                if (!first) {
+                    if (self.previous.token_type != .comma) return error.ParseMissingComma;
+                    _ = self.reader_readToken();
+                }
+
+                const value_type = try self.primitiveType();
+
+                while (true) {
+                    switch (self.previous.token_type) {
+                        .comma, .close_curly_brace => break,
+                        else => {
+                            const start_value = self.previous.span.start;
+                            const value = try self.dataValue();
+                            const end_value = self.previous.span.end;
+
+                            const type_value = try self.collection_append(ast.Statement.init(
+                                .{ .start = start_value, .end = end_value },
+                                .{ .typed_data = .{
+                                    .type = value_type,
+                                    .value = value,
+                                } },
+                            ));
+
+                            values = try self.collection_append(ast.Statement.init(
+                                .{ .start = start_value, .end = end_value },
+                                .{ .node = .{
+                                    .value = type_value,
+                                    .next = values,
+                                } },
+                            ));
+                        },
+                    }
+                }
+
+                first = false;
+            }
+
+            _ = self.reader_readToken();
+
+            const end = self.previous.span.start;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .data_definition = .{
+                    .thread = thread,
+                    .identifier = identifier,
+                    .values = values,
+                } },
+            ));
+        }
+
+        fn dataValue(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const canOffset = self.previous.token_type == .global_identifier;
+
+            const left = try switch (self.previous.token_type) {
+                .global_identifier => self.globalIdentifier(),
+                .integer_literal => self.integer(),
+                .single_literal => self.single(),
+                .double_literal => self.double(),
+                .string_literal => self.string(),
+                else => return error.ParseInvalidDataValue,
+            };
+
+            if (self.previous.token_type == .plus) {
+                if (!canOffset) return error.ParseInvalidDataOffset;
+            } else {
+                return left;
+            }
+
+            if (self.reader_readToken().token_type != .integer_literal) return error.ParseInvalidOffset;
+
+            const offset = try self.integer();
+
+            const end = self.previous.span.end;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .offset = .{
+                    .identifier = left,
+                    .value = offset,
+                } },
             ));
         }
 
@@ -216,11 +420,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                     switch (self.reader_readToken().token_type) {
                         .function => {},
-                        else => return error.ParseFunctionStartTokenError,
+                        else => return error.ParseMissingFunction,
                     }
                 },
                 .function => {},
-                else => return error.ParseFunctionStartTokenError,
+                else => return error.ParseMissingFunction,
             }
 
             var return_type: ?ast.StatementIndex = undefined;
@@ -247,87 +451,76 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn functionParameters(self: *Self) !?ast.StatementIndex {
-            if (self.previous.token_type != .open_parenthesis) return error.ParseParameterStartError;
-
+            if (self.previous.token_type != .open_parenthesis) return error.ParseMissingOpenParenthesis;
             _ = self.reader_readToken();
 
             var parameters: ?ast.StatementIndex = undefined;
 
-            switch (self.previous.token_type) {
-                .close_parenthesis => {},
-                .env => {
-                    const env_start = self.previous.span.start;
-                    const env = try self.envParameter();
-                    const env_end = self.previous.span.end;
+            var first = true;
+            while (self.previous.token_type != .close_parenthesis) {
+                if (!first) {
+                    if (self.previous.token_type != .comma) return error.ParseMissingCommaError;
 
-                    parameters = try self.collection_append(ast.Statement.init(
-                        .{ .start = env_start, .end = env_end },
-                        .{ .node = .{
-                            .value = env,
-                            .next = parameters,
-                        } },
-                    ));
-                },
-                else => {
-                    const param_start = self.previous.span.start;
-                    const param = try self.functionParameter();
-                    const param_end = self.previous.span.end;
-
-                    parameters = try self.collection_append(ast.Statement.init(
-                        .{ .start = param_start, .end = param_end },
-                        .{ .node = .{
-                            .value = param,
-                            .next = parameters,
-                        } },
-                    ));
-                },
-            }
-
-            while (true) {
-                switch (self.previous.token_type) {
-                    .close_parenthesis => break,
-                    .comma => {
-                        switch (self.reader_readToken().token_type) {
-                            .variable_arguments => {
-                                const vararg = try self.collection_append(ast.Statement.init(
-                                    self.previous.span,
-                                    .{ .variadic_parameter = undefined },
-                                ));
-
-                                parameters = try self.collection_append(ast.Statement.init(
-                                    self.previous.span,
-                                    .{ .node = .{
-                                        .value = vararg,
-                                        .next = parameters,
-                                    } },
-                                ));
-
-                                _ = self.reader_readToken();
-
-                                break;
-                            },
-                            else => {
-                                const param_start = self.previous.span.start;
-                                const param = try self.functionParameter();
-                                const param_end = self.previous.span.end;
-
-                                parameters = try self.collection_append(ast.Statement.init(
-                                    .{ .start = param_start, .end = param_end },
-                                    .{ .node = .{
-                                        .value = param,
-                                        .next = parameters,
-                                    } },
-                                ));
-                            },
-                        }
-                    },
-                    else => return error.ParserParameterUnexpectedTokenError,
+                    _ = self.reader_readToken();
                 }
+
+                switch (self.previous.token_type) {
+                    .env => {
+                        if (!first) return error.ParseInvalidEnv;
+
+                        const env_start = self.previous.span.start;
+                        const env = try self.envParameter();
+                        const env_end = self.previous.span.end;
+
+                        parameters = try self.collection_append(ast.Statement.init(
+                            .{ .start = env_start, .end = env_end },
+                            .{ .node = .{
+                                .value = env,
+                                .next = parameters,
+                            } },
+                        ));
+                    },
+                    .variable_arguments => {
+                        if (first) return error.ParseInvalidVarArgs;
+
+                        const vararg = try self.collection_append(ast.Statement.init(
+                            self.previous.span,
+                            .{ .variadic_parameter = undefined },
+                        ));
+
+                        parameters = try self.collection_append(ast.Statement.init(
+                            self.previous.span,
+                            .{ .node = .{
+                                .value = vararg,
+                                .next = parameters,
+                            } },
+                        ));
+
+                        _ = self.reader_readToken();
+
+                        break;
+                    },
+                    else => {
+                        const param_start = self.previous.span.start;
+                        const param = try self.functionParameter();
+                        const param_end = self.previous.span.end;
+
+                        parameters = try self.collection_append(ast.Statement.init(
+                            .{ .start = param_start, .end = param_end },
+                            .{ .node = .{
+                                .value = param,
+                                .next = parameters,
+                            } },
+                        ));
+                    },
+                }
+
+                first = false;
             }
 
             switch (self.previous.token_type) {
                 .close_parenthesis => {},
-                else => return error.ParserParameterCloseError,
+                else => return error.ParseMissingCloseParenthesis,
             }
 
             _ = self.reader_readToken();
@@ -397,7 +590,7 @@ fn testParser(buffer: anytype) ![]ast.Statement {
     defer statements.deinit();
 
     var parser = Parser(@TypeOf(token_reader), @TypeOf(statements)).init(&token_reader, &statements);
-    try parser.parse();
+    _ = try parser.parse();
 
     return try statements.toOwnedSlice();
 }
@@ -428,6 +621,152 @@ test "module" {
     // Arrange
     const file = "";
     const expected = [_]ast.StatementType{
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data" {
+    // Arrange
+    const file = "data $d = {w 1}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data with alignment" {
+    // Arrange
+    const file = "data $d = align 1 {w 1}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .literal,
+        .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data with global" {
+    // Arrange
+    const file = "data $d = {l $o}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data with global offset" {
+    // Arrange
+    const file = "data $d = {l $o + 32 0}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .literal,
+        .offset,
+        .typed_data,
+        .node,
+        .literal,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data with thread" {
+    // Arrange
+    const file = "thread data $d = {w 1}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data with reused type" {
+    // Arrange
+    const file = "data $d = {w 1 2 3}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .literal,
+        .typed_data,
+        .node,
+        .literal,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data with many types" {
+    // Arrange
+    const file = "data $d = {w 1, h 0, b \"test\"}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
         .module,
     };
 
@@ -590,10 +929,10 @@ test "function with variable parameter" {
 // Error Tests
 //
 
-test "function error.ParsePrimitiveTypeError" {
+test "function error.ParseInvalidPrimitiveType" {
     // Arrange
     const file = "function ";
-    const expected = error.ParsePrimitiveTypeError;
+    const expected = error.ParseInvalidPrimitiveType;
 
     // Act
     const res = testParser(file);
@@ -602,10 +941,10 @@ test "function error.ParsePrimitiveTypeError" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParsePrimitiveTypeError 2" {
+test "function error.ParseInvalidPrimitiveType 2" {
     // Arrange
     const file = "function @fun() {}";
-    const expected = error.ParsePrimitiveTypeError;
+    const expected = error.ParseInvalidPrimitiveType;
 
     // Act
     const res = testParser(file);
@@ -614,10 +953,10 @@ test "function error.ParsePrimitiveTypeError 2" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParsePrimitiveTypeError 3" {
+test "function error.ParseInvalidPrimitiveType 3" {
     // Arrange
     const file = "function $fun(w %p, ) {}";
-    const expected = error.ParsePrimitiveTypeError;
+    const expected = error.ParseInvalidPrimitiveType;
 
     // Act
     const res = testParser(file);
@@ -626,10 +965,10 @@ test "function error.ParsePrimitiveTypeError 3" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParsePrimitiveTypeError 4" {
+test "function error.ParseInvalidVarArgs 4" {
     // Arrange
     const file = "function $fun(...) {}";
-    const expected = error.ParsePrimitiveTypeError;
+    const expected = error.ParseInvalidVarArgs;
 
     // Act
     const res = testParser(file);
@@ -638,10 +977,10 @@ test "function error.ParsePrimitiveTypeError 4" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseLocalIdentifierError" {
+test "function error.ParseMissingLocalIdentifier" {
     // Arrange
     const file = "function $fun(w) {}";
-    const expected = error.ParseLocalIdentifierError;
+    const expected = error.ParseMissingLocalIdentifier;
 
     // Act
     const res = testParser(file);
@@ -650,10 +989,10 @@ test "function error.ParseLocalIdentifierError" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseLocalIdentifierError 2" {
+test "function error.ParseMissingLocalIdentifier 2" {
     // Arrange
     const file = "function $fun(w @a) {}";
-    const expected = error.ParseLocalIdentifierError;
+    const expected = error.ParseMissingLocalIdentifier;
 
     // Act
     const res = testParser(file);
