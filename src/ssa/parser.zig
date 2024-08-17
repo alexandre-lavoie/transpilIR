@@ -99,8 +99,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             ));
         }
 
-        fn localIdentifier(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .local_identifier) return error.ParseMissingLocalIdentifier;
+        fn scopeIdentifier(self: *Self, token_type: token.TokenType, scope: ast.Scope) !ast.StatementIndex {
+            if (self.previous.token_type != token_type) return error.ParseInvalidIdentifier;
 
             const start = self.previous.span.start + 1;
             const end = self.previous.span.end;
@@ -109,36 +109,24 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             return try self.collection_append(ast.Statement.init(
                 .{ .start = start, .end = end },
-                .{ .identifier = .{ .scope = .local } },
+                .{ .identifier = .{ .scope = scope } },
             ));
+        }
+
+        fn localIdentifier(self: *Self) !ast.StatementIndex {
+            return self.scopeIdentifier(.local_identifier, .local);
         }
 
         fn globalIdentifier(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .global_identifier) return error.ParseMissingGlobalIdentifier;
-
-            const start = self.previous.span.start + 1;
-            const end = self.previous.span.end;
-
-            _ = self.reader_readToken();
-
-            return try self.collection_append(ast.Statement.init(
-                .{ .start = start, .end = end },
-                .{ .identifier = .{ .scope = .global } },
-            ));
+            return self.scopeIdentifier(.global_identifier, .global);
         }
 
         fn typeIdentifier(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .type_identifier) return error.ParseMissingTypeIdentifier;
+            return self.scopeIdentifier(.type_identifier, .type);
+        }
 
-            const start = self.previous.span.start + 1;
-            const end = self.previous.span.end;
-
-            _ = self.reader_readToken();
-
-            return try self.collection_append(ast.Statement.init(
-                .{ .start = start, .end = end },
-                .{ .identifier = .{ .scope = .type } },
-            ));
+        fn labelIdentifier(self: *Self) !ast.StatementIndex {
+            return self.scopeIdentifier(.label_identifier, .label);
         }
 
         fn block(self: *Self) !?ast.StatementIndex {
@@ -1008,10 +996,10 @@ test "function error.ParseInvalidVarArgs 4" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseMissingLocalIdentifier" {
+test "function error.ParseInvalidIdentifier" {
     // Arrange
     const file = "function $fun(w) {}";
-    const expected = error.ParseMissingLocalIdentifier;
+    const expected = error.ParseInvalidIdentifier;
 
     // Act
     const res = testParser(file);
@@ -1020,10 +1008,10 @@ test "function error.ParseMissingLocalIdentifier" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseMissingLocalIdentifier 2" {
+test "function error.ParseInvalidIdentifier 2" {
     // Arrange
     const file = "function $fun(w @a) {}";
-    const expected = error.ParseMissingLocalIdentifier;
+    const expected = error.ParseInvalidIdentifier;
 
     // Act
     const res = testParser(file);
