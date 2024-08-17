@@ -431,7 +431,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             var return_type: ?ast.StatementIndex = undefined;
             switch (self.reader_readToken().token_type) {
                 .global_identifier => {},
-                else => return_type = try self.primitiveType(),
+                else => return_type = try self.variableType(),
             }
 
             const name = try self.globalIdentifier();
@@ -823,11 +823,27 @@ test "function with export" {
     try assertParser(file, &expected);
 }
 
-test "function with return type" {
+test "function with primitive return type" {
     // Arrange
     const file = "function w $fun() {}";
     const expected = [_]ast.StatementType{
         .primitive_type,
+        .identifier,
+        .function_signature,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "function with custom return type" {
+    // Arrange
+    const file = "function :type $fun() {}";
+    const expected = [_]ast.StatementType{
+        .identifier,
         .identifier,
         .function_signature,
         .function,
@@ -948,9 +964,57 @@ test "function with variable parameter" {
 // Error Tests
 //
 
+test "data error.ParseInvalidIdentifier" {
+    // Arrange
+    const file = "data";
+    const expected = error.ParseInvalidIdentifier;
+
+    // Act
+    const res = testParser(file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "data error.ParseInvalidIdentifier 2" {
+    // Arrange
+    const file = "data @d";
+    const expected = error.ParseInvalidIdentifier;
+
+    // Act
+    const res = testParser(file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "data error.ParseMissingEqual" {
+    // Arrange
+    const file = "data $d 1";
+    const expected = error.ParseMissingEqual;
+
+    // Act
+    const res = testParser(file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "data error.ParseInvalidPrimitiveType" {
+    // Arrange
+    const file = "data $d = {1}";
+    const expected = error.ParseInvalidPrimitiveType;
+
+    // Act
+    const res = testParser(file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
 test "function error.ParseInvalidPrimitiveType" {
     // Arrange
-    const file = "function ";
+    const file = "function";
     const expected = error.ParseInvalidPrimitiveType;
 
     // Act
