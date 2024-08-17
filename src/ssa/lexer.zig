@@ -11,7 +11,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
 
         const Self = @This();
 
-        fn reader_readerByte(self: *Self) u8 {
+        fn reader_readByte(self: *Self) u8 {
             self.offset += 1;
 
             self.previous = self.reader.readByte() catch 0;
@@ -32,7 +32,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         pub fn lex(self: *Self) !void {
             try self.collection_append(token.Token.init(.module_start));
 
-            _ = self.reader_readerByte();
+            _ = self.reader_readByte();
 
             while (true) {
                 const start = self.offset;
@@ -58,7 +58,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                     'a'...'z' => self.reservedWordOrFloatingLiteral(),
                     '-', '0'...'9' => self.integerLiteral(),
                     ' ', '\t', '\n', '\r' => {
-                        _ = self.reader_readerByte();
+                        _ = self.reader_readByte();
                         continue;
                     },
                     else => {
@@ -82,7 +82,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             if (self.previous != '#') return error.CommentError;
 
             while (true) {
-                switch (self.reader_readerByte()) {
+                switch (self.reader_readByte()) {
                     '\x00', '\r', '\n' => break,
                     else => continue,
                 }
@@ -93,7 +93,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             if (previous != self.previous) return error.IdentifierSymbolError;
 
             while (true) {
-                switch (self.reader_readerByte()) {
+                switch (self.reader_readByte()) {
                     '0'...'9', 'A'...'Z', 'a'...'z', '_', '.' => continue,
                     else => break,
                 }
@@ -107,7 +107,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn temporaryIdentifier(self: *Self) !token.Token {
-            return self.identifier('%', .temporary_identifier);
+            return self.identifier('%', .local_identifier);
         }
 
         fn labelIdentifier(self: *Self) !token.Token {
@@ -122,15 +122,15 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             if ('"' != self.previous) return error.StringOpenError;
 
             while (true) {
-                switch (self.reader_readerByte()) {
+                switch (self.reader_readByte()) {
                     '"' => {
-                        _ = self.reader_readerByte();
+                        _ = self.reader_readByte();
 
                         return token.Token.init(.string_literal);
                     },
                     '\x00' => return error.StringCloseError,
                     '\\' => {
-                        _ = self.reader_readerByte();
+                        _ = self.reader_readByte();
                         continue;
                     },
                     else => continue,
@@ -141,7 +141,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         fn integerLiteral(self: *Self) !token.Token {
             switch (self.previous) {
                 '0'...'9' => {},
-                '-' => switch (self.reader_readerByte()) {
+                '-' => switch (self.reader_readByte()) {
                     '0'...'9' => {},
                     else => return error.IntegerNegativeError,
                 },
@@ -149,7 +149,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             }
 
             while (true) {
-                switch (self.reader_readerByte()) {
+                switch (self.reader_readByte()) {
                     '0'...'9' => continue,
                     else => break,
                 }
@@ -159,31 +159,31 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn punctuation(self: *Self, token_type: token.TokenType) !token.Token {
-            _ = self.reader_readerByte();
+            _ = self.reader_readByte();
 
             return token.Token.init(token_type);
         }
 
         fn assign(self: *Self) !token.Token {
-            const token_type: token.TokenType = switch (self.reader_readerByte()) {
-                'w' => .word_assign,
+            const token_type: token.TokenType = switch (self.reader_readByte()) {
+                'd' => .double_assign,
                 'l' => .long_assign,
                 's' => .single_assign,
-                'd' => .double_assign,
+                'w' => .word_assign,
                 else => return error.AssignInvalidType,
             };
 
-            _ = self.reader_readerByte();
+            _ = self.reader_readByte();
 
             return token.Token.init(token_type);
         }
 
         fn variableArguments(self: *Self) !token.Token {
             if (self.previous != '.') return error.ArgumentSpreadError;
-            if (self.reader_readerByte() != '.') return error.ArgumentSpreadError;
-            if (self.reader_readerByte() != '.') return error.ArgumentSpreadError;
+            if (self.reader_readByte() != '.') return error.ArgumentSpreadError;
+            if (self.reader_readByte() != '.') return error.ArgumentSpreadError;
 
-            _ = self.reader_readerByte();
+            _ = self.reader_readByte();
 
             return token.Token.init(.variable_arguments);
         }
@@ -195,7 +195,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
 
             var i: usize = 1;
             while (i < token.longest_reserved_word) : (i += 1) {
-                const next_char = self.reader_readerByte();
+                const next_char = self.reader_readByte();
 
                 if (i == 1 and next_char == '_' and (buffer[0] == 'd' or buffer[0] == 's')) {
                     return self.floating_literal(buffer[0]);
@@ -223,9 +223,9 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
 
             if ('_' != self.previous) return error.FloatingSymbolError;
 
-            switch (self.reader_readerByte()) {
+            switch (self.reader_readByte()) {
                 '0'...'9' => {},
-                '-' => switch (self.reader_readerByte()) {
+                '-' => switch (self.reader_readByte()) {
                     '0'...'9' => {},
                     else => return error.FloatingNegativeError,
                 },
@@ -234,9 +234,9 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
 
             scope: {
                 while (true) {
-                    switch (self.reader_readerByte()) {
+                    switch (self.reader_readByte()) {
                         '0'...'9' => continue,
-                        '.' => switch (self.reader_readerByte()) {
+                        '.' => switch (self.reader_readByte()) {
                             '0'...'9' => break,
                             else => return error.FloatingDecimalError,
                         },
@@ -245,7 +245,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                 }
 
                 while (true) {
-                    switch (self.reader_readerByte()) {
+                    switch (self.reader_readByte()) {
                         '0'...'9' => continue,
                         else => break,
                     }
@@ -317,7 +317,7 @@ test "globalIdentifier" {
 test "localIdentifier" {
     // Arrange
     const file = "%local# Comment";
-    const expected = [_]token.TokenType{ .module_start, .temporary_identifier, .module_end };
+    const expected = [_]token.TokenType{ .module_start, .local_identifier, .module_end };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -404,10 +404,8 @@ test "error.StringCloseError" {
     const file = "\"not closed";
     const expected = error.StringCloseError;
 
-    const t = [_]token.TokenType{};
-
     // Act
-    const res = assertLex(file, &t);
+    const res = testLex(file);
 
     // Assert
     try std.testing.expectError(expected, res);

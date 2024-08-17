@@ -1,13 +1,90 @@
+const std = @import("std");
+
 const common = @import("../common.zig");
 
 pub const StatementIndex = usize;
 
 pub const Statement = struct {
-    span: common.SourceSpan,
+    span: common.SourceSpan = common.SourceSpan{},
     data: StatementData,
+
+    const Self = @This();
+
+    pub fn init(span: common.SourceSpan, data: StatementData) Self {
+        return Self{ .span = span, .data = data };
+    }
 };
 
-pub const StatementData = union(enum) {
+pub const StatementType = enum {
+    // Identifiers
+
+    identifier,
+
+    // Literals
+
+    literal,
+
+    // List
+
+    node,
+
+    // Module
+
+    module,
+
+    // Data
+
+    data_definition,
+    typed_data,
+    zero_data,
+
+    // Type
+
+    array_type,
+    env_type,
+    primitive_type,
+    struct_type,
+    type_definition,
+    union_type,
+
+    // Function
+
+    call,
+    function,
+    function_signature,
+    function_parameter,
+    variadic_parameter,
+    vaarg,
+    vastart,
+
+    // Memory
+
+    allocate,
+    assignment,
+    blit,
+    cast,
+    copy,
+    load,
+    store,
+
+    // Flow
+
+    branch,
+    label,
+    halt,
+    jump,
+    phi,
+    phi_parameter,
+    @"return",
+
+    // Opertations
+
+    binary_operation,
+    comparision,
+    negate,
+};
+
+pub const StatementData = union(StatementType) {
     // Identifiers
 
     identifier: struct {
@@ -30,9 +107,9 @@ pub const StatementData = union(enum) {
     // Module
 
     module: struct {
-        types: ?StatementIndex,
-        data: ?StatementIndex,
-        functions: ?StatementIndex,
+        types: ?StatementIndex = undefined,
+        data: ?StatementIndex = undefined,
+        functions: ?StatementIndex = undefined,
     },
 
     // Data
@@ -58,6 +135,8 @@ pub const StatementData = union(enum) {
         count: usize,
     },
 
+    env_type: void,
+
     primitive_type: PrimitiveType,
 
     struct_type: struct {
@@ -74,8 +153,6 @@ pub const StatementData = union(enum) {
         members: StatementIndex,
     },
 
-    void_type: void,
-
     // Function
 
     call: struct {
@@ -85,12 +162,13 @@ pub const StatementData = union(enum) {
 
     function: struct {
         signature: StatementIndex,
-        block: StatementIndex,
+        block: ?StatementIndex,
     },
 
     function_signature: struct {
         name: StatementIndex,
-        return_type: StatementIndex,
+        @"export": bool = false,
+        return_type: ?StatementIndex,
         parameters: ?StatementIndex,
     },
 
@@ -206,7 +284,8 @@ pub const StatementData = union(enum) {
 pub const Scope = enum {
     global,
     local,
-    address,
+    label,
+    type,
 };
 
 pub const PrimitiveType = enum(u4) {
@@ -217,7 +296,7 @@ pub const PrimitiveType = enum(u4) {
     half_word,
     long_unsigned,
     long,
-    short,
+    single,
     word_unsigned,
     word,
 };
