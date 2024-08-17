@@ -51,6 +51,7 @@ pub const StatementType = enum {
 
     // Function
 
+    block,
     call,
     function,
     function_signature,
@@ -72,7 +73,6 @@ pub const StatementType = enum {
     // Flow
 
     branch,
-    label,
     halt,
     jump,
     phi,
@@ -102,10 +102,10 @@ pub const StatementData = union(StatementType) {
     // Common
 
     linkage: struct {
-        @"export": bool = false,
-        thread: bool = false,
-        section: ?StatementIndex = undefined,
-        flags: ?StatementIndex = undefined,
+        @"export": bool,
+        thread: bool,
+        section: ?StatementIndex,
+        flags: ?StatementIndex,
     },
 
     node: struct {
@@ -116,9 +116,9 @@ pub const StatementData = union(StatementType) {
     // Module
 
     module: struct {
-        types: ?StatementIndex = undefined,
-        data: ?StatementIndex = undefined,
-        functions: ?StatementIndex = undefined,
+        types: ?StatementIndex,
+        data: ?StatementIndex,
+        functions: ?StatementIndex,
     },
 
     // Data
@@ -168,6 +168,13 @@ pub const StatementData = union(StatementType) {
 
     // Function
 
+    block: struct {
+        label: StatementIndex,
+        phi_statements: ?StatementIndex,
+        statements: ?StatementIndex,
+        flow_statement: StatementIndex,
+    },
+
     call: struct {
         identifier: StatementIndex,
         parameters: ?StatementIndex,
@@ -175,7 +182,7 @@ pub const StatementData = union(StatementType) {
 
     function: struct {
         signature: StatementIndex,
-        block: ?StatementIndex,
+        body: StatementIndex,
     },
 
     function_signature: struct {
@@ -248,10 +255,6 @@ pub const StatementData = union(StatementType) {
         false: StatementIndex,
     },
 
-    label: struct {
-        identifier: StatementIndex,
-    },
-
     halt: void,
 
     jump: struct {
@@ -268,8 +271,7 @@ pub const StatementData = union(StatementType) {
     },
 
     @"return": struct {
-        data_type: StatementIndex,
-        parameter: ?StatementIndex,
+        value: ?StatementIndex,
     },
 
     // Opertations

@@ -50,9 +50,9 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             _ = self.reader_readToken();
 
-            var function_definitions: ?ast.StatementIndex = undefined;
-            var data_definitions: ?ast.StatementIndex = undefined;
-            const type_definitions: ?ast.StatementIndex = undefined;
+            var function_definitions: ?ast.StatementIndex = null;
+            var data_definitions: ?ast.StatementIndex = null;
+            const type_definitions: ?ast.StatementIndex = null;
 
             const start = self.previous.span.start;
             while (true) {
@@ -100,13 +100,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             ));
         }
 
-        fn scopeIdentifier(self: *Self, token_type: token.TokenType, scope: ast.Scope) !ast.StatementIndex {
+        fn scopeIdentifier(self: *Self, token_type: token.TokenType, scope: ast.Scope, skip_read: bool) !ast.StatementIndex {
             if (self.previous.token_type != token_type) return error.ParseInvalidIdentifier;
 
             const start = self.previous.span.start + 1;
             const end = self.previous.span.end;
 
-            _ = self.reader_readToken();
+            if (!skip_read) _ = self.reader_readToken();
 
             return try self.collection_append(ast.Statement.init(
                 .{ .start = start, .end = end },
@@ -115,39 +115,19 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn localIdentifier(self: *Self) !ast.StatementIndex {
-            return self.scopeIdentifier(.local_identifier, .local);
+            return self.scopeIdentifier(.local_identifier, .local, false);
         }
 
         fn globalIdentifier(self: *Self) !ast.StatementIndex {
-            return self.scopeIdentifier(.global_identifier, .global);
+            return self.scopeIdentifier(.global_identifier, .global, false);
         }
 
         fn typeIdentifier(self: *Self) !ast.StatementIndex {
-            return self.scopeIdentifier(.type_identifier, .type);
+            return self.scopeIdentifier(.type_identifier, .type, false);
         }
 
         fn labelIdentifier(self: *Self) !ast.StatementIndex {
-            return self.scopeIdentifier(.label_identifier, .label);
-        }
-
-        fn block(self: *Self) !?ast.StatementIndex {
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
-
-            _ = self.reader_readToken();
-
-            const lines: ?ast.StatementIndex = 0;
-
-            while (true) {
-                switch (self.previous.token_type) {
-                    .close_curly_brace => break,
-                    // TODO: support for block lines.
-                    else => return error.TODO,
-                }
-            }
-
-            _ = self.reader_readToken();
-
-            return lines;
+            return self.scopeIdentifier(.label_identifier, .label, false);
         }
 
         fn stackAlignment(self: *Self) !ast.StatementIndex {
@@ -287,8 +267,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 t = self.reader_readToken();
             }
 
-            var section: ?ast.StatementIndex = undefined;
-            var flags: ?ast.StatementIndex = undefined;
+            var section: ?ast.StatementIndex = null;
+            var flags: ?ast.StatementIndex = null;
             if (t.token_type == .section) {
                 _ = self.reader_readToken();
 
@@ -341,7 +321,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             _ = self.reader_readToken();
 
-            var alignment: ?ast.StatementIndex = undefined;
+            var alignment: ?ast.StatementIndex = null;
             switch (self.previous.token_type) {
                 .@"align" => alignment = try self.stackAlignment(),
                 else => {},
@@ -351,7 +331,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             _ = self.reader_readToken();
 
-            var values: ?ast.StatementIndex = undefined;
+            var values: ?ast.StatementIndex = null;
 
             var first = true;
             while (self.previous.token_type != .close_curly_brace) {
@@ -447,7 +427,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
         fn functionDefinition(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
             const function_signature = try self.functionSignature(start, link);
-            const function_block = try self.block();
+            const function_body = try self.functionBody();
 
             const end = self.previous.span.start;
 
@@ -455,13 +435,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .function = .{
                     .signature = function_signature,
-                    .block = function_block,
+                    .body = function_body,
                 } },
             ));
         }
 
         fn functionSignature(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
-            var return_type: ?ast.StatementIndex = undefined;
+            var return_type: ?ast.StatementIndex = null;
             switch (self.reader_readToken().token_type) {
                 .global_identifier => {},
                 else => return_type = try self.variableType(),
@@ -488,7 +468,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .open_parenthesis) return error.ParseMissingOpenParenthesis;
             _ = self.reader_readToken();
 
-            var parameters: ?ast.StatementIndex = undefined;
+            var parameters: ?ast.StatementIndex = null;
 
             var first = true;
             while (self.previous.token_type != .close_parenthesis) {
@@ -593,6 +573,172 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .function_parameter = .{
                     .type_statement = type_statement,
                     .identifier = identifier,
+                } },
+            ));
+        }
+
+        fn functionBody(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+
+            _ = self.reader_readToken();
+
+            var blocks: ?ast.StatementIndex = null;
+
+            while (true) {
+                switch (self.previous.token_type) {
+                    .close_curly_brace => break,
+                    else => {
+                        const block_start = self.previous.span.start;
+                        const out = try self.block();
+                        const block_end = self.previous.span.start;
+
+                        blocks = try self.collection_append(ast.Statement.init(
+                            .{ .start = block_start, .end = block_end },
+                            .{ .node = .{
+                                .value = out,
+                                .next = blocks,
+                            } },
+                        ));
+                    },
+                }
+            }
+
+            _ = self.reader_readToken();
+
+            if (blocks) |b| {
+                return b;
+            } else {
+                return error.ParseEmptyFunctionBody;
+            }
+        }
+
+        fn block(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .label_identifier) return error.ParseMissingLabel;
+
+            const label = try self.labelIdentifier();
+
+            const phi_statements: ?ast.StatementIndex = null;
+            const statements: ?ast.StatementIndex = null;
+
+            const flow_statement: ast.StatementIndex = scope: {
+                while (true) {
+                    switch (self.previous.token_type) {
+                        // Flow
+                        .halt => break :scope try self.halt(),
+                        .jump => break :scope try self.jump(),
+                        .jump_not_zero => break :scope try self.branch(),
+                        .@"return" => break :scope try self.@"return"(),
+                        .label_identifier => break :scope try self.fallThroughJump(),
+                        // TODO: Support all instructions.
+                        else => return error.TODO,
+                    }
+                }
+            };
+
+            const end = self.previous.span.start;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .block = .{
+                    .label = label,
+                    .phi_statements = phi_statements,
+                    .statements = statements,
+                    .flow_statement = flow_statement,
+                } },
+            ));
+        }
+
+        fn branch(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .jump_not_zero) return error.ParseMissingJump;
+            _ = self.reader_readToken();
+
+            const condition = try self.localIdentifier();
+
+            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            _ = self.reader_readToken();
+
+            const true_label = try self.labelIdentifier();
+
+            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            _ = self.reader_readToken();
+
+            const false_label = try self.labelIdentifier();
+
+            const end = self.previous.span.start;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .branch = .{
+                    .condition = condition,
+                    .true = true_label,
+                    .false = false_label,
+                } },
+            ));
+        }
+
+        fn halt(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .halt) return error.ParseMissingHalt;
+            const span = self.previous.span;
+            _ = self.reader_readToken();
+
+            return try self.collection_append(ast.Statement.init(
+                span,
+                .{ .halt = undefined },
+            ));
+        }
+
+        fn fallThroughJump(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+            const label = try self.scopeIdentifier(.label_identifier, .label, true);
+            const end = self.previous.span.end;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .jump = .{
+                    .identifier = label,
+                } },
+            ));
+        }
+
+        fn jump(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .jump) return error.ParseMissingJump;
+            _ = self.reader_readToken();
+
+            const label = try self.labelIdentifier();
+
+            const end = self.previous.span.start;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .jump = .{
+                    .identifier = label,
+                } },
+            ));
+        }
+
+        fn @"return"(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .@"return") return error.ParseMissingReturn;
+            _ = self.reader_readToken();
+
+            const value: ?ast.StatementIndex = switch (self.previous.token_type) {
+                .local_identifier => try self.localIdentifier(),
+                else => undefined,
+            };
+
+            const end = self.previous.span.start;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .@"return" = .{
+                    .value = value,
                 } },
             ));
         }
@@ -869,10 +1015,14 @@ test "data with zeros" {
 
 test "function" {
     // Arrange
-    const file = "function $fun() {}";
+    const file = "function $fun() {@s ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -884,13 +1034,17 @@ test "function" {
 
 test "function with linkage" {
     // Arrange
-    const file = "export thread section \"function\" \"flag\" function $fun() {}";
+    const file = "export thread section \"function\" \"flag\" function $fun() {@s ret}";
     const expected = [_]ast.StatementType{
         .literal,
         .literal,
         .linkage,
         .identifier,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -902,11 +1056,15 @@ test "function with linkage" {
 
 test "function with primitive return type" {
     // Arrange
-    const file = "function w $fun() {}";
+    const file = "function w $fun() {@s ret}";
     const expected = [_]ast.StatementType{
         .primitive_type,
         .identifier,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -918,11 +1076,15 @@ test "function with primitive return type" {
 
 test "function with custom return type" {
     // Arrange
-    const file = "function :type $fun() {}";
+    const file = "function :type $fun() {@s ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .identifier,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -934,7 +1096,7 @@ test "function with custom return type" {
 
 test "function with custom type parameter" {
     // Arrange
-    const file = "function $fun(:type %p) {}";
+    const file = "function $fun(:type %p) {@s ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .identifier,
@@ -942,6 +1104,10 @@ test "function with custom type parameter" {
         .function_parameter,
         .node,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -953,7 +1119,7 @@ test "function with custom type parameter" {
 
 test "function with one parameter" {
     // Arrange
-    const file = "function $fun(w %p) {}";
+    const file = "function $fun(w %p) {@s ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .primitive_type,
@@ -961,6 +1127,10 @@ test "function with one parameter" {
         .function_parameter,
         .node,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -972,7 +1142,7 @@ test "function with one parameter" {
 
 test "function with trailing comma" {
     // Arrange
-    const file = "function $fun(w %p, ) {}";
+    const file = "function $fun(w %p, ) {@s ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .primitive_type,
@@ -980,6 +1150,10 @@ test "function with trailing comma" {
         .function_parameter,
         .node,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -991,7 +1165,7 @@ test "function with trailing comma" {
 
 test "function with many parameters" {
     // Arrange
-    const file = "function $fun(w %p0, b %p1, h %p2) {}";
+    const file = "function $fun(w %p0, b %p1, h %p2) {@s ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .primitive_type,
@@ -1007,6 +1181,10 @@ test "function with many parameters" {
         .function_parameter,
         .node,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -1018,7 +1196,7 @@ test "function with many parameters" {
 
 test "function with env parameter" {
     // Arrange
-    const file = "function $fun(env %e) {}";
+    const file = "function $fun(env %e) {@s ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .env_type,
@@ -1026,6 +1204,10 @@ test "function with env parameter" {
         .function_parameter,
         .node,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -1037,7 +1219,7 @@ test "function with env parameter" {
 
 test "function with variable parameter" {
     // Arrange
-    const file = "function $fun(w %fmt, ...) {}";
+    const file = "function $fun(w %fmt, ...) {@s ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .primitive_type,
@@ -1047,6 +1229,69 @@ test "function with variable parameter" {
         .variadic_parameter,
         .node,
         .function_signature,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "function many flow" {
+    // Arrange
+    const file = "function $fun() {@a jmp @b @b jnz %p, @c, @d @c hlt @d ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .jump,
+        .block,
+        .node,
+        .identifier,
+        .identifier,
+        .identifier,
+        .identifier,
+        .branch,
+        .block,
+        .node,
+        .identifier,
+        .halt,
+        .block,
+        .node,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "function fall-through block" {
+    // Arrange
+    const file = "function $fun() {@s @n ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .jump,
+        .block,
+        .node,
+        .identifier,
+        .@"return",
+        .block,
+        .node,
         .function,
         .node,
         .module,
@@ -1122,7 +1367,7 @@ test "function error.ParseInvalidPrimitiveType" {
 
 test "function error.ParseInvalidPrimitiveType 2" {
     // Arrange
-    const file = "function @fun() {}";
+    const file = "function @fun() {@s ret}";
     const expected = error.ParseInvalidPrimitiveType;
 
     // Act
@@ -1134,7 +1379,7 @@ test "function error.ParseInvalidPrimitiveType 2" {
 
 test "function error.ParseInvalidVarArgs" {
     // Arrange
-    const file = "function $fun(...) {}";
+    const file = "function $fun(...) {@s ret}";
     const expected = error.ParseInvalidVarArgs;
 
     // Act
@@ -1146,7 +1391,7 @@ test "function error.ParseInvalidVarArgs" {
 
 test "function error.ParseInvalidIdentifier" {
     // Arrange
-    const file = "function $fun(w) {}";
+    const file = "function $fun(w) {@s ret}";
     const expected = error.ParseInvalidIdentifier;
 
     // Act
@@ -1158,8 +1403,20 @@ test "function error.ParseInvalidIdentifier" {
 
 test "function error.ParseInvalidIdentifier 2" {
     // Arrange
-    const file = "function $fun(w @a) {}";
+    const file = "function $fun(w @a) {@s ret}";
     const expected = error.ParseInvalidIdentifier;
+
+    // Act
+    const res = testParser(file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "function error.ParseEmptyFunctionBody" {
+    // Arrange
+    const file = "function $fun() {}";
+    const expected = error.ParseEmptyFunctionBody;
 
     // Act
     const res = testParser(file);
