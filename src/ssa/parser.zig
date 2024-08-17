@@ -361,6 +361,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 }
 
                 const value_type = try switch (self.previous.token_type) {
+                    .close_curly_brace => break,
                     .zero => self.zeroType(),
                     else => self.primitiveType(),
                 };
@@ -498,6 +499,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 }
 
                 switch (self.previous.token_type) {
+                    .close_parenthesis => break,
                     .env => {
                         if (!first) return error.ParseInvalidEnv;
 
@@ -683,6 +685,24 @@ test "module" {
 test "data" {
     // Arrange
     const file = "data $d = {w 1}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data with trailing comma" {
+    // Arrange
+    const file = "data $d = {w 1, }";
     const expected = [_]ast.StatementType{
         .identifier,
         .primitive_type,
@@ -950,6 +970,25 @@ test "function with one parameter" {
     try assertParser(file, &expected);
 }
 
+test "function with trailing comma" {
+    // Arrange
+    const file = "function $fun(w %p, ) {}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .function_parameter,
+        .node,
+        .function_signature,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
 test "function with many parameters" {
     // Arrange
     const file = "function $fun(w %p0, b %p1, h %p2) {}";
@@ -1093,19 +1132,7 @@ test "function error.ParseInvalidPrimitiveType 2" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseInvalidPrimitiveType 3" {
-    // Arrange
-    const file = "function $fun(w %p, ) {}";
-    const expected = error.ParseInvalidPrimitiveType;
-
-    // Act
-    const res = testParser(file);
-
-    // Assert
-    try std.testing.expectError(expected, res);
-}
-
-test "function error.ParseInvalidVarArgs 4" {
+test "function error.ParseInvalidVarArgs" {
     // Arrange
     const file = "function $fun(...) {}";
     const expected = error.ParseInvalidVarArgs;
