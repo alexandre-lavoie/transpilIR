@@ -50,38 +50,39 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             _ = self.reader_readToken();
 
-            var functions: ?ast.StatementIndex = undefined;
+            var function_definitions: ?ast.StatementIndex = undefined;
             var data_definitions: ?ast.StatementIndex = undefined;
             const type_definitions: ?ast.StatementIndex = undefined;
 
             const start = self.previous.span.start;
             while (true) {
                 switch (self.previous.token_type) {
-                    .function, .@"export" => {
-                        const fn_start = self.previous.span.start;
-                        const next_fn = try self.function();
-                        const fn_end = self.previous.span.end;
+                    .@"export", .thread, .section, .function, .data => {
+                        const def_start = self.previous.span.start;
+                        const out = try self.linkageDefinition();
+                        const def_end = self.previous.span.end;
 
-                        functions = try self.collection_append(ast.Statement.init(
-                            .{ .start = fn_start, .end = fn_end },
-                            .{ .node = .{
-                                .value = next_fn,
-                                .next = functions,
-                            } },
-                        ));
-                    },
-                    .data, .thread => {
-                        const data_start = self.previous.span.start;
-                        const next_data = try self.dataDefinition();
-                        const data_end = self.previous.span.end;
-
-                        data_definitions = try self.collection_append(ast.Statement.init(
-                            .{ .start = data_start, .end = data_end },
-                            .{ .node = .{
-                                .value = next_data,
-                                .next = data_definitions,
-                            } },
-                        ));
+                        switch (out.token_type) {
+                            .function => {
+                                function_definitions = try self.collection_append(ast.Statement.init(
+                                    .{ .start = def_start, .end = def_end },
+                                    .{ .node = .{
+                                        .value = out.statement,
+                                        .next = function_definitions,
+                                    } },
+                                ));
+                            },
+                            .data => {
+                                data_definitions = try self.collection_append(ast.Statement.init(
+                                    .{ .start = def_start, .end = def_end },
+                                    .{ .node = .{
+                                        .value = out.statement,
+                                        .next = data_definitions,
+                                    } },
+                                ));
+                            },
+                            else => return error.ParseUnexpectedType,
+                        }
                     },
                     .module_end => break,
                     else => return error.ParseModuleInvalidToken,
@@ -92,7 +93,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try self.collection_append(ast.Statement.init(
                 .{ .start = start, .end = end },
                 .{ .module = .{
-                    .functions = functions,
+                    .functions = function_definitions,
                     .data = data_definitions,
                     .types = type_definitions,
                 } },
@@ -269,19 +270,68 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             ));
         }
 
-        fn dataDefinition(self: *Self) !ast.StatementIndex {
+        fn linkage(self: *Self) !?ast.StatementIndex {
             const start = self.previous.span.start;
 
-            var thread = false;
-            switch (self.previous.token_type) {
-                .thread => {
-                    if (self.reader_readToken().token_type != .data) return error.ParseMissingData;
+            var t = self.previous;
 
-                    thread = true;
-                },
-                .data => {},
-                else => return error.ParseMissingData,
+            var @"export" = false;
+            if (t.token_type == .@"export") {
+                @"export" = true;
+                t = self.reader_readToken();
             }
+
+            var thread = false;
+            if (t.token_type == .thread) {
+                thread = true;
+                t = self.reader_readToken();
+            }
+
+            var section: ?ast.StatementIndex = undefined;
+            var flags: ?ast.StatementIndex = undefined;
+            if (t.token_type == .section) {
+                _ = self.reader_readToken();
+
+                section = try self.string();
+
+                if (self.previous.token_type == .string_literal) flags = try self.string();
+            }
+
+            const end = self.previous.span.start;
+
+            if (start == end) return undefined;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .linkage = .{
+                    .@"export" = @"export",
+                    .thread = thread,
+                    .section = section,
+                    .flags = flags,
+                } },
+            ));
+        }
+
+        fn linkageDefinition(self: *Self) !struct { token_type: token.TokenType, statement: ast.StatementIndex } {
+            const start = self.previous.span.start;
+
+            const link = try self.linkage();
+
+            return switch (self.previous.token_type) {
+                .data => .{
+                    .token_type = .data,
+                    .statement = try self.dataDefinition(start, link),
+                },
+                .function => .{
+                    .token_type = .function,
+                    .statement = try self.functionDefinition(start, link),
+                },
+                else => return error.ParseInvalidLinkageType,
+            };
+        }
+
+        fn dataDefinition(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
+            if (self.previous.token_type != .data) return error.ParseInvalidData;
 
             _ = self.reader_readToken();
 
@@ -352,7 +402,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try self.collection_append(ast.Statement.init(
                 .{ .start = start, .end = end },
                 .{ .data_definition = .{
-                    .thread = thread,
+                    .linkage = link,
                     .identifier = identifier,
                     .values = values,
                 } },
@@ -394,10 +444,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             ));
         }
 
-        fn function(self: *Self) !ast.StatementIndex {
-            const start = self.previous.span.start;
-
-            const function_signature = try self.functionSignature();
+        fn functionDefinition(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
+            const function_signature = try self.functionSignature(start, link);
             const function_block = try self.block();
 
             const end = self.previous.span.start;
@@ -411,23 +459,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             ));
         }
 
-        fn functionSignature(self: *Self) !ast.StatementIndex {
-            const start = self.previous.span.start;
-
-            var @"export" = false;
-            switch (self.previous.token_type) {
-                .@"export" => {
-                    @"export" = true;
-
-                    switch (self.reader_readToken().token_type) {
-                        .function => {},
-                        else => return error.ParseMissingFunction,
-                    }
-                },
-                .function => {},
-                else => return error.ParseMissingFunction,
-            }
-
+        fn functionSignature(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
             var return_type: ?ast.StatementIndex = undefined;
             switch (self.reader_readToken().token_type) {
                 .global_identifier => {},
@@ -443,9 +475,9 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try self.collection_append(ast.Statement.init(
                 .{ .start = start, .end = end },
                 .{ .function_signature = .{
+                    .linkage = link,
                     .name = name,
                     .return_type = return_type,
-                    .@"export" = @"export",
                     .parameters = parameters,
                 } },
             ));
@@ -629,6 +661,25 @@ test "module" {
     try assertParser(file, &expected);
 }
 
+// TODO: Types
+// test "type" {
+//     // Arrange
+//     const file = "type :t = {w}";
+//     const expected = [_]ast.StatementType{
+//         .identifier,
+//         .primitive_type,
+//         .literal,
+//         .typed_data,
+//         .node,
+//         .data_definition,
+//         .node,
+//         .module,
+//     };
+
+//     // Act + Assert
+//     try assertParser(file, &expected);
+// }
+
 test "data" {
     // Arrange
     const file = "data $d = {w 1}";
@@ -707,10 +758,13 @@ test "data with global offset" {
     try assertParser(file, &expected);
 }
 
-test "data with thread" {
+test "data with linkage" {
     // Arrange
-    const file = "thread data $d = {w 1}";
+    const file = "export thread section \"data\" \"flags\" data $d = {w 1}";
     const expected = [_]ast.StatementType{
+        .literal,
+        .literal,
+        .linkage,
         .identifier,
         .primitive_type,
         .literal,
@@ -808,10 +862,13 @@ test "function" {
     try assertParser(file, &expected);
 }
 
-test "function with export" {
+test "function with linkage" {
     // Arrange
-    const file = "export function $fun() {}";
+    const file = "export thread section \"function\" \"flag\" function $fun() {}";
     const expected = [_]ast.StatementType{
+        .literal,
+        .literal,
+        .linkage,
         .identifier,
         .function_signature,
         .function,

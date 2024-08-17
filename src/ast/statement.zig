@@ -24,8 +24,9 @@ pub const StatementType = enum {
 
     literal,
 
-    // List
+    // Common
 
+    linkage,
     node,
 
     // Module
@@ -98,7 +99,14 @@ pub const StatementData = union(StatementType) {
         type: LiteralType,
     },
 
-    // List
+    // Common
+
+    linkage: struct {
+        @"export": bool = false,
+        thread: bool = false,
+        section: ?StatementIndex = undefined,
+        flags: ?StatementIndex = undefined,
+    },
 
     node: struct {
         value: StatementIndex,
@@ -116,7 +124,7 @@ pub const StatementData = union(StatementType) {
     // Data
 
     data_definition: struct {
-        thread: bool = false,
+        linkage: ?StatementIndex,
         identifier: StatementIndex,
         values: ?StatementIndex,
     },
@@ -171,8 +179,8 @@ pub const StatementData = union(StatementType) {
     },
 
     function_signature: struct {
+        linkage: ?StatementIndex,
         name: StatementIndex,
-        @"export": bool = false,
         return_type: ?StatementIndex,
         parameters: ?StatementIndex,
     },
