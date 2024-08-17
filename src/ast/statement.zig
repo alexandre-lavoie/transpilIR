@@ -46,6 +46,7 @@ pub const StatementType = enum {
     struct_type,
     type_definition,
     union_type,
+    zero_type,
 
     // Function
 
@@ -154,6 +155,8 @@ pub const StatementData = union(StatementType) {
     union_type: struct {
         members: StatementIndex,
     },
+
+    zero_type: void,
 
     // Function
 

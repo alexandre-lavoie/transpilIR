@@ -194,6 +194,18 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             ));
         }
 
+        fn zeroType(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .zero) return error.ParseMissingZero;
+
+            const span = self.previous.span;
+            _ = self.reader_readToken();
+
+            return try self.collection_append(ast.Statement.init(
+                span,
+                .{ .zero_type = undefined },
+            ));
+        }
+
         fn variableType(self: *Self) !ast.StatementIndex {
             return switch (self.previous.token_type) {
                 .type_identifier => self.typeIdentifier(),
@@ -204,13 +216,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         fn envType(self: *Self) !ast.StatementIndex {
             if (self.previous.token_type != .env) return error.ParseMissingEnv;
 
-            const start = self.previous.span.start;
-            const end = self.previous.span.end;
-
+            const span = self.previous.span;
             _ = self.reader_readToken();
 
             return try self.collection_append(ast.Statement.init(
-                .{ .start = start, .end = end },
+                span,
                 .{ .env_type = undefined },
             ));
         }
@@ -312,7 +322,10 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     _ = self.reader_readToken();
                 }
 
-                const value_type = try self.primitiveType();
+                const value_type = try switch (self.previous.token_type) {
+                    .zero => self.zeroType(),
+                    else => self.primitiveType(),
+                };
 
                 while (true) {
                     switch (self.previous.token_type) {
@@ -762,6 +775,24 @@ test "data with many types" {
         .typed_data,
         .node,
         .primitive_type,
+        .literal,
+        .typed_data,
+        .node,
+        .data_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "data with zeros" {
+    // Arrange
+    const file = "data $d = {z 1000}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .zero_type,
         .literal,
         .typed_data,
         .node,
