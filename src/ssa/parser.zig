@@ -110,6 +110,20 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             ));
         }
 
+        fn typeIdentifier(self: *Self) !ast.StatementIndex {
+            if (self.previous.token_type != .type_identifier) return error.ParseTypeIdentifierError;
+
+            const start = self.previous.span.start + 1;
+            const end = self.previous.span.end;
+
+            _ = self.reader_readToken();
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .identifier = .{ .scope = .type } },
+            ));
+        }
+
         fn block(self: *Self) !?ast.StatementIndex {
             if (self.previous.token_type != .open_curly_brace) return error.ParseBlockStartTokenError;
 
@@ -152,6 +166,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .primitive_type = primitive_type },
             ));
+        }
+
+        fn variableType(self: *Self) !ast.StatementIndex {
+            return switch (self.previous.token_type) {
+                .type_identifier => self.typeIdentifier(),
+                else => self.primitiveType(),
+            };
         }
 
         fn envType(self: *Self) !ast.StatementIndex {
@@ -334,7 +355,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         fn functionParameter(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            const type_statement = try self.primitiveType();
+            const type_statement = try self.variableType();
             const identifier = try self.localIdentifier();
 
             const end = self.previous.span.start;
@@ -450,6 +471,25 @@ test "function with return type" {
     const expected = [_]ast.StatementType{
         .primitive_type,
         .identifier,
+        .function_signature,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "function with custom type parameter" {
+    // Arrange
+    const file = "function $fun(:type %p) {}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .identifier,
+        .identifier,
+        .function_parameter,
+        .node,
         .function_signature,
         .function,
         .node,
