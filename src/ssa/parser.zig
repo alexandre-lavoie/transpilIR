@@ -874,6 +874,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try switch (self.previous.token_type) {
                 .allocate => self.allocate(data_type),
                 .call => self.call(data_type),
+                .vaarg => self.vaarg(data_type),
                 .cast,
                 .copy,
                 .double_to_single,
@@ -940,6 +941,25 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return self.new(
                 .{ .start = start, .end = end },
                 .{ .vastart = .{ .parameter = parameter } },
+            );
+        }
+
+        fn vaarg(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .vaarg) return error.ParserMissingVaarg;
+            _ = self.next();
+
+            const parameter = try self.blockValue();
+
+            const end = self.previous.span.start;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{ .vaarg = .{
+                    .data_type = data_type,
+                    .parameter = parameter,
+                } },
             );
         }
 
@@ -2178,6 +2198,31 @@ test "vastart" {
         .identifier,
         .identifier,
         .vastart,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "vaarg" {
+    // Arrange
+    const file = "function $fun() {@s %l =w vaarg %ap ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .vaarg,
+        .assignment,
         .node,
         .@"return",
         .block,
