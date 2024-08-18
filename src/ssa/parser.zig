@@ -808,6 +808,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             return try switch (self.previous.token_type) {
                 // Block
+                .blit => self.blit(),
                 .call => self.call(null),
                 .byte_store,
                 .double_store,
@@ -920,6 +921,36 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .allocate = .{
                     .data_type = data_type,
                     .alignment = alignment,
+                    .size = size,
+                } },
+            );
+        }
+
+        fn blit(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .blit) return error.ParserMissingBlit;
+            _ = self.next();
+
+            const source = try self.blockValue();
+
+            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            _ = self.next();
+
+            const target = try self.blockValue();
+
+            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            _ = self.next();
+
+            const size = try self.blockValue();
+
+            const end = self.previous.span.start;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{ .blit = .{
+                    .source = source,
+                    .target = target,
                     .size = size,
                 } },
             );
@@ -2108,6 +2139,30 @@ test "copy" {
         .identifier,
         .copy,
         .assignment,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "blit" {
+    // Arrange
+    const file = "function $fun() {@s blit %a, $g, 16 ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .identifier,
+        .literal,
+        .blit,
         .node,
         .@"return",
         .block,

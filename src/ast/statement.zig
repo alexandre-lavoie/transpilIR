@@ -82,7 +82,7 @@ pub const StatementType = enum {
     // Math
 
     binary_operation,
-    comparision,
+    comparison,
     negate,
 };
 
@@ -290,7 +290,7 @@ pub const StatementData = union(StatementType) {
         right: StatementIndex,
     },
 
-    comparision: struct {
+    comparison: struct {
         operation_type: ComparisonOperationType,
         data_type: StatementIndex,
         left: StatementIndex,
