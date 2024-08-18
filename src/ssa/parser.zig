@@ -330,7 +330,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 else => null,
             };
 
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
             _ = self.next();
 
             return try switch (self.previous.token_type) {
@@ -343,7 +343,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         fn unionType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
             var types: ?ast.StatementIndex = null;
 
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
 
             while (true) {
                 const out_start = self.previous.span.start;
@@ -365,7 +365,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 switch (self.previous.token_type) {
                     .close_curly_brace => break,
                     .open_curly_brace => continue,
-                    else => return error.ParseMissingCurlyBrace,
+                    else => return error.ParseMissingOpenCurlyBrace,
                 }
             }
 
@@ -385,7 +385,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         fn opaqueType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
             const size = try self.integer();
 
-            if (self.previous.token_type != .close_curly_brace) return error.ParseMissingCurlyBrace;
+            if (self.previous.token_type != .close_curly_brace) return error.ParseMissingCloseCurlyBrace;
             _ = self.next();
 
             const end = self.previous.span.start;
@@ -489,7 +489,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 else => {},
             }
 
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
             _ = self.next();
 
             var values: ?ast.StatementIndex = null;
@@ -631,7 +631,9 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             while (self.previous.token_type != .close_parenthesis) {
                 const param_start = self.previous.span.start;
 
-                const param = try switch (self.previous.token_type) {
+                const param_token_type = self.previous.token_type;
+
+                const param = try switch (param_token_type) {
                     .env => switch (first) {
                         true => self.envParameter(),
                         false => return error.ParseInvalidEnv,
@@ -652,6 +654,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                         .next = parameters,
                     } },
                 );
+
+                if (param_token_type == .variable_arguments) break;
 
                 switch (self.previous.token_type) {
                     .close_parenthesis => break,
@@ -718,7 +722,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn functionBody(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
 
             _ = self.next();
 
@@ -762,7 +766,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                     var is_phi = false;
                     const next_statement: ast.StatementIndex = try switch (self.previous.token_type) {
-                        // Assignment
+                        // Block
+                        .call => self.call(null),
                         .local_identifier => self.assignment(&is_phi),
                         // Flow
                         .halt => break :scope try self.halt(),
@@ -820,21 +825,10 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const identifier = try self.localIdentifier();
 
-            const assignment_span = self.previous.span;
-            const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
-                .long_assign => .long,
-                .word_assign => .word,
-                .single_assign => .single,
-                .double_assign => .double,
-                else => return error.ParserInvalidAssignmentSymbol,
-            };
-
-            const data_type = try self.new(
-                .{ .start = assignment_span.start + 1, .end = assignment_span.end },
-                .{ .primitive_type = primitive_type },
-            );
-
+            if (self.previous.token_type != .assign) return error.ParserMissingEqual;
             _ = self.next();
+
+            const data_type = try self.variableType();
 
             is_phi.* = switch (self.previous.token_type) {
                 .phi => true,
@@ -842,6 +836,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             };
 
             const statement = try switch (self.previous.token_type) {
+                .call => self.call(data_type),
                 .phi => self.phi(data_type),
                 else => return error.TODO,
             };
@@ -921,6 +916,82 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     },
                 },
             );
+        }
+
+        fn call(self: *Self, data_type: ?ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .call) return error.ParseMissingCall;
+            _ = self.next();
+
+            const identifier = try self.globalIdentifier();
+
+            const parameters = try self.callParameters();
+
+            const end = self.previous.span.end;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{
+                    .call = .{
+                        .identifier = identifier,
+                        .return_type = data_type,
+                        .parameters = parameters,
+                    },
+                },
+            );
+        }
+
+        fn callParameters(self: *Self) !?ast.StatementIndex {
+            if (self.previous.token_type != .open_parenthesis) return error.ParseMissingOpenParenthesis;
+            _ = self.next();
+
+            var parameters: ?ast.StatementIndex = null;
+
+            var first = true;
+            var hasVarArgs = false;
+            while (self.previous.token_type != .close_parenthesis) {
+                const param_start = self.previous.span.start;
+
+                const param = try switch (self.previous.token_type) {
+                    .env => switch (first) {
+                        true => self.envParameter(),
+                        false => return error.ParseInvalidEnv,
+                    },
+                    .variable_arguments => switch (first or hasVarArgs) {
+                        true => return error.ParseInvalidVarArgs,
+                        false => scope: {
+                            hasVarArgs = true;
+                            break :scope self.varArgParameter();
+                        },
+                    },
+                    else => self.typeParameter(),
+                };
+
+                const param_end = self.previous.span.start;
+
+                parameters = try self.new(
+                    .{ .start = param_start, .end = param_end },
+                    .{ .node = .{
+                        .value = param,
+                        .next = parameters,
+                    } },
+                );
+
+                switch (self.previous.token_type) {
+                    .close_parenthesis => break,
+                    .comma => _ = self.next(),
+                    else => return error.ParseMissingCommaError,
+                }
+
+                first = false;
+            }
+
+            if (self.previous.token_type != .close_parenthesis) return error.ParseMissingCloseParenthesis;
+
+            _ = self.next();
+
+            return parameters;
         }
 
         fn branch(self: *Self) !ast.StatementIndex {
@@ -1788,6 +1859,115 @@ test "phi" {
     try assertParser(file, &expected);
 }
 
+test "call" {
+    // Arrange
+    const file = "function $fun() {@s call $f() ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .call,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "call assign" {
+    // Arrange
+    const file = "function $fun() {@s %x =w call $f() ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .call,
+        .assignment,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "call parameters" {
+    // Arrange
+    const file = "function $fun() {@s call $f(w %a, :type %b) ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .type_parameter,
+        .node,
+        .identifier,
+        .identifier,
+        .type_parameter,
+        .node,
+        .call,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "call varargs" {
+    // Arrange
+    const file = "function $fun() {@s call $f(w %a, ..., w %b) ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .type_parameter,
+        .node,
+        .variadic_parameter,
+        .node,
+        .primitive_type,
+        .identifier,
+        .type_parameter,
+        .node,
+        .call,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
 //
 // Error Tests
 //
@@ -1904,6 +2084,30 @@ test "function error.ParseEmptyFunctionBody" {
     // Arrange
     const file = "function $fun() {}";
     const expected = error.ParseEmptyFunctionBody;
+
+    // Act
+    const res = testParser(file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "function error.ParseMissingCloseParenthesis" {
+    // Arrange
+    const file = "function $fun(w %a, ..., w %b) {}";
+    const expected = error.ParseMissingCloseParenthesis;
+
+    // Act
+    const res = testParser(file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "function error.ParseMissingCloseParenthesis 2" {
+    // Arrange
+    const file = "function $fun(w %a, ..., ) {}";
+    const expected = error.ParseMissingCloseParenthesis;
 
     // Act
     const res = testParser(file);

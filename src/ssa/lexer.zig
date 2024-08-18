@@ -54,7 +54,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                     '{' => self.punctuation(.open_curly_brace),
                     '}' => self.punctuation(.close_curly_brace),
                     '+' => self.punctuation(.plus),
-                    '=' => self.assign(),
+                    '=' => self.punctuation(.assign),
                     '.' => self.variableArguments(),
                     'a'...'z' => self.reservedWordOrFloatingLiteral(),
                     '-', '0'...'9' => self.integerLiteral(),
@@ -160,21 +160,6 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn punctuation(self: *Self, token_type: token.TokenType) !token.Token {
-            _ = self.reader_readByte();
-
-            return token.Token.init(token_type);
-        }
-
-        fn assign(self: *Self) !token.Token {
-            const token_type: token.TokenType = switch (self.reader_readByte()) {
-                'd' => .double_assign,
-                'l' => .long_assign,
-                's' => .single_assign,
-                'w' => .word_assign,
-                ' ', '\t', '\n', '\r', '\x00' => .assign,
-                else => return error.AssignInvalidType,
-            };
-
             _ = self.reader_readByte();
 
             return token.Token.init(token_type);
@@ -382,7 +367,7 @@ test "integerLiteral" {
 test "assign" {
     // Arrange
     const file = "=w =s =";
-    const expected = [_]token.TokenType{ .module_start, .word_assign, .single_assign, .assign, .module_end };
+    const expected = [_]token.TokenType{ .module_start, .assign, .word, .assign, .single, .assign, .module_end };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -441,18 +426,6 @@ test "error.FloatingDigitError" {
     // Arrange
     const file = "s_ ";
     const expected = error.FloatingDigitError;
-
-    // Act
-    const res = testLex(file);
-
-    // Assert
-    try std.testing.expectError(expected, res);
-}
-
-test "error.AssignInvalidType" {
-    // Arrange
-    const file = "=| ";
-    const expected = error.AssignInvalidType;
 
     // Act
     const res = testLex(file);

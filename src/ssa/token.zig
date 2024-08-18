@@ -61,10 +61,6 @@ pub const TokenType = enum(u8) {
     variable_arguments,
     plus,
     assign,
-    word_assign,
-    long_assign,
-    single_assign,
-    double_assign,
 
     // Reserved Words
     byte_unsigned,
