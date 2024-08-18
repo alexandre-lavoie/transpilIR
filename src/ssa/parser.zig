@@ -20,17 +20,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         const Self = @This();
 
         fn reader_readToken(self: *Self) *const token.Token {
-            self.previous = self.reader.readToken();
-            return self.previous;
+            return self.reader.readToken();
         }
 
-        fn collection_append(self: *Self, next_statement: ast.Statement) !ast.StatementIndex {
+        fn collection_append(self: *Self, next_statement: ast.Statement) !void {
             try self.collection.append(next_statement);
-
-            const index = self.offset;
-            self.offset += 1;
-
-            return index;
         }
 
         pub fn init(reader: *Reader, collection: *Collection) Self {
@@ -41,23 +35,32 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         pub fn parse(self: *Self) !usize {
-            _ = self.reader_readToken();
-
+            _ = self.next();
             return try self.module();
         }
 
-        pub fn new(self: *Self, span: common.SourceSpan, data: ast.StatementData) !ast.StatementIndex {
-            return try self.collection_append(ast.Statement.init(
+        fn new(self: *Self, span: common.SourceSpan, data: ast.StatementData) !ast.StatementIndex {
+            try self.collection_append(ast.Statement.init(
                 span,
                 data,
             ));
+
+            const index = self.offset;
+            self.offset += 1;
+
+            return index;
+        }
+
+        fn next(self: *Self) *const token.Token {
+            self.previous = self.reader_readToken();
+            return self.previous;
         }
 
         fn module(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
             if (self.previous.token_type != .module_start) return error.ParseMissingModule;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             var function_definitions: ?ast.StatementIndex = null;
             var data_definitions: ?ast.StatementIndex = null;
@@ -107,7 +110,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != token_type) return error.ParseInvalidIdentifier;
 
             const span = self.previous.span;
-            if (!skip_read) _ = self.reader_readToken();
+            if (!skip_read) _ = self.next();
 
             return try self.new(
                 .{ .start = span.start + 1, .end = span.end },
@@ -134,7 +137,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         fn stackAlignment(self: *Self) !ast.StatementIndex {
             if (self.previous.token_type != .@"align") return error.ParseMissingAlign;
 
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.integer();
         }
@@ -154,7 +157,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             };
 
             const span = self.previous.span;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.new(
                 span,
@@ -166,7 +169,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .zero) return error.ParseMissingZero;
 
             const span = self.previous.span;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.new(
                 span,
@@ -185,7 +188,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .env) return error.ParseMissingEnv;
 
             const span = self.previous.span;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.new(
                 span,
@@ -197,7 +200,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .integer_literal) return error.ParseMissingIntegerLiteral;
 
             const span = self.previous.span;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.new(
                 span,
@@ -211,7 +214,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .single_literal) return error.ParseMissingSingleLiteral;
 
             const span = self.previous.span;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.new(
                 .{ .start = span.start + 2, .end = span.end },
@@ -225,7 +228,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .double_literal) return error.ParseMissingDoubleLiteral;
 
             const span = self.previous.span;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.new(
                 .{ .start = span.start + 2, .end = span.end },
@@ -239,7 +242,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .string_literal) return error.ParseMissingStringLiteral;
 
             const span = self.previous.span;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.new(
                 .{ .start = span.start + 1, .end = span.end - 1 },
@@ -258,17 +261,17 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .@"export" => true,
                 else => false,
             };
-            if (@"export") t = self.reader_readToken();
+            if (@"export") t = self.next();
 
             const thread: bool = switch (t.token_type) {
                 .thread => true,
                 else => false,
             };
-            if (thread) t = self.reader_readToken();
+            if (thread) t = self.next();
 
             const section: ?ast.StatementIndex = switch (t.token_type) {
                 .section => scope: {
-                    _ = self.reader_readToken();
+                    _ = self.next();
 
                     break :scope try self.string();
                 },
@@ -299,12 +302,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const start = self.previous.span.start;
 
             if (self.previous.token_type != .type) return error.ParseMissingType;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const identifier = try self.typeIdentifier();
 
             if (self.previous.token_type != .assign) return error.ParseMissingEqual;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const body = try self.typeDefinitionBody();
 
@@ -328,7 +331,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             };
 
             if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try switch (self.previous.token_type) {
                 .open_curly_brace => self.unionType(start, alignment),
@@ -345,7 +348,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             while (true) {
                 const out_start = self.previous.span.start;
 
-                _ = self.reader_readToken();
+                _ = self.next();
 
                 const out = try self.structType(out_start, alignment);
 
@@ -366,7 +369,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 }
             }
 
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const end = self.previous.span.start;
 
@@ -383,7 +386,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const size = try self.integer();
 
             if (self.previous.token_type != .close_curly_brace) return error.ParseMissingCurlyBrace;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const end = self.previous.span.start;
 
@@ -421,12 +424,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                 switch (self.previous.token_type) {
                     .close_curly_brace => break,
-                    .comma => _ = self.reader_readToken(),
+                    .comma => _ = self.next(),
                     else => return error.ParseMissingComma,
                 }
             }
 
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const end = self.previous.span.end;
 
@@ -473,12 +476,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
         fn dataDefinition(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
             if (self.previous.token_type != .data) return error.ParseInvalidData;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const identifier = try self.globalIdentifier();
 
             if (self.previous.token_type != .assign) return error.ParseMissingEqual;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             var alignment: ?ast.StatementIndex = null;
             switch (self.previous.token_type) {
@@ -487,7 +490,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             }
 
             if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             var values: ?ast.StatementIndex = null;
 
@@ -528,12 +531,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                 switch (self.previous.token_type) {
                     .close_curly_brace => break,
-                    .comma => _ = self.reader_readToken(),
+                    .comma => _ = self.next(),
                     else => return error.ParseMissingComma,
                 }
             }
 
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const end = self.previous.span.start;
 
@@ -565,7 +568,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             if (!canOffset) return error.ParseInvalidDataOffset;
 
-            if (self.reader_readToken().token_type != .integer_literal) return error.ParseInvalidOffset;
+            if (self.next().token_type != .integer_literal) return error.ParseInvalidOffset;
 
             const offset = try self.integer();
 
@@ -596,7 +599,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn functionSignature(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
-            const return_type: ?ast.StatementIndex = switch (self.reader_readToken().token_type) {
+            const return_type: ?ast.StatementIndex = switch (self.next().token_type) {
                 .global_identifier => null,
                 else => try self.variableType(),
             };
@@ -620,7 +623,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
         fn functionParameters(self: *Self) !?ast.StatementIndex {
             if (self.previous.token_type != .open_parenthesis) return error.ParseMissingOpenParenthesis;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             var parameters: ?ast.StatementIndex = null;
 
@@ -652,7 +655,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                 switch (self.previous.token_type) {
                     .close_parenthesis => break,
-                    .comma => _ = self.reader_readToken(),
+                    .comma => _ = self.next(),
                     else => return error.ParseMissingCommaError,
                 }
 
@@ -661,7 +664,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             if (self.previous.token_type != .close_parenthesis) return error.ParseMissingCloseParenthesis;
 
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return parameters;
         }
@@ -687,7 +690,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const start = self.previous.span.start;
 
             if (self.previous.token_type != .variable_arguments) return error.ParserMissingVarArg;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const end = self.previous.span.start;
 
@@ -717,7 +720,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         fn functionBody(self: *Self) !ast.StatementIndex {
             if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
 
-            _ = self.reader_readToken();
+            _ = self.next();
 
             var blocks: ?ast.StatementIndex = null;
 
@@ -738,7 +741,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 );
             }
 
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return blocks orelse error.ParseEmptyFunctionBody;
         }
@@ -831,7 +834,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .primitive_type = primitive_type },
             );
 
-            _ = self.reader_readToken();
+            _ = self.next();
 
             is_phi.* = switch (self.previous.token_type) {
                 .phi => true,
@@ -860,7 +863,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const start = self.previous.span.start;
 
             if (self.previous.token_type != .phi) return error.ParserMissingPhi;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             var parameters: ?ast.StatementIndex = null;
 
@@ -868,7 +871,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             while (true) {
                 if (!first) {
                     if (self.previous.token_type != .comma) break;
-                    _ = self.reader_readToken();
+                    _ = self.next();
                 }
 
                 const parameter_start = self.previous.span.start;
@@ -924,17 +927,17 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const start = self.previous.span.start;
 
             if (self.previous.token_type != .jump_not_zero) return error.ParseMissingJump;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const condition = try self.localIdentifier();
 
             if (self.previous.token_type != .comma) return error.ParseMissingComma;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const true_label = try self.labelIdentifier();
 
             if (self.previous.token_type != .comma) return error.ParseMissingComma;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const false_label = try self.labelIdentifier();
 
@@ -954,7 +957,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .halt) return error.ParseMissingHalt;
 
             const span = self.previous.span;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             return try self.new(
                 span,
@@ -979,7 +982,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const start = self.previous.span.start;
 
             if (self.previous.token_type != .jump) return error.ParseMissingJump;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const label = try self.labelIdentifier();
 
@@ -997,7 +1000,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const start = self.previous.span.start;
 
             if (self.previous.token_type != .@"return") return error.ParseMissingReturn;
-            _ = self.reader_readToken();
+            _ = self.next();
 
             const value: ?ast.StatementIndex = switch (self.previous.token_type) {
                 .local_identifier => try self.localIdentifier(),
