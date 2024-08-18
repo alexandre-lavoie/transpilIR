@@ -189,7 +189,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                 }
 
                 switch (next_char) {
-                    'a'...'z', '0'...'9' => buffer[i] = next_char,
+                    'a'...'z' => buffer[i] = next_char,
                     else => break,
                 }
             }
@@ -322,7 +322,7 @@ test "label" {
 test "reserved" {
     // Arrange
     const file = "alloc4 data function s";
-    const expected = [_]token.TokenType{ .module_start, .allocate4, .data, .function, .single, .module_end };
+    const expected = [_]token.TokenType{ .module_start, .allocate, .integer_literal, .data, .function, .single, .module_end };
 
     // Act + Assert
     try assertLex(file, &expected);

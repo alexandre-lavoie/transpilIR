@@ -220,6 +220,7 @@ pub const StatementData = union(StatementType) {
 
     allocate: struct {
         data_type: StatementIndex,
+        alignment: StatementIndex,
         size: StatementIndex,
     },
 

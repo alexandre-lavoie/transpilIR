@@ -835,11 +835,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 else => false,
             };
 
-            const statement = try switch (self.previous.token_type) {
-                .call => self.call(data_type),
-                .phi => self.phi(data_type),
-                else => return error.TODO,
-            };
+            const statement = try self.assignmentBody(data_type);
 
             const end = self.previous.span.start;
 
@@ -851,6 +847,36 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                         .statement = statement,
                     },
                 },
+            );
+        }
+
+        fn assignmentBody(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            return try switch (self.previous.token_type) {
+                .allocate => self.allocate(data_type),
+                .call => self.call(data_type),
+                .phi => self.phi(data_type),
+                else => return error.TODO,
+            };
+        }
+
+        fn allocate(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .allocate) return error.ParserMissingAllocate;
+            _ = self.next();
+
+            const alignment = try self.integer();
+            const size = try self.integer();
+
+            const end = self.previous.span.start;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{ .allocate = .{
+                    .data_type = data_type,
+                    .alignment = alignment,
+                    .size = size,
+                } },
             );
         }
 
@@ -1811,6 +1837,39 @@ test "function fall-through block" {
         .block,
         .node,
         .identifier,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "allocate" {
+    // Arrange
+    const file = "function $fun() {@s %x =w alloc4 32 %y =:type alloc16 64 ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .literal,
+        .literal,
+        .allocate,
+        .assignment,
+        .node,
+        .identifier,
+        .identifier,
+        .literal,
+        .literal,
+        .allocate,
+        .assignment,
+        .node,
         .@"return",
         .block,
         .node,
