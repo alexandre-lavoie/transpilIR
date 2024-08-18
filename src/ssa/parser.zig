@@ -340,10 +340,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         fn unionType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
             var types: ?ast.StatementIndex = null;
 
-            while (self.previous.token_type != .close_curly_brace) {
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+
+            while (true) {
                 const out_start = self.previous.span.start;
 
-                if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
                 _ = self.reader_readToken();
 
                 const out = try self.structType(out_start, alignment);
@@ -357,6 +358,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                         .next = types,
                     } },
                 );
+
+                switch (self.previous.token_type) {
+                    .close_curly_brace => break,
+                    .open_curly_brace => continue,
+                    else => return error.ParseMissingCurlyBrace,
+                }
             }
 
             _ = self.reader_readToken();
@@ -392,15 +399,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         fn structType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
             var members: ?ast.StatementIndex = null;
 
-            var first = true;
             while (self.previous.token_type != .close_curly_brace) {
-                if (!first) {
-                    if (self.previous.token_type != .comma) return error.ParseMissingComma;
-                    _ = self.reader_readToken();
-                }
-
-                if (self.previous.token_type == .close_curly_brace) break;
-
                 const member_start = self.previous.span.start;
 
                 const variable_type = try self.variableType();
@@ -420,7 +419,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     } },
                 );
 
-                first = false;
+                switch (self.previous.token_type) {
+                    .close_curly_brace => break,
+                    .comma => _ = self.reader_readToken(),
+                    else => return error.ParseMissingComma,
+                }
             }
 
             _ = self.reader_readToken();
@@ -488,15 +491,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             var values: ?ast.StatementIndex = null;
 
-            var first = true;
             while (self.previous.token_type != .close_curly_brace) {
-                if (!first) {
-                    if (self.previous.token_type != .comma) return error.ParseMissingComma;
-                    _ = self.reader_readToken();
-                }
-
                 const value_type = try switch (self.previous.token_type) {
-                    .close_curly_brace => break,
                     .zero => self.zeroType(),
                     else => self.primitiveType(),
                 };
@@ -530,7 +526,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                 if (!has_data) return error.ParserEmptyData;
 
-                first = false;
+                switch (self.previous.token_type) {
+                    .close_curly_brace => break,
+                    .comma => _ = self.reader_readToken(),
+                    else => return error.ParseMissingComma,
+                }
             }
 
             _ = self.reader_readToken();
@@ -542,7 +542,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .data_definition = .{
                     .linkage = link,
                     .identifier = identifier,
-                    .values = values,
+                    .values = values orelse return error.ParserEmptyData,
                 } },
             );
         }
@@ -626,16 +626,9 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             var first = true;
             while (self.previous.token_type != .close_parenthesis) {
-                if (!first) {
-                    if (self.previous.token_type != .comma) return error.ParseMissingCommaError;
-
-                    _ = self.reader_readToken();
-                }
-
                 const param_start = self.previous.span.start;
 
                 const param = try switch (self.previous.token_type) {
-                    .close_parenthesis => break,
                     .env => switch (first) {
                         true => self.envParameter(),
                         false => return error.ParseInvalidEnv,
@@ -656,6 +649,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                         .next = parameters,
                     } },
                 );
+
+                switch (self.previous.token_type) {
+                    .close_parenthesis => break,
+                    .comma => _ = self.reader_readToken(),
+                    else => return error.ParseMissingCommaError,
+                }
 
                 first = false;
             }
@@ -802,11 +801,123 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             );
         }
 
-        fn assignment(self: *Self, is_phi: *bool) !ast.StatementIndex {
-            _ = self;
-            _ = is_phi;
+        fn blockValue(self: *Self) !ast.StatementIndex {
+            return try switch (self.previous.token_type) {
+                .global_identifier => self.globalIdentifier(),
+                .local_identifier => self.localIdentifier(),
+                .integer_literal => self.integer(),
+                .single_literal => self.single(),
+                .double_literal => self.double(),
+                else => return error.ParserInvalidBlockValue,
+            };
+        }
 
-            return error.TODO;
+        fn assignment(self: *Self, is_phi: *bool) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const identifier = try self.localIdentifier();
+
+            const assignment_span = self.previous.span;
+            const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
+                .long_assign => .long,
+                .word_assign => .word,
+                .single_assign => .single,
+                .double_assign => .double,
+                else => return error.ParserInvalidAssignmentSymbol,
+            };
+
+            const data_type = try self.new(
+                .{ .start = assignment_span.start + 1, .end = assignment_span.end },
+                .{ .primitive_type = primitive_type },
+            );
+
+            _ = self.reader_readToken();
+
+            is_phi.* = switch (self.previous.token_type) {
+                .phi => true,
+                else => false,
+            };
+
+            const statement = try switch (self.previous.token_type) {
+                .phi => self.phi(data_type),
+                else => return error.TODO,
+            };
+
+            const end = self.previous.span.start;
+
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{
+                    .assignment = .{
+                        .identifier = identifier,
+                        .statement = statement,
+                    },
+                },
+            );
+        }
+
+        fn phi(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .phi) return error.ParserMissingPhi;
+            _ = self.reader_readToken();
+
+            var parameters: ?ast.StatementIndex = null;
+
+            var first = true;
+            while (true) {
+                if (!first) {
+                    if (self.previous.token_type != .comma) break;
+                    _ = self.reader_readToken();
+                }
+
+                const parameter_start = self.previous.span.start;
+                const parameter = try self.phiParameter();
+                const parameter_end = self.previous.span.start;
+
+                parameters = try self.new(
+                    .{ .start = parameter_start, .end = parameter_end },
+                    .{
+                        .node = .{
+                            .value = parameter,
+                            .next = parameters,
+                        },
+                    },
+                );
+
+                first = false;
+            }
+
+            const end = self.previous.span.start;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{
+                    .phi = .{
+                        .data_type = data_type,
+                        .parameters = parameters orelse return error.ParserEmptyPhi,
+                    },
+                },
+            );
+        }
+
+        fn phiParameter(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const identifier = try self.labelIdentifier();
+            const value = try self.blockValue();
+
+            const end = self.previous.span.end;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{
+                    .phi_parameter = .{
+                        .identifier = identifier,
+                        .value = value,
+                    },
+                },
+            );
         }
 
         fn branch(self: *Self) !ast.StatementIndex {
@@ -1626,6 +1737,42 @@ test "function fall-through block" {
         .block,
         .node,
         .identifier,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "phi" {
+    // Arrange
+    const file = "function $fun() {@s %x =w phi @a 1, @b %l, @c $g ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .literal,
+        .phi_parameter,
+        .node,
+        .identifier,
+        .identifier,
+        .phi_parameter,
+        .node,
+        .identifier,
+        .identifier,
+        .phi_parameter,
+        .node,
+        .phi,
+        .assignment,
+        .node,
         .@"return",
         .block,
         .node,

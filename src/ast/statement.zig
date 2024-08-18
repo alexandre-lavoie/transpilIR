@@ -127,7 +127,7 @@ pub const StatementData = union(StatementType) {
     data_definition: struct {
         linkage: ?StatementIndex,
         identifier: StatementIndex,
-        values: ?StatementIndex,
+        values: StatementIndex,
     },
 
     typed_data: struct {
@@ -269,6 +269,7 @@ pub const StatementData = union(StatementType) {
     },
 
     phi: struct {
+        data_type: StatementIndex,
         parameters: StatementIndex,
     },
 
