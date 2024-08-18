@@ -875,6 +875,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .allocate => self.allocate(data_type),
                 .call => self.call(data_type),
                 .vaarg => self.vaarg(data_type),
+                .negate => self.negate(data_type),
                 .cast,
                 .copy,
                 .double_to_single,
@@ -959,6 +960,25 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .vaarg = .{
                     .data_type = data_type,
                     .parameter = parameter,
+                } },
+            );
+        }
+
+        fn negate(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .negate) return error.ParserMissingVaarg;
+            _ = self.next();
+
+            const value = try self.blockValue();
+
+            const end = self.previous.span.start;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{ .negate = .{
+                    .data_type = data_type,
+                    .value = value,
                 } },
             );
         }
@@ -2222,6 +2242,31 @@ test "vaarg" {
         .primitive_type,
         .identifier,
         .vaarg,
+        .assignment,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "negate" {
+    // Arrange
+    const file = "function $fun() {@s %l =w neg %v ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .negate,
         .assignment,
         .node,
         .@"return",
