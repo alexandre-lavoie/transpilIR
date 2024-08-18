@@ -6,3 +6,4 @@ pub const Parser = parser.Parser;
 
 pub const token = @import("token.zig");
 pub const Token = token.Token;
+pub const TokenReader = token.TokenReader;
