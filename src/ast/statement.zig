@@ -80,7 +80,7 @@ pub const StatementType = enum {
     phi_parameter,
     @"return",
 
-    // Opertations
+    // Math
 
     binary_operation,
     comparision,
@@ -281,7 +281,7 @@ pub const StatementData = union(StatementType) {
         value: ?StatementIndex,
     },
 
-    // Opertations
+    // Math
 
     binary_operation: struct {
         operation_type: BinaryOperationType,

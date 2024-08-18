@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
+const common = @import("../common.zig");
 const lexer = @import("lexer.zig");
 const token = @import("token.zig");
 
@@ -45,86 +46,73 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try self.module();
         }
 
-        fn module(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .module_start) return error.ParseMissingModule;
+        pub fn new(self: *Self, span: common.SourceSpan, data: ast.StatementData) !ast.StatementIndex {
+            return try self.collection_append(ast.Statement.init(
+                span,
+                data,
+            ));
+        }
 
+        fn module(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .module_start) return error.ParseMissingModule;
             _ = self.reader_readToken();
 
             var function_definitions: ?ast.StatementIndex = null;
             var data_definitions: ?ast.StatementIndex = null;
             var type_definitions: ?ast.StatementIndex = null;
 
-            const start = self.previous.span.start;
             while (true) {
-                switch (self.previous.token_type) {
-                    .@"export", .thread, .section, .function, .data => {
-                        const def_start = self.previous.span.start;
-                        const out = try self.linkageDefinition();
-                        const def_end = self.previous.span.end;
+                var token_type: token.TokenType = .type;
 
-                        switch (out.token_type) {
-                            .function => {
-                                function_definitions = try self.collection_append(ast.Statement.init(
-                                    .{ .start = def_start, .end = def_end },
-                                    .{ .node = .{
-                                        .value = out.statement,
-                                        .next = function_definitions,
-                                    } },
-                                ));
-                            },
-                            .data => {
-                                data_definitions = try self.collection_append(ast.Statement.init(
-                                    .{ .start = def_start, .end = def_end },
-                                    .{ .node = .{
-                                        .value = out.statement,
-                                        .next = data_definitions,
-                                    } },
-                                ));
-                            },
-                            else => return error.ParseUnexpectedType,
-                        }
-                    },
-                    .type => {
-                        const def_start = self.previous.span.start;
-                        const out = try self.typeDefinition();
-                        const def_end = self.previous.span.start;
-
-                        type_definitions = try self.collection_append(ast.Statement.init(
-                            .{ .start = def_start, .end = def_end },
-                            .{ .node = .{
-                                .value = out,
-                                .next = type_definitions,
-                            } },
-                        ));
-                    },
+                const def_start = self.previous.span.start;
+                const def_value = try switch (self.previous.token_type) {
                     .module_end => break,
+                    .@"export", .thread, .section, .function, .data => self.linkageDefinition(&token_type),
+                    .type => self.typeDefinition(),
                     else => return error.ParseModuleInvalidToken,
-                }
+                };
+                const def_end = self.previous.span.start;
+
+                const target = switch (token_type) {
+                    .function => &function_definitions,
+                    .data => &data_definitions,
+                    .type => &type_definitions,
+                    else => return error.ParseUnexpectedType,
+                };
+
+                target.* = try self.new(
+                    .{ .start = def_start, .end = def_end },
+                    .{ .node = .{
+                        .value = def_value,
+                        .next = target.*,
+                    } },
+                );
             }
+
             const end = self.previous.span.end;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .module = .{
                     .functions = function_definitions,
                     .data = data_definitions,
                     .types = type_definitions,
                 } },
-            ));
+            );
         }
 
         fn scopeIdentifier(self: *Self, token_type: token.TokenType, scope: ast.Scope, skip_read: bool) !ast.StatementIndex {
             if (self.previous.token_type != token_type) return error.ParseInvalidIdentifier;
 
-            const start = self.previous.span.start + 1;
-            const end = self.previous.span.end;
-
+            const span = self.previous.span;
             if (!skip_read) _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
-                .{ .start = start, .end = end },
+            return try self.new(
+                .{ .start = span.start + 1, .end = span.end },
                 .{ .identifier = .{ .scope = scope } },
-            ));
+            );
         }
 
         fn localIdentifier(self: *Self) !ast.StatementIndex {
@@ -165,15 +153,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 else => return error.ParseInvalidPrimitiveType,
             };
 
-            const start = self.previous.span.start;
-            const end = self.previous.span.end;
-
+            const span = self.previous.span;
             _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
-                .{ .start = start, .end = end },
+            return try self.new(
+                span,
                 .{ .primitive_type = primitive_type },
-            ));
+            );
         }
 
         fn zeroType(self: *Self) !ast.StatementIndex {
@@ -182,10 +168,10 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const span = self.previous.span;
             _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 span,
                 .{ .zero_type = undefined },
-            ));
+            );
         }
 
         fn variableType(self: *Self) !ast.StatementIndex {
@@ -201,10 +187,10 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const span = self.previous.span;
             _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 span,
                 .{ .env_type = undefined },
-            ));
+            );
         }
 
         fn integer(self: *Self) !ast.StatementIndex {
@@ -213,12 +199,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const span = self.previous.span;
             _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 span,
                 .{ .literal = .{
                     .type = .integer,
                 } },
-            ));
+            );
         }
 
         fn single(self: *Self) !ast.StatementIndex {
@@ -227,12 +213,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const span = self.previous.span;
             _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = span.start + 2, .end = span.end },
                 .{ .literal = .{
                     .type = .float,
                 } },
-            ));
+            );
         }
 
         fn double(self: *Self) !ast.StatementIndex {
@@ -241,12 +227,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const span = self.previous.span;
             _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = span.start + 2, .end = span.end },
                 .{ .literal = .{
                     .type = .float,
                 } },
-            ));
+            );
         }
 
         fn string(self: *Self) !ast.StatementIndex {
@@ -255,12 +241,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const span = self.previous.span;
             _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = span.start + 1, .end = span.end - 1 },
                 .{ .literal = .{
                     .type = .float,
                 } },
-            ));
+            );
         }
 
         fn linkage(self: *Self) !?ast.StatementIndex {
@@ -268,33 +254,37 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             var t = self.previous;
 
-            var @"export" = false;
-            if (t.token_type == .@"export") {
-                @"export" = true;
-                t = self.reader_readToken();
-            }
+            const @"export": bool = switch (t.token_type) {
+                .@"export" => true,
+                else => false,
+            };
+            if (@"export") t = self.reader_readToken();
 
-            var thread = false;
-            if (t.token_type == .thread) {
-                thread = true;
-                t = self.reader_readToken();
-            }
+            const thread: bool = switch (t.token_type) {
+                .thread => true,
+                else => false,
+            };
+            if (thread) t = self.reader_readToken();
 
-            var section: ?ast.StatementIndex = null;
-            var flags: ?ast.StatementIndex = null;
-            if (t.token_type == .section) {
-                _ = self.reader_readToken();
+            const section: ?ast.StatementIndex = switch (t.token_type) {
+                .section => scope: {
+                    _ = self.reader_readToken();
 
-                section = try self.string();
+                    break :scope try self.string();
+                },
+                else => null,
+            };
 
-                if (self.previous.token_type == .string_literal) flags = try self.string();
-            }
+            const flags: ?ast.StatementIndex = switch (section != null and self.previous.token_type == .string_literal) {
+                true => try self.string(),
+                false => null,
+            };
 
             const end = self.previous.span.start;
 
             if (start == end) return undefined;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .linkage = .{
                     .@"export" = @"export",
@@ -302,7 +292,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .section = section,
                     .flags = flags,
                 } },
-            ));
+            );
         }
 
         fn typeDefinition(self: *Self) !ast.StatementIndex {
@@ -320,13 +310,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .type_definition = .{
                     .identifier = identifier,
                     .type = body,
                 } },
-            ));
+            );
         }
 
         fn typeDefinitionBody(self: *Self) !ast.StatementIndex {
@@ -352,36 +342,34 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             while (self.previous.token_type != .close_curly_brace) {
                 const out_start = self.previous.span.start;
+
                 if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
                 _ = self.reader_readToken();
 
                 const out = try self.structType(out_start, alignment);
+
                 const out_end = self.previous.span.end;
 
-                types = try self.collection_append(ast.Statement.init(
+                types = try self.new(
                     .{ .start = out_start, .end = out_end },
                     .{ .node = .{
                         .value = out,
                         .next = types,
                     } },
-                ));
+                );
             }
 
             _ = self.reader_readToken();
 
             const end = self.previous.span.start;
 
-            if (types) |o| {
-                return try self.collection_append(ast.Statement.init(
-                    .{ .start = start, .end = end },
-                    .{ .union_type = .{
-                        .alignment = alignment,
-                        .types = o,
-                    } },
-                ));
-            } else {
-                return error.ParseEmptyUnion;
-            }
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{ .union_type = .{
+                    .alignment = alignment,
+                    .types = types orelse return error.ParseEmptyUnion,
+                } },
+            );
         }
 
         fn opaqueType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
@@ -392,13 +380,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .opaque_type = .{
                     .alignment = alignment,
                     .size = size,
                 } },
-            ));
+            );
         }
 
         fn structType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
@@ -411,28 +399,26 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     _ = self.reader_readToken();
                 }
 
-                switch (self.previous.token_type) {
-                    .close_curly_brace => break,
-                    else => {
-                        const member_start = self.previous.span.start;
-                        const variable_type = try self.variableType();
+                if (self.previous.token_type == .close_curly_brace) break;
 
-                        const member_type = switch (self.previous.token_type) {
-                            .integer_literal => try self.arrayType(member_start, variable_type),
-                            else => variable_type,
-                        };
+                const member_start = self.previous.span.start;
 
-                        const member_end = self.previous.span.end;
+                const variable_type = try self.variableType();
 
-                        members = try self.collection_append(ast.Statement.init(
-                            .{ .start = member_start, .end = member_end },
-                            .{ .node = .{
-                                .value = member_type,
-                                .next = members,
-                            } },
-                        ));
-                    },
-                }
+                const member_type = switch (self.previous.token_type) {
+                    .integer_literal => try self.arrayType(member_start, variable_type),
+                    else => variable_type,
+                };
+
+                const member_end = self.previous.span.end;
+
+                members = try self.new(
+                    .{ .start = member_start, .end = member_end },
+                    .{ .node = .{
+                        .value = member_type,
+                        .next = members,
+                    } },
+                );
 
                 first = false;
             }
@@ -441,17 +427,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.end;
 
-            if (members) |o| {
-                return try self.collection_append(ast.Statement.init(
-                    .{ .start = start, .end = end },
-                    .{ .struct_type = .{
-                        .alignment = alignment,
-                        .members = o,
-                    } },
-                ));
-            } else {
-                return error.ParseEmptyStruct;
-            }
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{ .struct_type = .{
+                    .alignment = alignment,
+                    .members = members orelse return error.ParseEmptyStruct,
+                } },
+            );
         }
 
         fn arrayType(self: *Self, start: usize, item: ast.StatementIndex) !ast.StatementIndex {
@@ -459,42 +441,40 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .array_type = .{
                     .item = item,
                     .count = count,
                 } },
-            ));
+            );
         }
 
-        fn linkageDefinition(self: *Self) !struct { token_type: token.TokenType, statement: ast.StatementIndex } {
+        fn linkageDefinition(self: *Self, out_token_type: *token.TokenType) !ast.StatementIndex {
             const start = self.previous.span.start;
 
             const link = try self.linkage();
 
-            return switch (self.previous.token_type) {
-                .data => .{
-                    .token_type = .data,
-                    .statement = try self.dataDefinition(start, link),
-                },
-                .function => .{
-                    .token_type = .function,
-                    .statement = try self.functionDefinition(start, link),
-                },
+            out_token_type.* = switch (self.previous.token_type) {
+                .data => .data,
+                .function => .function,
+                else => return error.ParseInvalidLinkageType,
+            };
+
+            return try switch (self.previous.token_type) {
+                .data => self.dataDefinition(start, link),
+                .function => self.functionDefinition(start, link),
                 else => return error.ParseInvalidLinkageType,
             };
         }
 
         fn dataDefinition(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
             if (self.previous.token_type != .data) return error.ParseInvalidData;
-
             _ = self.reader_readToken();
 
             const identifier = try self.globalIdentifier();
 
             if (self.previous.token_type != .assign) return error.ParseMissingEqual;
-
             _ = self.reader_readToken();
 
             var alignment: ?ast.StatementIndex = null;
@@ -504,7 +484,6 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             }
 
             if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
-
             _ = self.reader_readToken();
 
             var values: ?ast.StatementIndex = null;
@@ -522,32 +501,34 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     else => self.primitiveType(),
                 };
 
-                while (true) {
-                    switch (self.previous.token_type) {
-                        .comma, .close_curly_brace => break,
-                        else => {
-                            const start_value = self.previous.span.start;
-                            const value = try self.dataValue();
-                            const end_value = self.previous.span.end;
+                var has_data = false;
+                while (!(self.previous.token_type == .comma or self.previous.token_type == .close_curly_brace)) {
+                    has_data = true;
 
-                            const type_value = try self.collection_append(ast.Statement.init(
-                                .{ .start = start_value, .end = end_value },
-                                .{ .typed_data = .{
-                                    .type = value_type,
-                                    .value = value,
-                                } },
-                            ));
+                    const data_start = self.previous.span.start;
+                    const data_value = try self.dataValue();
+                    const data_end = self.previous.span.start;
 
-                            values = try self.collection_append(ast.Statement.init(
-                                .{ .start = start_value, .end = end_value },
-                                .{ .node = .{
-                                    .value = type_value,
-                                    .next = values,
-                                } },
-                            ));
-                        },
-                    }
+                    const data_span = .{ .start = data_start, .end = data_end };
+
+                    const type_value = try self.new(
+                        data_span,
+                        .{ .typed_data = .{
+                            .type = value_type,
+                            .value = data_value,
+                        } },
+                    );
+
+                    values = try self.new(
+                        data_span,
+                        .{ .node = .{
+                            .value = type_value,
+                            .next = values,
+                        } },
+                    );
                 }
+
+                if (!has_data) return error.ParserEmptyData;
 
                 first = false;
             }
@@ -556,14 +537,14 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .data_definition = .{
                     .linkage = link,
                     .identifier = identifier,
                     .values = values,
                 } },
-            ));
+            );
         }
 
         fn dataValue(self: *Self) !ast.StatementIndex {
@@ -580,11 +561,9 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 else => return error.ParseInvalidDataValue,
             };
 
-            if (self.previous.token_type == .plus) {
-                if (!canOffset) return error.ParseInvalidDataOffset;
-            } else {
-                return left;
-            }
+            if (self.previous.token_type != .plus) return left;
+
+            if (!canOffset) return error.ParseInvalidDataOffset;
 
             if (self.reader_readToken().token_type != .integer_literal) return error.ParseInvalidOffset;
 
@@ -592,13 +571,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.end;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .offset = .{
                     .identifier = left,
                     .value = offset,
                 } },
-            ));
+            );
         }
 
         fn functionDefinition(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
@@ -607,21 +586,20 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .function = .{
                     .signature = function_signature,
                     .body = function_body,
                 } },
-            ));
+            );
         }
 
         fn functionSignature(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
-            var return_type: ?ast.StatementIndex = null;
-            switch (self.reader_readToken().token_type) {
-                .global_identifier => {},
-                else => return_type = try self.variableType(),
-            }
+            const return_type: ?ast.StatementIndex = switch (self.reader_readToken().token_type) {
+                .global_identifier => null,
+                else => try self.variableType(),
+            };
 
             const name = try self.globalIdentifier();
 
@@ -629,7 +607,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .function_signature = .{
                     .linkage = link,
@@ -637,7 +615,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .return_type = return_type,
                     .parameters = parameters,
                 } },
-            ));
+            );
         }
 
         fn functionParameters(self: *Self) !?ast.StatementIndex {
@@ -654,65 +632,35 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     _ = self.reader_readToken();
                 }
 
-                switch (self.previous.token_type) {
+                const param_start = self.previous.span.start;
+
+                const param = try switch (self.previous.token_type) {
                     .close_parenthesis => break,
-                    .env => {
-                        if (!first) return error.ParseInvalidEnv;
-
-                        const env_start = self.previous.span.start;
-                        const env = try self.envParameter();
-                        const env_end = self.previous.span.end;
-
-                        parameters = try self.collection_append(ast.Statement.init(
-                            .{ .start = env_start, .end = env_end },
-                            .{ .node = .{
-                                .value = env,
-                                .next = parameters,
-                            } },
-                        ));
+                    .env => switch (first) {
+                        true => self.envParameter(),
+                        false => return error.ParseInvalidEnv,
                     },
-                    .variable_arguments => {
-                        if (first) return error.ParseInvalidVarArgs;
-
-                        const vararg = try self.collection_append(ast.Statement.init(
-                            self.previous.span,
-                            .{ .variadic_parameter = undefined },
-                        ));
-
-                        parameters = try self.collection_append(ast.Statement.init(
-                            self.previous.span,
-                            .{ .node = .{
-                                .value = vararg,
-                                .next = parameters,
-                            } },
-                        ));
-
-                        _ = self.reader_readToken();
-
-                        break;
+                    .variable_arguments => switch (first) {
+                        true => return error.ParseInvalidVarArgs,
+                        false => self.varArgParameter(),
                     },
-                    else => {
-                        const param_start = self.previous.span.start;
-                        const param = try self.functionParameter();
-                        const param_end = self.previous.span.end;
+                    else => self.functionParameter(),
+                };
 
-                        parameters = try self.collection_append(ast.Statement.init(
-                            .{ .start = param_start, .end = param_end },
-                            .{ .node = .{
-                                .value = param,
-                                .next = parameters,
-                            } },
-                        ));
-                    },
-                }
+                const param_end = self.previous.span.start;
+
+                parameters = try self.new(
+                    .{ .start = param_start, .end = param_end },
+                    .{ .node = .{
+                        .value = param,
+                        .next = parameters,
+                    } },
+                );
 
                 first = false;
             }
 
-            switch (self.previous.token_type) {
-                .close_parenthesis => {},
-                else => return error.ParseMissingCloseParenthesis,
-            }
+            if (self.previous.token_type != .close_parenthesis) return error.ParseMissingCloseParenthesis;
 
             _ = self.reader_readToken();
 
@@ -727,13 +675,27 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .function_parameter = .{
                     .type_statement = type_statement,
                     .identifier = identifier,
                 } },
-            ));
+            );
+        }
+
+        fn varArgParameter(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .variable_arguments) return error.ParserMissingVarArg;
+            _ = self.reader_readToken();
+
+            const end = self.previous.span.start;
+
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{ .variadic_parameter = undefined },
+            );
         }
 
         fn functionParameter(self: *Self) !ast.StatementIndex {
@@ -744,13 +706,13 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .function_parameter = .{
                     .type_statement = type_statement,
                     .identifier = identifier,
                 } },
-            ));
+            );
         }
 
         fn functionBody(self: *Self) !ast.StatementIndex {
@@ -761,31 +723,25 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             var blocks: ?ast.StatementIndex = null;
 
             while (true) {
-                switch (self.previous.token_type) {
+                const block_start = self.previous.span.start;
+                const block_value = switch (self.previous.token_type) {
                     .close_curly_brace => break,
-                    else => {
-                        const block_start = self.previous.span.start;
-                        const out = try self.block();
-                        const block_end = self.previous.span.start;
+                    else => try self.block(),
+                };
+                const block_end = self.previous.span.start;
 
-                        blocks = try self.collection_append(ast.Statement.init(
-                            .{ .start = block_start, .end = block_end },
-                            .{ .node = .{
-                                .value = out,
-                                .next = blocks,
-                            } },
-                        ));
-                    },
-                }
+                blocks = try self.new(
+                    .{ .start = block_start, .end = block_end },
+                    .{ .node = .{
+                        .value = block_value,
+                        .next = blocks,
+                    } },
+                );
             }
 
             _ = self.reader_readToken();
 
-            if (blocks) |b| {
-                return b;
-            } else {
-                return error.ParseEmptyFunctionBody;
-            }
+            return blocks orelse error.ParseEmptyFunctionBody;
         }
 
         fn block(self: *Self) !ast.StatementIndex {
@@ -795,12 +751,17 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const label = try self.labelIdentifier();
 
-            const phi_statements: ?ast.StatementIndex = null;
-            const statements: ?ast.StatementIndex = null;
+            var phi_statements: ?ast.StatementIndex = null;
+            var statements: ?ast.StatementIndex = null;
 
             const flow_statement: ast.StatementIndex = scope: {
                 while (true) {
-                    switch (self.previous.token_type) {
+                    const statement_start = self.previous.span.start;
+
+                    var is_phi = false;
+                    const next_statement: ast.StatementIndex = try switch (self.previous.token_type) {
+                        // Assignment
+                        .local_identifier => self.assignment(&is_phi),
                         // Flow
                         .halt => break :scope try self.halt(),
                         .jump => break :scope try self.jump(),
@@ -809,13 +770,28 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                         .label_identifier => break :scope try self.fallThroughJump(),
                         // TODO: Support all instructions.
                         else => return error.TODO,
-                    }
+                    };
+
+                    const statement_end = self.previous.span.start;
+
+                    const target = switch (is_phi) {
+                        true => &phi_statements,
+                        false => &statements,
+                    };
+
+                    target.* = try self.new(
+                        .{ .start = statement_start, .end = statement_end },
+                        .{ .node = .{
+                            .value = next_statement,
+                            .next = target.*,
+                        } },
+                    );
                 }
             };
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .block = .{
                     .label = label,
@@ -823,7 +799,14 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .statements = statements,
                     .flow_statement = flow_statement,
                 } },
-            ));
+            );
+        }
+
+        fn assignment(self: *Self, is_phi: *bool) !ast.StatementIndex {
+            _ = self;
+            _ = is_phi;
+
+            return error.TODO;
         }
 
         fn branch(self: *Self) !ast.StatementIndex {
@@ -846,25 +829,26 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .branch = .{
                     .condition = condition,
                     .true = true_label,
                     .false = false_label,
                 } },
-            ));
+            );
         }
 
         fn halt(self: *Self) !ast.StatementIndex {
             if (self.previous.token_type != .halt) return error.ParseMissingHalt;
+
             const span = self.previous.span;
             _ = self.reader_readToken();
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 span,
                 .{ .halt = undefined },
-            ));
+            );
         }
 
         fn fallThroughJump(self: *Self) !ast.StatementIndex {
@@ -872,12 +856,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const label = try self.scopeIdentifier(.label_identifier, .label, true);
             const end = self.previous.span.end;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .jump = .{
                     .identifier = label,
                 } },
-            ));
+            );
         }
 
         fn jump(self: *Self) !ast.StatementIndex {
@@ -890,12 +874,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .jump = .{
                     .identifier = label,
                 } },
-            ));
+            );
         }
 
         fn @"return"(self: *Self) !ast.StatementIndex {
@@ -911,12 +895,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const end = self.previous.span.start;
 
-            return try self.collection_append(ast.Statement.init(
+            return try self.new(
                 .{ .start = start, .end = end },
                 .{ .@"return" = .{
                     .value = value,
                 } },
-            ));
+            );
         }
     };
 }
