@@ -660,7 +660,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 switch (self.previous.token_type) {
                     .close_parenthesis => break,
                     .comma => _ = self.next(),
-                    else => return error.ParseMissingCommaError,
+                    else => return error.ParseMissingComma,
                 }
 
                 first = false;
@@ -876,6 +876,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .call => self.call(data_type),
                 .vaarg => self.vaarg(data_type),
                 .negate => self.negate(data_type),
+                .phi => self.phi(data_type),
                 .cast,
                 .copy,
                 .double_to_single,
@@ -915,8 +916,44 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .shift_left,
                 .bitwise_xor,
                 => self.binaryOperation(data_type),
-                .phi => self.phi(data_type),
-                else => return error.TODO,
+                .double_equal,
+                .long_equal,
+                .single_equal,
+                .word_equal,
+                .double_not_equal,
+                .long_not_equal,
+                .single_not_equal,
+                .word_not_equal,
+                .double_greater_than_equal,
+                .long_greater_than_equal,
+                .long_greater_than_equal_unsigned,
+                .single_greater_than_equal,
+                .word_greater_than_equal,
+                .word_greater_than_equal_unsigned,
+                .double_greater_than,
+                .long_greater_than,
+                .long_greater_than_unsigned,
+                .single_greater_than,
+                .word_greater_than,
+                .word_greater_than_unsigned,
+                .double_less_than_equal,
+                .long_less_than_equal,
+                .long_less_than_equal_unsigned,
+                .single_less_than_equal,
+                .word_less_than_equal,
+                .word_less_than_equal_unsigned,
+                .double_less_than,
+                .long_less_than,
+                .long_less_than_unsigned,
+                .single_less_than,
+                .word_less_than,
+                .word_less_than_unsigned,
+                .double_all_nan,
+                .single_all_nan,
+                .double_any_nan,
+                .single_any_nan,
+                => self.comparison(data_type),
+                else => return error.ParseInvalidAssignment,
             };
         }
 
@@ -1211,6 +1248,59 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .binary_operation = .{
                     .data_type = data_type,
                     .operation_type = operation_type,
+                    .left = left,
+                    .right = right,
+                } },
+            );
+        }
+
+        fn comparison(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const operation_type: ast.ComparisonOperationType = switch (self.previous.token_type) {
+                .double_equal, .long_equal, .single_equal, .word_equal => .equal,
+                .double_not_equal, .long_not_equal, .single_not_equal, .word_not_equal => .not_equal,
+                .double_greater_than_equal, .long_greater_than_equal, .long_greater_than_equal_unsigned, .single_greater_than_equal, .word_greater_than_equal, .word_greater_than_equal_unsigned => .greater_than_equal,
+                .double_greater_than, .long_greater_than, .long_greater_than_unsigned, .single_greater_than, .word_greater_than, .word_greater_than_unsigned => .greater_than,
+                .double_less_than_equal, .long_less_than_equal, .long_less_than_equal_unsigned, .single_less_than_equal, .word_less_than_equal, .word_less_than_equal_unsigned => .less_than_equal,
+                .double_less_than, .long_less_than, .long_less_than_unsigned, .single_less_than, .word_less_than, .word_less_than_unsigned => .less_than,
+                .double_all_nan, .single_all_nan => .all_nan,
+                .double_any_nan, .single_any_nan => .any_nan,
+                else => return error.ParseInvalidComparison,
+            };
+
+            const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
+                .double_equal, .double_not_equal, .double_greater_than_equal, .double_greater_than, .double_less_than_equal, .double_less_than, .double_all_nan, .double_any_nan => .double,
+                .long_equal, .long_not_equal, .long_greater_than_equal, .long_greater_than, .long_less_than_equal, .long_less_than => .long,
+                .long_greater_than_equal_unsigned, .long_greater_than_unsigned, .long_less_than_equal_unsigned, .long_less_than_unsigned => .long_unsigned,
+                .single_equal, .single_not_equal, .single_greater_than_equal, .single_greater_than, .single_less_than_equal, .single_less_than, .single_all_nan, .single_any_nan => .single,
+                .word_equal, .word_not_equal, .word_greater_than_equal, .word_greater_than, .word_less_than_equal, .word_less_than => .word,
+                .word_greater_than_equal_unsigned, .word_greater_than_unsigned, .word_less_than_equal_unsigned, .word_less_than_unsigned => .word_unsigned,
+                else => return error.ParseInvalidComparison,
+            };
+
+            const comparison_type = try self.new(
+                self.previous.span,
+                .{ .primitive_type = primitive_type },
+            );
+
+            _ = self.next();
+
+            const left = try self.blockValue();
+
+            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            _ = self.next();
+
+            const right = try self.blockValue();
+
+            const end = self.previous.span.start;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{ .comparison = .{
+                    .data_type = data_type,
+                    .operation_type = operation_type,
+                    .comparison_type = comparison_type,
                     .left = left,
                     .right = right,
                 } },
@@ -2375,6 +2465,41 @@ test "binaryOperation" {
         .literal,
         .identifier,
         .binary_operation,
+        .assignment,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "comparison" {
+    // Arrange
+    const file = "function $fun() {@s %t =w ceqw $g, 1 %u =s ceqs 0, %f ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .primitive_type,
+        .identifier,
+        .literal,
+        .comparison,
+        .assignment,
+        .node,
+        .identifier,
+        .primitive_type,
+        .primitive_type,
+        .literal,
+        .identifier,
+        .comparison,
         .assignment,
         .node,
         .@"return",

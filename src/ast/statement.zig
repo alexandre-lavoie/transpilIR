@@ -293,6 +293,7 @@ pub const StatementData = union(StatementType) {
     comparison: struct {
         operation_type: ComparisonOperationType,
         data_type: StatementIndex,
+        comparison_type: StatementIndex,
         left: StatementIndex,
         right: StatementIndex,
     },

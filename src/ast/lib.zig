@@ -6,3 +6,4 @@ pub const StatementData = statement.StatementData;
 pub const Scope = statement.Scope;
 pub const PrimitiveType = statement.PrimitiveType;
 pub const BinaryOperationtype = statement.BinaryOperationType;
+pub const ComparisonOperationType = statement.ComparisonOperationType;
