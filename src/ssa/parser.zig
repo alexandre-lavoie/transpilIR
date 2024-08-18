@@ -52,7 +52,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             var function_definitions: ?ast.StatementIndex = null;
             var data_definitions: ?ast.StatementIndex = null;
-            const type_definitions: ?ast.StatementIndex = null;
+            var type_definitions: ?ast.StatementIndex = null;
 
             const start = self.previous.span.start;
             while (true) {
@@ -83,6 +83,19 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                             },
                             else => return error.ParseUnexpectedType,
                         }
+                    },
+                    .type => {
+                        const def_start = self.previous.span.start;
+                        const out = try self.typeDefinition();
+                        const def_end = self.previous.span.start;
+
+                        type_definitions = try self.collection_append(ast.Statement.init(
+                            .{ .start = def_start, .end = def_end },
+                            .{ .node = .{
+                                .value = out,
+                                .next = type_definitions,
+                            } },
+                        ));
                     },
                     .module_end => break,
                     else => return error.ParseModuleInvalidToken,
@@ -288,6 +301,169 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .thread = thread,
                     .section = section,
                     .flags = flags,
+                } },
+            ));
+        }
+
+        fn typeDefinition(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .type) return error.ParseMissingType;
+            _ = self.reader_readToken();
+
+            const identifier = try self.typeIdentifier();
+
+            if (self.previous.token_type != .assign) return error.ParseMissingEqual;
+            _ = self.reader_readToken();
+
+            const body = try self.typeDefinitionBody();
+
+            const end = self.previous.span.start;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .type_definition = .{
+                    .identifier = identifier,
+                    .type = body,
+                } },
+            ));
+        }
+
+        fn typeDefinitionBody(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const alignment: ?ast.StatementIndex = switch (self.previous.token_type) {
+                .@"align" => try self.stackAlignment(),
+                else => null,
+            };
+
+            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+            _ = self.reader_readToken();
+
+            return try switch (self.previous.token_type) {
+                .open_curly_brace => self.unionType(start, alignment),
+                .integer_literal => self.opaqueType(start, alignment),
+                else => self.structType(start, alignment),
+            };
+        }
+
+        fn unionType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
+            var types: ?ast.StatementIndex = null;
+
+            while (self.previous.token_type != .close_curly_brace) {
+                const out_start = self.previous.span.start;
+                if (self.previous.token_type != .open_curly_brace) return error.ParseMissingCurlyBrace;
+                _ = self.reader_readToken();
+
+                const out = try self.structType(out_start, alignment);
+                const out_end = self.previous.span.end;
+
+                types = try self.collection_append(ast.Statement.init(
+                    .{ .start = out_start, .end = out_end },
+                    .{ .node = .{
+                        .value = out,
+                        .next = types,
+                    } },
+                ));
+            }
+
+            _ = self.reader_readToken();
+
+            const end = self.previous.span.start;
+
+            if (types) |o| {
+                return try self.collection_append(ast.Statement.init(
+                    .{ .start = start, .end = end },
+                    .{ .union_type = .{
+                        .alignment = alignment,
+                        .types = o,
+                    } },
+                ));
+            } else {
+                return error.ParseEmptyUnion;
+            }
+        }
+
+        fn opaqueType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
+            const size = try self.integer();
+
+            if (self.previous.token_type != .close_curly_brace) return error.ParseMissingCurlyBrace;
+            _ = self.reader_readToken();
+
+            const end = self.previous.span.start;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .opaque_type = .{
+                    .alignment = alignment,
+                    .size = size,
+                } },
+            ));
+        }
+
+        fn structType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
+            var members: ?ast.StatementIndex = null;
+
+            var first = true;
+            while (self.previous.token_type != .close_curly_brace) {
+                if (!first) {
+                    if (self.previous.token_type != .comma) return error.ParseMissingComma;
+                    _ = self.reader_readToken();
+                }
+
+                switch (self.previous.token_type) {
+                    .close_curly_brace => break,
+                    else => {
+                        const member_start = self.previous.span.start;
+                        const variable_type = try self.variableType();
+
+                        const member_type = switch (self.previous.token_type) {
+                            .integer_literal => try self.arrayType(member_start, variable_type),
+                            else => variable_type,
+                        };
+
+                        const member_end = self.previous.span.end;
+
+                        members = try self.collection_append(ast.Statement.init(
+                            .{ .start = member_start, .end = member_end },
+                            .{ .node = .{
+                                .value = member_type,
+                                .next = members,
+                            } },
+                        ));
+                    },
+                }
+
+                first = false;
+            }
+
+            _ = self.reader_readToken();
+
+            const end = self.previous.span.end;
+
+            if (members) |o| {
+                return try self.collection_append(ast.Statement.init(
+                    .{ .start = start, .end = end },
+                    .{ .struct_type = .{
+                        .alignment = alignment,
+                        .members = o,
+                    } },
+                ));
+            } else {
+                return error.ParseEmptyStruct;
+            }
+        }
+
+        fn arrayType(self: *Self, start: usize, item: ast.StatementIndex) !ast.StatementIndex {
+            const count = try self.integer();
+
+            const end = self.previous.span.start;
+
+            return try self.collection_append(ast.Statement.init(
+                .{ .start = start, .end = end },
+                .{ .array_type = .{
+                    .item = item,
+                    .count = count,
                 } },
             ));
         }
@@ -794,6 +970,15 @@ fn assertStatementTypes(types: []const ast.StatementType, statements: []const as
     }
 }
 
+fn printStatements(file: []const u8) !void {
+    const statements = try testParser(file);
+    defer test_allocator.free(statements);
+
+    for (statements) |statement| {
+        std.log.err("{any}", .{@as(ast.StatementType, @enumFromInt(@intFromEnum(statement.data)))});
+    }
+}
+
 //
 // Valid Test
 //
@@ -809,24 +994,192 @@ test "module" {
     try assertParser(file, &expected);
 }
 
-// TODO: Types
-// test "type" {
-//     // Arrange
-//     const file = "type :t = {w}";
-//     const expected = [_]ast.StatementType{
-//         .identifier,
-//         .primitive_type,
-//         .literal,
-//         .typed_data,
-//         .node,
-//         .data_definition,
-//         .node,
-//         .module,
-//     };
+test "type struct" {
+    // Arrange
+    const file = "type :t = {w}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .node,
+        .struct_type,
+        .type_definition,
+        .node,
+        .module,
+    };
 
-//     // Act + Assert
-//     try assertParser(file, &expected);
-// }
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type struct alignment" {
+    // Arrange
+    const file = "type :t = align 32 {w}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .literal,
+        .primitive_type,
+        .node,
+        .struct_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type struct trailing comma" {
+    // Arrange
+    const file = "type :t = {w, }";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .node,
+        .struct_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type struct array" {
+    // Arrange
+    const file = "type :t = {w 1}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .literal,
+        .array_type,
+        .node,
+        .struct_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type struct custom type" {
+    // Arrange
+    const file = "type :t = {:o}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .identifier,
+        .node,
+        .struct_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type struct many members" {
+    // Arrange
+    const file = "type :t = {w, :o, s 1}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .node,
+        .identifier,
+        .node,
+        .primitive_type,
+        .literal,
+        .array_type,
+        .node,
+        .struct_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type union" {
+    // Arrange
+    const file = "type :t = { {w} {s} }";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .primitive_type,
+        .node,
+        .struct_type,
+        .node,
+        .primitive_type,
+        .node,
+        .struct_type,
+        .node,
+        .union_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type union alignment" {
+    // Arrange
+    const file = "type :t = align 32 { {w} }";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .literal,
+        .primitive_type,
+        .node,
+        .struct_type,
+        .node,
+        .union_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type opaque" {
+    // Arrange
+    const file = "type :t = { 32 }";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .literal,
+        .opaque_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "type opaque alignment" {
+    // Arrange
+    const file = "type :t = align 16 { 32 }";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .literal,
+        .literal,
+        .opaque_type,
+        .type_definition,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
 
 test "data" {
     // Arrange

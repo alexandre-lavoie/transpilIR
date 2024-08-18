@@ -43,6 +43,7 @@ pub const StatementType = enum {
 
     array_type,
     env_type,
+    opaque_type,
     primitive_type,
     struct_type,
     type_definition,
@@ -148,6 +149,11 @@ pub const StatementData = union(StatementType) {
 
     env_type: void,
 
+    opaque_type: struct {
+        alignment: ?StatementIndex,
+        size: StatementIndex,
+    },
+
     primitive_type: PrimitiveType,
 
     struct_type: struct {
@@ -161,7 +167,8 @@ pub const StatementData = union(StatementType) {
     },
 
     union_type: struct {
-        members: StatementIndex,
+        alignment: ?StatementIndex,
+        types: StatementIndex,
     },
 
     zero_type: void,
