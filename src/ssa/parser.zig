@@ -872,6 +872,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try switch (self.previous.token_type) {
                 .allocate => self.allocate(data_type),
                 .call => self.call(data_type),
+                .cast => self.cast(data_type),
                 .byte_load_unsigned,
                 .byte_load,
                 .double_load,
@@ -904,6 +905,25 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .data_type = data_type,
                     .alignment = alignment,
                     .size = size,
+                } },
+            );
+        }
+
+        fn cast(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .cast) return error.ParseMissingCast;
+            _ = self.next();
+
+            const value = try self.blockValue();
+
+            const end = self.previous.span.end;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{ .cast = .{
+                    .data_type = data_type,
+                    .value = value,
                 } },
             );
         }
@@ -1975,6 +1995,43 @@ test "allocate" {
         .literal,
         .literal,
         .allocate,
+        .assignment,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "cast" {
+    // Arrange
+    const file = "function $fun() {@s %x =w cast 0 %y =w cast %l %z =w cast $g ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .literal,
+        .cast,
+        .assignment,
+        .node,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .cast,
+        .assignment,
+        .node,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .cast,
         .assignment,
         .node,
         .@"return",
