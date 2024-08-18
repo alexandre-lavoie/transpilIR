@@ -765,19 +765,10 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     const statement_start = self.previous.span.start;
 
                     var is_phi = false;
-                    const next_statement: ast.StatementIndex = try switch (self.previous.token_type) {
-                        // Block
-                        .call => self.call(null),
-                        .local_identifier => self.assignment(&is_phi),
-                        // Flow
-                        .halt => break :scope try self.halt(),
-                        .jump => break :scope try self.jump(),
-                        .jump_not_zero => break :scope try self.branch(),
-                        .@"return" => break :scope try self.@"return"(),
-                        .label_identifier => break :scope try self.fallThroughJump(),
-                        // TODO: Support all instructions.
-                        else => return error.TODO,
-                    };
+                    var is_flow = false;
+                    const next_statement: ast.StatementIndex = try self.blockLine(&is_phi, &is_flow);
+
+                    if (is_flow) break :scope next_statement;
 
                     const statement_end = self.previous.span.start;
 
@@ -807,6 +798,28 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .flow_statement = flow_statement,
                 } },
             );
+        }
+
+        fn blockLine(self: *Self, is_phi: *bool, is_flow: *bool) !ast.StatementIndex {
+            is_flow.* = switch (self.previous.token_type) {
+                .halt, .jump, .jump_not_zero, .@"return", .label_identifier => true,
+                else => false,
+            };
+
+            return try switch (self.previous.token_type) {
+                // Block
+                .call => self.call(null),
+                .byte_store, .double_store, .half_word_store, .single_store, .word_store => self.store(),
+                .local_identifier => self.assignment(is_phi),
+                // Flow
+                .halt => self.halt(),
+                .jump => self.jump(),
+                .jump_not_zero => self.branch(),
+                .@"return" => try self.@"return"(),
+                .label_identifier => try self.fallThroughJump(),
+                // TODO: Support all instructions.
+                else => return error.TODO,
+            };
         }
 
         fn blockValue(self: *Self) !ast.StatementIndex {
@@ -876,6 +889,46 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .data_type = data_type,
                     .alignment = alignment,
                     .size = size,
+                } },
+            );
+        }
+
+        fn store(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const store_span = self.previous.span;
+            const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
+                .byte_store => .byte,
+                .double_store => .double,
+                .half_word_store => .half_word,
+                .single_store => .single,
+                .word_store => .word,
+                else => return error.ParseMissingStore,
+            };
+
+            const memory_type = try self.new(
+                // +5 is offset to skip "store"
+                .{ .start = store_span.start + 5, .end = store_span.end },
+                .{ .primitive_type = primitive_type },
+            );
+
+            _ = self.next();
+
+            const source = try self.blockValue();
+
+            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            _ = self.next();
+
+            const target = try self.blockValue();
+
+            const end = self.previous.span.end;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{ .store = .{
+                    .memory_type = memory_type,
+                    .source = source,
+                    .target = target,
                 } },
             );
         }
@@ -1007,7 +1060,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 switch (self.previous.token_type) {
                     .close_parenthesis => break,
                     .comma => _ = self.next(),
-                    else => return error.ParseMissingCommaError,
+                    else => return error.ParseMissingComma,
                 }
 
                 first = false;
@@ -1869,6 +1922,35 @@ test "allocate" {
         .literal,
         .allocate,
         .assignment,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "store" {
+    // Arrange
+    const file = "function $fun() {@s storew %l, 1 storeh 0, $g ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .literal,
+        .store,
+        .node,
+        .primitive_type,
+        .literal,
+        .identifier,
+        .store,
         .node,
         .@"return",
         .block,

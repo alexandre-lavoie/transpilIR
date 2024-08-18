@@ -247,11 +247,12 @@ pub const StatementData = union(StatementType) {
 
     load: struct {
         data_type: StatementIndex,
-        target: StatementIndex,
+        memory_type: StatementIndex,
+        source: StatementIndex,
     },
 
     store: struct {
-        data_type: StatementIndex,
+        memory_type: StatementIndex,
         source: StatementIndex,
         target: StatementIndex,
     },
