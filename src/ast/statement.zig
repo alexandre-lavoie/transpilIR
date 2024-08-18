@@ -339,22 +339,23 @@ pub const BinaryOperationType = enum {
 
     // Bitwise
     arthimetic_shift_right,
-    and_,
-    or_,
+    @"and",
+    @"or",
     logical_shift_right,
     shift_left,
     xor,
-
-    // Float
-    all_nan,
-    any_nan,
 };
 
 pub const ComparisonOperationType = enum {
+    // Basic
     equal,
     greater_than_equal,
     greater_than,
     less_than_equal,
     less_than,
     not_equal,
+
+    // Float
+    all_nan,
+    any_nan,
 };

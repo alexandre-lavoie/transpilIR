@@ -903,6 +903,18 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .word_load_unsigned,
                 .word_load,
                 => self.load(data_type),
+                .addition,
+                .divide,
+                .multiply,
+                .remainder,
+                .subtract,
+                .arthimetic_shift_right,
+                .bitwise_and,
+                .bitwise_or,
+                .shift_right,
+                .shift_left,
+                .bitwise_xor,
+                => self.binaryOperation(data_type),
                 .phi => self.phi(data_type),
                 else => return error.TODO,
             };
@@ -1162,6 +1174,45 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .memory_type = memory_type,
                     .data_type = data_type,
                     .source = source,
+                } },
+            );
+        }
+
+        fn binaryOperation(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const operation_type: ast.BinaryOperationtype = switch (self.previous.token_type) {
+                .addition => .addition,
+                .divide => .divide,
+                .multiply => .multiply,
+                .remainder => .remainder,
+                .subtract => .subtract,
+                .arthimetic_shift_right => .arthimetic_shift_right,
+                .bitwise_and => .@"and",
+                .bitwise_or => .@"or",
+                .shift_right => .logical_shift_right,
+                .shift_left => .shift_left,
+                .bitwise_xor => .xor,
+                else => return error.ParseInvalidBinaryOperation,
+            };
+            _ = self.next();
+
+            const left = try self.blockValue();
+
+            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            _ = self.next();
+
+            const right = try self.blockValue();
+
+            const end = self.previous.span.start;
+
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{ .binary_operation = .{
+                    .data_type = data_type,
+                    .operation_type = operation_type,
+                    .left = left,
+                    .right = right,
                 } },
             );
         }
@@ -2292,6 +2343,39 @@ test "blit" {
         .identifier,
         .literal,
         .blit,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "binaryOperation" {
+    // Arrange
+    const file = "function $fun() {@s %t =w add %l, 0 %u =s div 0, $g ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .identifier,
+        .literal,
+        .binary_operation,
+        .assignment,
+        .node,
+        .identifier,
+        .primitive_type,
+        .literal,
+        .identifier,
+        .binary_operation,
+        .assignment,
         .node,
         .@"return",
         .block,
