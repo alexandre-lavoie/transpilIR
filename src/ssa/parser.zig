@@ -640,7 +640,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                         true => return error.ParseInvalidVarArgs,
                         false => self.varArgParameter(),
                     },
-                    else => self.functionParameter(),
+                    else => self.typeParameter(),
                 };
 
                 const param_end = self.previous.span.start;
@@ -679,7 +679,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             return try self.new(
                 .{ .start = start, .end = end },
-                .{ .function_parameter = .{
+                .{ .type_parameter = .{
                     .type_statement = type_statement,
                     .identifier = identifier,
                 } },
@@ -700,7 +700,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             );
         }
 
-        fn functionParameter(self: *Self) !ast.StatementIndex {
+        fn typeParameter(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
             const type_statement = try self.variableType();
@@ -710,7 +710,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             return try self.new(
                 .{ .start = start, .end = end },
-                .{ .function_parameter = .{
+                .{ .type_parameter = .{
                     .type_statement = type_statement,
                     .identifier = identifier,
                 } },
@@ -1552,7 +1552,7 @@ test "function with custom type parameter" {
         .identifier,
         .identifier,
         .identifier,
-        .function_parameter,
+        .type_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -1575,7 +1575,7 @@ test "function with one parameter" {
         .identifier,
         .primitive_type,
         .identifier,
-        .function_parameter,
+        .type_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -1598,7 +1598,7 @@ test "function with trailing comma" {
         .identifier,
         .primitive_type,
         .identifier,
-        .function_parameter,
+        .type_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -1621,15 +1621,15 @@ test "function with many parameters" {
         .identifier,
         .primitive_type,
         .identifier,
-        .function_parameter,
+        .type_parameter,
         .node,
         .primitive_type,
         .identifier,
-        .function_parameter,
+        .type_parameter,
         .node,
         .primitive_type,
         .identifier,
-        .function_parameter,
+        .type_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -1652,7 +1652,7 @@ test "function with env parameter" {
         .identifier,
         .env_type,
         .identifier,
-        .function_parameter,
+        .type_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -1675,7 +1675,7 @@ test "function with variable parameter" {
         .identifier,
         .primitive_type,
         .identifier,
-        .function_parameter,
+        .type_parameter,
         .node,
         .variadic_parameter,
         .node,
