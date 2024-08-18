@@ -872,8 +872,23 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try switch (self.previous.token_type) {
                 .allocate => self.allocate(data_type),
                 .call => self.call(data_type),
-                .cast => self.cast(data_type),
-                .copy => self.copy(data_type),
+                .cast,
+                .copy,
+                .double_to_single,
+                .double_to_word_unsigned,
+                .double_to_word,
+                .half_word_to_word_unsigned,
+                .half_word_to_word,
+                .long_to_single_unsigned,
+                .long_to_single,
+                .single_to_double,
+                .single_to_word_unsigned,
+                .single_to_word,
+                .word_to_long_unsigned,
+                .word_to_long,
+                .word_to_single_unsigned,
+                .word_to_single,
+                => self.copy(data_type),
                 .byte_load_unsigned,
                 .byte_load,
                 .double_load,
@@ -910,29 +925,63 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             );
         }
 
-        fn cast(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
-            const start = self.previous.span.start;
-
-            if (self.previous.token_type != .cast) return error.ParseMissingCast;
-            _ = self.next();
-
-            const value = try self.blockValue();
-
-            const end = self.previous.span.end;
-
-            return self.new(
-                .{ .start = start, .end = end },
-                .{ .cast = .{
-                    .data_type = data_type,
-                    .value = value,
-                } },
-            );
-        }
-
         fn copy(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .copy) return error.ParseMissingCast;
+            const to_type: ast.StatementIndex = scope: {
+                const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
+                    .cast => break :scope data_type,
+                    .copy => break :scope data_type,
+                    .double_to_single => .single,
+                    .double_to_word_unsigned => .word_unsigned,
+                    .double_to_word => .word,
+                    .half_word_to_word_unsigned => .word,
+                    .half_word_to_word => .word,
+                    .long_to_single_unsigned => .single,
+                    .long_to_single => .single,
+                    .single_to_double => .double,
+                    .single_to_word_unsigned => .word_unsigned,
+                    .single_to_word => .word,
+                    .word_to_long_unsigned => .long,
+                    .word_to_long => .long,
+                    .word_to_single_unsigned => .single,
+                    .word_to_single => .single,
+                    else => return error.ParseMissingCopy,
+                };
+
+                break :scope try self.new(
+                    self.previous.span,
+                    .{ .primitive_type = primitive_type },
+                );
+            };
+
+            const from_type: ?ast.StatementIndex = scope: {
+                const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
+                    .cast => break :scope null,
+                    .copy => break :scope data_type,
+                    .double_to_single => .double,
+                    .double_to_word_unsigned => .double,
+                    .double_to_word => .double,
+                    .half_word_to_word_unsigned => .half_word_unsigned,
+                    .half_word_to_word => .half_word,
+                    .long_to_single_unsigned => .long_unsigned,
+                    .long_to_single => .long,
+                    .single_to_double => .single,
+                    .single_to_word_unsigned => .single,
+                    .single_to_word => .single,
+                    .word_to_long_unsigned => .word_unsigned,
+                    .word_to_long => .word,
+                    .word_to_single_unsigned => .word_unsigned,
+                    .word_to_single => .word,
+                    else => return error.ParseMissingCopy,
+                };
+
+                break :scope try self.new(
+                    self.previous.span,
+                    .{ .primitive_type = primitive_type },
+                );
+            };
+
             _ = self.next();
 
             const value = try self.blockValue();
@@ -943,6 +992,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .copy = .{
                     .data_type = data_type,
+                    .to_type = to_type,
+                    .from_type = from_type,
                     .value = value,
                 } },
             );
@@ -2029,46 +2080,9 @@ test "allocate" {
     try assertParser(file, &expected);
 }
 
-test "cast" {
-    // Arrange
-    const file = "function $fun() {@s %x =w cast 0 %y =w cast %l %z =w cast $g ret}";
-    const expected = [_]ast.StatementType{
-        .identifier,
-        .function_signature,
-        .identifier,
-        .identifier,
-        .primitive_type,
-        .literal,
-        .cast,
-        .assignment,
-        .node,
-        .identifier,
-        .primitive_type,
-        .identifier,
-        .cast,
-        .assignment,
-        .node,
-        .identifier,
-        .primitive_type,
-        .identifier,
-        .cast,
-        .assignment,
-        .node,
-        .@"return",
-        .block,
-        .node,
-        .function,
-        .node,
-        .module,
-    };
-
-    // Act + Assert
-    try assertParser(file, &expected);
-}
-
 test "copy" {
     // Arrange
-    const file = "function $fun() {@s %x =w copy 0 %y =w copy %l %z =w copy $g ret}";
+    const file = "function $fun() {@s %x =w copy 0 %y =w extsw %l %z =s ultof $g ret}";
     const expected = [_]ast.StatementType{
         .identifier,
         .function_signature,
@@ -2081,11 +2095,15 @@ test "copy" {
         .node,
         .identifier,
         .primitive_type,
+        .primitive_type,
+        .primitive_type,
         .identifier,
         .copy,
         .assignment,
         .node,
         .identifier,
+        .primitive_type,
+        .primitive_type,
         .primitive_type,
         .identifier,
         .copy,

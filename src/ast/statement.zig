@@ -66,7 +66,6 @@ pub const StatementType = enum {
     allocate,
     assignment,
     blit,
-    cast,
     copy,
     load,
     store,
@@ -235,13 +234,10 @@ pub const StatementData = union(StatementType) {
         target: StatementIndex,
     },
 
-    cast: struct {
-        data_type: StatementIndex,
-        value: StatementIndex,
-    },
-
     copy: struct {
         data_type: StatementIndex,
+        to_type: StatementIndex,
+        from_type: ?StatementIndex,
         value: StatementIndex,
     },
 
