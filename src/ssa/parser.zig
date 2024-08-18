@@ -810,6 +810,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 // Block
                 .blit => self.blit(),
                 .call => self.call(null),
+                .vastart => self.vastart(),
                 .byte_store,
                 .double_store,
                 .half_word_store,
@@ -923,6 +924,22 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .alignment = alignment,
                     .size = size,
                 } },
+            );
+        }
+
+        fn vastart(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .vastart) return error.ParserMissingVastart;
+            _ = self.next();
+
+            const parameter = try self.blockValue();
+
+            const end = self.previous.span.start;
+
+            return self.new(
+                .{ .start = start, .end = end },
+                .{ .vastart = .{ .parameter = parameter } },
             );
         }
 
@@ -2139,6 +2156,28 @@ test "copy" {
         .identifier,
         .copy,
         .assignment,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "vastart" {
+    // Arrange
+    const file = "function $fun() {@s vastart %ap ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .vastart,
         .node,
         .@"return",
         .block,
