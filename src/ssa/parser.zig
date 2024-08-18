@@ -809,7 +809,12 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try switch (self.previous.token_type) {
                 // Block
                 .call => self.call(null),
-                .byte_store, .double_store, .half_word_store, .single_store, .word_store => self.store(),
+                .byte_store,
+                .double_store,
+                .half_word_store,
+                .single_store,
+                .word_store,
+                => self.store(),
                 .local_identifier => self.assignment(is_phi),
                 // Flow
                 .halt => self.halt(),
@@ -867,6 +872,16 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try switch (self.previous.token_type) {
                 .allocate => self.allocate(data_type),
                 .call => self.call(data_type),
+                .byte_load_unsigned,
+                .byte_load,
+                .double_load,
+                .half_word_load_unsigned,
+                .half_word_load,
+                .long_load,
+                .single_load,
+                .word_load_unsigned,
+                .word_load,
+                => self.load(data_type),
                 .phi => self.phi(data_type),
                 else => return error.TODO,
             };
@@ -907,7 +922,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             };
 
             const memory_type = try self.new(
-                // +5 is offset to skip "store"
+                // +5 to skip "store"
                 .{ .start = store_span.start + 5, .end = store_span.end },
                 .{ .primitive_type = primitive_type },
             );
@@ -929,6 +944,45 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                     .memory_type = memory_type,
                     .source = source,
                     .target = target,
+                } },
+            );
+        }
+
+        fn load(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const load_span = self.previous.span;
+            const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
+                .byte_load_unsigned => .byte_unsigned,
+                .byte_load => .byte,
+                .double_load => .double,
+                .half_word_load_unsigned => .half_word_unsigned,
+                .half_word_load => .half_word,
+                .long_load => .long,
+                .single_load => .single,
+                .word_load_unsigned => .word_unsigned,
+                .word_load => .word,
+                else => return error.ParseMissingStore,
+            };
+
+            const memory_type = try self.new(
+                // +4 to skip "load"
+                .{ .start = load_span.start + 4, .end = load_span.end },
+                .{ .primitive_type = primitive_type },
+            );
+
+            _ = self.next();
+
+            const source = try self.blockValue();
+
+            const end = self.previous.span.end;
+
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{ .load = .{
+                    .memory_type = memory_type,
+                    .data_type = data_type,
+                    .source = source,
                 } },
             );
         }
@@ -1951,6 +2005,46 @@ test "store" {
         .literal,
         .identifier,
         .store,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParser(file, &expected);
+}
+
+test "load" {
+    // Arrange
+    const file = "function $fun() {@s %l1 =w loadw %x %l2 =w loadsb $g %l3 =d loadd 0 ret}";
+    const expected = [_]ast.StatementType{
+        .identifier,
+        .function_signature,
+        .identifier,
+        .identifier,
+        .primitive_type,
+        .primitive_type,
+        .identifier,
+        .load,
+        .assignment,
+        .node,
+        .identifier,
+        .primitive_type,
+        .primitive_type,
+        .identifier,
+        .load,
+        .assignment,
+        .node,
+        .identifier,
+        .primitive_type,
+        .primitive_type,
+        .literal,
+        .load,
+        .assignment,
         .node,
         .@"return",
         .block,
