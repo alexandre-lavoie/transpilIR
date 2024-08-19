@@ -97,7 +97,7 @@ pub fn ASTWalk(comptime Callback: type) type {
                     try self.walk(d.flow_statement);
                 },
                 .call => |*d| {
-                    try self.walk(d.identifier);
+                    try self.walk(d.target);
                     try self.walk(d.return_type);
                     try self.walk(d.parameters);
                 },

@@ -35,7 +35,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             _ = self.reader_readByte();
 
             while (true) {
-                const start = self.offset;
+                const start = self.offset - 1;
 
                 var next_token: token.Token = try switch (self.previous) {
                     '\x00' => token.Token.init(.module_end),

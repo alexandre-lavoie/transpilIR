@@ -10,45 +10,52 @@ pub fn main() !void {
     var args = std.process.args();
     _ = args.skip();
 
-    const file_arg = args.next() orelse return error.MissingFile;
+    var files = std.ArrayList([]const u8).init(allocator);
+    defer files.deinit();
 
-    var buffer: [4096]u8 = undefined;
-    const file_path = try std.fs.cwd().realpath(file_arg, &buffer);
-
-    std.log.info("=== File ===", .{});
-    std.log.info("{s}", .{file_path});
-
-    const file = try std.fs.openFileAbsolute(file_path, .{});
-    defer file.close();
-
-    var file_reader = file.reader();
-
-    var tokens = std.ArrayList(lib.ssa.Token).init(allocator);
-    defer tokens.deinit();
-
-    var lexer = lib.ssa.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
-    try lexer.lex();
-
-    std.log.info("=== Tokens ===", .{});
-    for (tokens.items) |token| {
-        std.log.info("{s} {}:{}", .{ @tagName(token.token_type), token.span.start, token.span.end });
+    while (args.next()) |file_arg| {
+        try files.append(file_arg);
     }
 
-    const token_slice = try tokens.toOwnedSlice();
-    defer tokens.allocator.free(token_slice);
+    for (files.items) |file_arg| {
+        var buffer: [4096]u8 = undefined;
+        const file_path = try std.fs.cwd().realpath(file_arg, &buffer);
 
-    var token_reader = lib.ssa.TokenReader(@TypeOf(token_slice)).init(token_slice);
+        std.log.info("=== File ===", .{});
+        std.log.info("{s}", .{file_path});
 
-    var ast = lib.ast.AST.init(allocator);
-    defer ast.deinit();
+        const file = try std.fs.openFileAbsolute(file_path, .{});
+        defer file.close();
 
-    var parser = lib.ssa.Parser(@TypeOf(token_reader)).init(&token_reader, &ast);
-    _ = try parser.parse();
+        var file_reader = file.reader();
 
-    std.log.info("=== Statements ===", .{});
-    var callback = LogASTWalkCallback.init();
-    var walk = lib.ast.ASTWalk(@TypeOf(callback)).init(&ast, &callback);
-    try walk.walk(ast.entrypoint() orelse return error.NotFound);
+        std.log.info("=== Lexer ===", .{});
+        var tokens = std.ArrayList(lib.ssa.Token).init(allocator);
+        defer tokens.deinit();
+
+        var lexer = lib.ssa.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
+        try lexer.lex();
+
+        for (tokens.items) |token| {
+            std.log.info("{s} {}:{}", .{ @tagName(token.token_type), token.span.start, token.span.end });
+        }
+
+        const token_slice = try tokens.toOwnedSlice();
+        defer tokens.allocator.free(token_slice);
+
+        var token_reader = lib.ssa.TokenReader(@TypeOf(token_slice)).init(token_slice);
+
+        std.log.info("=== Parser ===", .{});
+        var ast = lib.ast.AST.init(allocator);
+        defer ast.deinit();
+
+        var parser = lib.ssa.Parser(@TypeOf(token_reader)).init(&token_reader, &ast);
+        _ = try parser.parse();
+
+        var callback = LogASTWalkCallback.init();
+        var walk = lib.ast.ASTWalk(@TypeOf(callback)).init(&ast, &callback);
+        try walk.walk(ast.entrypoint() orelse return error.NotFound);
+    }
 }
 
 const LogASTWalkCallback = struct {

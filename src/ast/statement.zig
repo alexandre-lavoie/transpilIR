@@ -91,6 +91,7 @@ pub const StatementData = union(StatementType) {
 
     identifier: struct {
         scope: Scope,
+        thread: bool = false,
     },
 
     // Literals
@@ -102,8 +103,8 @@ pub const StatementData = union(StatementType) {
     // Common
 
     linkage: struct {
-        @"export": bool,
-        thread: bool,
+        @"export": bool = false,
+        thread: bool = false,
         section: ?StatementIndex,
         flags: ?StatementIndex,
     },
@@ -183,7 +184,7 @@ pub const StatementData = union(StatementType) {
     },
 
     call: struct {
-        identifier: StatementIndex,
+        target: StatementIndex,
         return_type: ?StatementIndex,
         parameters: ?StatementIndex,
     },

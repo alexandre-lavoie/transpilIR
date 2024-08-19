@@ -260,6 +260,7 @@ pub const reserved_words = std.StaticStringMap(TokenType).initComptime(.{
     .{ "loadub", .byte_load_unsigned },
     .{ "loaduh", .half_word_load_unsigned },
     .{ "loaduw", .word_load_unsigned },
+    .{ "load", .word_load }, // TODO: Is this accurate?
     .{ "loadw", .word_load },
     .{ "mul", .multiply },
     .{ "neg", .negate },
