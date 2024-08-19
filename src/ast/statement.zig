@@ -110,6 +110,7 @@ pub const StatementData = union(StatementType) {
 
     node: struct {
         value: StatementIndex,
+        previous: ?StatementIndex,
         next: ?StatementIndex,
     },
 
@@ -201,7 +202,7 @@ pub const StatementData = union(StatementType) {
 
     type_parameter: struct {
         type_statement: StatementIndex,
-        identifier: StatementIndex,
+        value: StatementIndex,
     },
 
     variadic_parameter: void,

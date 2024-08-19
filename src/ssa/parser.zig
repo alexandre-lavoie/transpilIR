@@ -10,11 +10,10 @@ const ParseRecord = struct {
     statement: *ast.Statement,
 };
 
-pub fn Parser(comptime Reader: type, comptime Collection: type) type {
+pub fn Parser(comptime Reader: type) type {
     return struct {
         reader: *Reader,
-        collection: *Collection,
-        offset: ast.StatementIndex = 0,
+        ast: *ast.AST,
         previous: *const token.Token = undefined,
 
         const Self = @This();
@@ -23,14 +22,10 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return self.reader.readToken();
         }
 
-        fn collection_append(self: *Self, next_statement: ast.Statement) !void {
-            try self.collection.append(next_statement);
-        }
-
-        pub fn init(reader: *Reader, collection: *Collection) Self {
+        pub fn init(reader: *Reader, tree: *ast.AST) Self {
             return Self{
                 .reader = reader,
-                .collection = collection,
+                .ast = tree,
             };
         }
 
@@ -40,20 +35,43 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn new(self: *Self, span: common.SourceSpan, data: ast.StatementData) !ast.StatementIndex {
-            try self.collection_append(ast.Statement.init(
+            return try self.ast.append(ast.Statement.init(
                 span,
                 data,
             ));
-
-            const index = self.offset;
-            self.offset += 1;
-
-            return index;
         }
 
         fn next(self: *Self) *const token.Token {
             self.previous = self.reader_readToken();
             return self.previous;
+        }
+
+        fn node(self: *Self, head: *?ast.StatementIndex, tail: *?ast.StatementIndex, span: common.SourceSpan, value: ast.StatementIndex) !ast.StatementIndex {
+            const next_node = try self.new(
+                span,
+                .{ .node = .{
+                    .value = value,
+                    .previous = tail.*,
+                    .next = null,
+                } },
+            );
+
+            if (tail.*) |ti| {
+                const ts = self.ast.getPtr(ti) orelse return error.NotFound;
+
+                switch (ts.data) {
+                    .node => |*n| {
+                        n.next = next_node;
+                    },
+                    else => {},
+                }
+            } else {
+                head.* = next_node;
+            }
+
+            tail.* = next_node;
+
+            return next_node;
         }
 
         fn module(self: *Self) !ast.StatementIndex {
@@ -62,9 +80,14 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .module_start) return error.ParseMissingModule;
             _ = self.next();
 
-            var function_definitions: ?ast.StatementIndex = null;
-            var data_definitions: ?ast.StatementIndex = null;
-            var type_definitions: ?ast.StatementIndex = null;
+            var function_head: ?ast.StatementIndex = null;
+            var function_tail: ?ast.StatementIndex = null;
+
+            var data_head: ?ast.StatementIndex = null;
+            var data_tail: ?ast.StatementIndex = null;
+
+            var type_head: ?ast.StatementIndex = null;
+            var type_tail: ?ast.StatementIndex = null;
 
             while (true) {
                 var token_type: token.TokenType = .type;
@@ -78,19 +101,25 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 };
                 const def_end = self.previous.span.start;
 
-                const target = switch (token_type) {
-                    .function => &function_definitions,
-                    .data => &data_definitions,
-                    .type => &type_definitions,
+                const head = switch (token_type) {
+                    .function => &function_head,
+                    .data => &data_head,
+                    .type => &type_head,
                     else => return error.ParseUnexpectedType,
                 };
 
-                target.* = try self.new(
+                const tail = switch (token_type) {
+                    .function => &function_tail,
+                    .data => &data_tail,
+                    .type => &type_tail,
+                    else => return error.ParseUnexpectedType,
+                };
+
+                _ = try self.node(
+                    head,
+                    tail,
                     .{ .start = def_start, .end = def_end },
-                    .{ .node = .{
-                        .value = def_value,
-                        .next = target.*,
-                    } },
+                    def_value,
                 );
             }
 
@@ -99,9 +128,9 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try self.new(
                 .{ .start = start, .end = end },
                 .{ .module = .{
-                    .functions = function_definitions,
-                    .data = data_definitions,
-                    .types = type_definitions,
+                    .functions = function_head,
+                    .data = data_head,
+                    .types = type_head,
                 } },
             );
         }
@@ -142,8 +171,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             return try self.integer();
         }
 
-        fn primitiveType(self: *Self) !ast.StatementIndex {
-            const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
+        fn primitiveTypeInner(self: *Self) !ast.PrimitiveType {
+            return switch (self.previous.token_type) {
                 .byte_unsigned => .byte_unsigned,
                 .byte => .byte,
                 .double => .double,
@@ -155,6 +184,10 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .word => .word,
                 else => return error.ParseInvalidPrimitiveType,
             };
+        }
+
+        fn primitiveType(self: *Self) !ast.StatementIndex {
+            const primitive_type = try self.primitiveTypeInner();
 
             const span = self.previous.span;
             _ = self.next();
@@ -341,7 +374,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn unionType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
-            var types: ?ast.StatementIndex = null;
+            var type_head: ?ast.StatementIndex = null;
+            var type_tail: ?ast.StatementIndex = null;
 
             if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
 
@@ -354,12 +388,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                 const out_end = self.previous.span.end;
 
-                types = try self.new(
+                _ = try self.node(
+                    &type_head,
+                    &type_tail,
                     .{ .start = out_start, .end = out_end },
-                    .{ .node = .{
-                        .value = out,
-                        .next = types,
-                    } },
+                    out,
                 );
 
                 switch (self.previous.token_type) {
@@ -377,7 +410,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .union_type = .{
                     .alignment = alignment,
-                    .types = types orelse return error.ParseEmptyUnion,
+                    .types = type_head orelse return error.ParseEmptyUnion,
                 } },
             );
         }
@@ -400,7 +433,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn structType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
-            var members: ?ast.StatementIndex = null;
+            var member_head: ?ast.StatementIndex = null;
+            var member_tail: ?ast.StatementIndex = null;
 
             while (self.previous.token_type != .close_curly_brace) {
                 const member_start = self.previous.span.start;
@@ -414,12 +448,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                 const member_end = self.previous.span.end;
 
-                members = try self.new(
+                _ = try self.node(
+                    &member_head,
+                    &member_tail,
                     .{ .start = member_start, .end = member_end },
-                    .{ .node = .{
-                        .value = member_type,
-                        .next = members,
-                    } },
+                    member_type,
                 );
 
                 switch (self.previous.token_type) {
@@ -437,7 +470,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .struct_type = .{
                     .alignment = alignment,
-                    .members = members orelse return error.ParseEmptyStruct,
+                    .members = member_head orelse return error.ParseEmptyStruct,
                 } },
             );
         }
@@ -492,16 +525,29 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
             _ = self.next();
 
-            var values: ?ast.StatementIndex = null;
+            var value_head: ?ast.StatementIndex = null;
+            var value_tail: ?ast.StatementIndex = null;
 
             while (self.previous.token_type != .close_curly_brace) {
-                const value_type = try switch (self.previous.token_type) {
-                    .zero => self.zeroType(),
-                    else => self.primitiveType(),
+                const value_span = self.previous.span;
+                const value_data: ast.StatementData = switch (self.previous.token_type) {
+                    .zero => .{
+                        .zero_type = undefined,
+                    },
+                    else => .{
+                        .primitive_type = try self.primitiveTypeInner(),
+                    },
                 };
+
+                _ = self.next();
 
                 var has_data = false;
                 while (!(self.previous.token_type == .comma or self.previous.token_type == .close_curly_brace)) {
+                    const value_type = try self.new(
+                        value_span,
+                        value_data,
+                    );
+
                     has_data = true;
 
                     const data_start = self.previous.span.start;
@@ -518,12 +564,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                         } },
                     );
 
-                    values = try self.new(
+                    _ = try self.node(
+                        &value_head,
+                        &value_tail,
                         data_span,
-                        .{ .node = .{
-                            .value = type_value,
-                            .next = values,
-                        } },
+                        type_value,
                     );
                 }
 
@@ -545,7 +590,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .data_definition = .{
                     .linkage = link,
                     .identifier = identifier,
-                    .values = values orelse return error.ParserEmptyData,
+                    .values = value_head orelse return error.ParserEmptyData,
                 } },
             );
         }
@@ -625,7 +670,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .open_parenthesis) return error.ParseMissingOpenParenthesis;
             _ = self.next();
 
-            var parameters: ?ast.StatementIndex = null;
+            var parameter_head: ?ast.StatementIndex = null;
+            var parameter_tail: ?ast.StatementIndex = null;
 
             var first = true;
             while (self.previous.token_type != .close_parenthesis) {
@@ -647,12 +693,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                 const param_end = self.previous.span.start;
 
-                parameters = try self.new(
+                _ = try self.node(
+                    &parameter_head,
+                    &parameter_tail,
                     .{ .start = param_start, .end = param_end },
-                    .{ .node = .{
-                        .value = param,
-                        .next = parameters,
-                    } },
+                    param,
                 );
 
                 if (param_token_type == .variable_arguments) break;
@@ -670,14 +715,14 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             _ = self.next();
 
-            return parameters;
+            return parameter_head;
         }
 
         fn envParameter(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
             const type_statement = try self.envType();
-            const identifier = try self.localIdentifier();
+            const value = try self.localIdentifier();
 
             const end = self.previous.span.start;
 
@@ -685,7 +730,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .type_parameter = .{
                     .type_statement = type_statement,
-                    .identifier = identifier,
+                    .value = value,
                 } },
             );
         }
@@ -708,7 +753,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             const start = self.previous.span.start;
 
             const type_statement = try self.variableType();
-            const identifier = try self.localIdentifier();
+            const value = try self.localIdentifier();
 
             const end = self.previous.span.start;
 
@@ -716,7 +761,24 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .type_parameter = .{
                     .type_statement = type_statement,
-                    .identifier = identifier,
+                    .value = value,
+                } },
+            );
+        }
+
+        fn callParameter(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const type_statement = try self.variableType();
+            const value = try self.blockValue();
+
+            const end = self.previous.span.start;
+
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{ .type_parameter = .{
+                    .type_statement = type_statement,
+                    .value = value,
                 } },
             );
         }
@@ -726,7 +788,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             _ = self.next();
 
-            var blocks: ?ast.StatementIndex = null;
+            var block_head: ?ast.StatementIndex = null;
+            var block_tail: ?ast.StatementIndex = null;
 
             while (true) {
                 const block_start = self.previous.span.start;
@@ -736,18 +799,17 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 };
                 const block_end = self.previous.span.start;
 
-                blocks = try self.new(
+                _ = try self.node(
+                    &block_head,
+                    &block_tail,
                     .{ .start = block_start, .end = block_end },
-                    .{ .node = .{
-                        .value = block_value,
-                        .next = blocks,
-                    } },
+                    block_value,
                 );
             }
 
             _ = self.next();
 
-            return blocks orelse error.ParseEmptyFunctionBody;
+            return block_head orelse error.ParseEmptyFunctionBody;
         }
 
         fn block(self: *Self) !ast.StatementIndex {
@@ -757,8 +819,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             const label = try self.labelIdentifier();
 
-            var phi_statements: ?ast.StatementIndex = null;
-            var statements: ?ast.StatementIndex = null;
+            var phi_statement_head: ?ast.StatementIndex = null;
+            var phi_statement_tail: ?ast.StatementIndex = null;
+
+            var statement_head: ?ast.StatementIndex = null;
+            var statement_tail: ?ast.StatementIndex = null;
 
             const flow_statement: ast.StatementIndex = scope: {
                 while (true) {
@@ -772,17 +837,21 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
                     const statement_end = self.previous.span.start;
 
-                    const target = switch (is_phi) {
-                        true => &phi_statements,
-                        false => &statements,
+                    const head = switch (is_phi) {
+                        true => &phi_statement_head,
+                        false => &statement_head,
                     };
 
-                    target.* = try self.new(
+                    const tail = switch (is_phi) {
+                        true => &phi_statement_tail,
+                        false => &statement_tail,
+                    };
+
+                    _ = try self.node(
+                        head,
+                        tail,
                         .{ .start = statement_start, .end = statement_end },
-                        .{ .node = .{
-                            .value = next_statement,
-                            .next = target.*,
-                        } },
+                        next_statement,
                     );
                 }
             };
@@ -793,8 +862,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{ .start = start, .end = end },
                 .{ .block = .{
                     .label = label,
-                    .phi_statements = phi_statements,
-                    .statements = statements,
+                    .phi_statements = phi_statement_head,
+                    .statements = statement_head,
                     .flow_statement = flow_statement,
                 } },
             );
@@ -1313,7 +1382,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .phi) return error.ParserMissingPhi;
             _ = self.next();
 
-            var parameters: ?ast.StatementIndex = null;
+            var parameter_head: ?ast.StatementIndex = null;
+            var parameter_tail: ?ast.StatementIndex = null;
 
             var first = true;
             while (true) {
@@ -1326,14 +1396,11 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 const parameter = try self.phiParameter();
                 const parameter_end = self.previous.span.start;
 
-                parameters = try self.new(
+                _ = try self.node(
+                    &parameter_head,
+                    &parameter_tail,
                     .{ .start = parameter_start, .end = parameter_end },
-                    .{
-                        .node = .{
-                            .value = parameter,
-                            .next = parameters,
-                        },
-                    },
+                    parameter,
                 );
 
                 first = false;
@@ -1346,7 +1413,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                 .{
                     .phi = .{
                         .data_type = data_type,
-                        .parameters = parameters orelse return error.ParserEmptyPhi,
+                        .parameters = parameter_head orelse return error.ParserEmptyPhi,
                     },
                 },
             );
@@ -1399,7 +1466,8 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
             if (self.previous.token_type != .open_parenthesis) return error.ParseMissingOpenParenthesis;
             _ = self.next();
 
-            var parameters: ?ast.StatementIndex = null;
+            var parameter_head: ?ast.StatementIndex = null;
+            var parameter_tail: ?ast.StatementIndex = null;
 
             var first = true;
             var hasVarArgs = false;
@@ -1418,17 +1486,16 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
                             break :scope self.varArgParameter();
                         },
                     },
-                    else => self.typeParameter(),
+                    else => self.callParameter(),
                 };
 
                 const param_end = self.previous.span.start;
 
-                parameters = try self.new(
+                _ = try self.node(
+                    &parameter_head,
+                    &parameter_tail,
                     .{ .start = param_start, .end = param_end },
-                    .{ .node = .{
-                        .value = param,
-                        .next = parameters,
-                    } },
+                    param,
                 );
 
                 switch (self.previous.token_type) {
@@ -1444,7 +1511,7 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 
             _ = self.next();
 
-            return parameters;
+            return parameter_head;
         }
 
         fn branch(self: *Self) !ast.StatementIndex {
@@ -1548,48 +1615,20 @@ pub fn Parser(comptime Reader: type, comptime Collection: type) type {
 //
 
 const test_allocator = std.testing.allocator;
+const test_lib = @import("../test.zig");
 
 fn testParser(buffer: anytype) ![]ast.Statement {
-    var file_stream = std.io.fixedBufferStream(buffer);
+    var tree = try test_lib.testAST(test_allocator, buffer);
+    defer tree.deinit();
 
-    var file_reader = file_stream.reader();
-
-    var tokens = std.ArrayList(token.Token).init(test_allocator);
-    defer tokens.deinit();
-
-    var lex = lexer.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
-    try lex.lex();
-
-    const token_slice = try tokens.toOwnedSlice();
-    defer test_allocator.free(token_slice);
-
-    var token_reader = token.TokenReader(@TypeOf(token_slice)).init(token_slice);
-
-    var statements = std.ArrayList(ast.Statement).init(test_allocator);
-    defer statements.deinit();
-
-    var parser = Parser(@TypeOf(token_reader), @TypeOf(statements)).init(&token_reader, &statements);
-    _ = try parser.parse();
-
-    return try statements.toOwnedSlice();
+    return try tree.toSlice(test_allocator);
 }
 
 fn assertParser(buffer: anytype, expected: []const ast.StatementType) !void {
     const statements = try testParser(buffer);
     defer test_allocator.free(statements);
 
-    try assertStatementTypes(expected, statements);
-}
-
-fn assertStatementTypes(types: []const ast.StatementType, statements: []const ast.Statement) !void {
-    try std.testing.expectEqual(types.len, statements.len);
-
-    for (0..statements.len) |i| {
-        const expected: ast.StatementType = @enumFromInt(@intFromEnum(types[i]));
-        const actual: ast.StatementType = @enumFromInt(@intFromEnum(statements[i].data));
-
-        try std.testing.expectEqual(expected, actual);
-    }
+    try test_lib.assertStatementTypes(expected, statements);
 }
 
 fn printStatements(file: []const u8) !void {
@@ -1597,7 +1636,7 @@ fn printStatements(file: []const u8) !void {
     defer test_allocator.free(statements);
 
     for (statements) |statement| {
-        std.log.err("{any}", .{@as(ast.StatementType, @enumFromInt(@intFromEnum(statement.data)))});
+        std.log.err("{any}", .{@as(ast.StatementType, statement.data)});
     }
 }
 
@@ -1887,6 +1926,7 @@ test "data with global offset" {
         .offset,
         .typed_data,
         .node,
+        .primitive_type,
         .literal,
         .typed_data,
         .node,
@@ -1929,9 +1969,11 @@ test "data with reused type" {
         .literal,
         .typed_data,
         .node,
+        .primitive_type,
         .literal,
         .typed_data,
         .node,
+        .primitive_type,
         .literal,
         .typed_data,
         .node,
