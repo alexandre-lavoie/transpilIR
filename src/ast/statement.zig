@@ -126,7 +126,7 @@ pub const StatementData = union(StatementType) {
     // Data
 
     data_definition: struct {
-        linkage: ?StatementIndex,
+        linkage: StatementIndex,
         identifier: StatementIndex,
         values: StatementIndex,
     },
@@ -185,7 +185,7 @@ pub const StatementData = union(StatementType) {
 
     call: struct {
         target: StatementIndex,
-        return_type: ?StatementIndex,
+        return_type: StatementIndex,
         parameters: ?StatementIndex,
     },
 
@@ -195,9 +195,9 @@ pub const StatementData = union(StatementType) {
     },
 
     function_signature: struct {
-        linkage: ?StatementIndex,
+        linkage: StatementIndex,
         name: StatementIndex,
-        return_type: ?StatementIndex,
+        return_type: StatementIndex,
         parameters: ?StatementIndex,
     },
 
@@ -314,6 +314,7 @@ pub const Scope = enum {
 };
 
 pub const PrimitiveType = enum(u4) {
+    void,
     byte_unsigned,
     byte,
     double,

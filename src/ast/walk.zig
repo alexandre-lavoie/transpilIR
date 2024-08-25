@@ -81,7 +81,7 @@ pub fn ASTWalk(comptime Callback: type) type {
                     },
                     .data_definition => |*d| {
                         try stack.append(.{ .index = d.identifier });
-                        if (d.linkage) |linkage| try stack.append(.{ .index = linkage });
+                        try stack.append(.{ .index = d.linkage });
                         try stack.append(.{ .index = d.values });
                     },
                     .typed_data => |*d| {
@@ -123,7 +123,7 @@ pub fn ASTWalk(comptime Callback: type) type {
                     },
                     .call => |*d| {
                         try stack.append(.{ .index = d.target });
-                        if (d.return_type) |return_type| try stack.append(.{ .index = return_type });
+                        try stack.append(.{ .index = d.return_type });
                         if (d.parameters) |parameters| try stack.append(.{ .index = parameters });
                     },
                     .function => |*d| {
@@ -132,8 +132,8 @@ pub fn ASTWalk(comptime Callback: type) type {
                     },
                     .function_signature => |*d| {
                         try stack.append(.{ .index = d.name });
-                        if (d.linkage) |linkage| try stack.append(.{ .index = linkage });
-                        if (d.return_type) |return_type| try stack.append(.{ .index = return_type });
+                        try stack.append(.{ .index = d.linkage });
+                        try stack.append(.{ .index = d.return_type });
                         if (d.parameters) |parameters| try stack.append(.{ .index = parameters });
                     },
                     .type_parameter => |*d| {
@@ -280,16 +280,7 @@ fn assertEnter(buffer: anytype, expected: []const statement.StatementType) !void
     const statements = try testEnter(buffer);
     defer test_allocator.free(statements);
 
-    try test_lib.assertStatementTypes(expected, statements);
-}
-
-fn printStatements(file: []const u8) !void {
-    const statements = try testEnter(file);
-    defer test_allocator.free(statements);
-
-    for (statements) |s| {
-        std.log.err("{any}", .{@as(statement.StatementType, s.data)});
-    }
+    try test_lib.assertStatementTypes(test_allocator, expected, statements);
 }
 
 //
@@ -337,6 +328,7 @@ test "data" {
         .node,
         .data_definition,
         .identifier,
+        .linkage,
         .node,
         .typed_data,
         .primitive_type,
@@ -352,6 +344,7 @@ test "data" {
         .node,
         .data_definition,
         .identifier,
+        .linkage,
         .node,
         .typed_data,
         .zero_type,
@@ -371,6 +364,8 @@ test "function" {
         .function,
         .function_signature,
         .identifier,
+        .linkage,
+        .primitive_type,
         .node,
         .type_parameter,
         .identifier,

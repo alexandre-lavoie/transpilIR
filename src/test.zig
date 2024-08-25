@@ -27,13 +27,15 @@ pub fn testAST(allocator: std.mem.Allocator, buffer: anytype) !lib.ast.AST {
     return tree;
 }
 
-pub fn assertStatementTypes(types: []const lib.ast.StatementType, statements: []const lib.ast.Statement) !void {
-    try std.testing.expectEqual(types.len, statements.len);
+pub fn assertStatementTypes(allocator: std.mem.Allocator, types: []const lib.ast.StatementType, statements: []const lib.ast.Statement) !void {
+    const expected = types;
 
-    for (0..statements.len) |i| {
-        const expected = @as(lib.ast.StatementType, types[i]);
-        const actual = @as(lib.ast.StatementType, statements[i].data);
+    var actual = try std.ArrayList(lib.ast.StatementType).initCapacity(allocator, statements.len);
+    defer actual.deinit();
 
-        try std.testing.expectEqual(expected, actual);
+    for (statements) |statement| {
+        try actual.append(@as(lib.ast.StatementType, statement.data));
     }
+
+    try std.testing.expectEqualSlices(lib.ast.StatementType, expected, actual.items);
 }

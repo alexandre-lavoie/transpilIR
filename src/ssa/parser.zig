@@ -299,7 +299,7 @@ pub fn Parser(comptime Reader: type) type {
             );
         }
 
-        fn linkage(self: *Self) !?ast.StatementIndex {
+        fn linkage(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
             var t = self.previous;
@@ -331,8 +331,6 @@ pub fn Parser(comptime Reader: type) type {
             };
 
             const end = self.previous.span.start;
-
-            if (start == end) return undefined;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -521,7 +519,7 @@ pub fn Parser(comptime Reader: type) type {
             };
         }
 
-        fn dataDefinition(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
+        fn dataDefinition(self: *Self, start: usize, link: ast.StatementIndex) !ast.StatementIndex {
             if (self.previous.token_type != .data) return error.ParseInvalidData;
             _ = self.next();
 
@@ -642,7 +640,7 @@ pub fn Parser(comptime Reader: type) type {
             );
         }
 
-        fn functionDefinition(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
+        fn functionDefinition(self: *Self, start: usize, link: ast.StatementIndex) !ast.StatementIndex {
             const function_signature = try self.functionSignature(start, link);
             const function_body = try self.functionBody();
 
@@ -657,9 +655,12 @@ pub fn Parser(comptime Reader: type) type {
             );
         }
 
-        fn functionSignature(self: *Self, start: usize, link: ?ast.StatementIndex) !ast.StatementIndex {
-            const return_type: ?ast.StatementIndex = switch (self.next().token_type) {
-                .global_identifier => null,
+        fn functionSignature(self: *Self, start: usize, link: ast.StatementIndex) !ast.StatementIndex {
+            const return_type: ast.StatementIndex = switch (self.next().token_type) {
+                .global_identifier => try self.new(
+                    .{ .start = self.previous.span.start, .end = self.previous.span.end },
+                    .{ .primitive_type = .void },
+                ),
                 else => try self.variableType(),
             };
 
@@ -1472,6 +1473,17 @@ pub fn Parser(comptime Reader: type) type {
         fn call(self: *Self, data_type: ?ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
+            const return_type = scope: {
+                if (data_type) |dt| {
+                    break :scope dt;
+                } else break :scope try self.new(
+                    .{ .start = start, .end = start },
+                    .{
+                        .primitive_type = .void,
+                    },
+                );
+            };
+
             if (self.previous.token_type != .call) return error.ParseMissingCall;
             _ = self.next();
 
@@ -1486,7 +1498,7 @@ pub fn Parser(comptime Reader: type) type {
                 .{
                     .call = .{
                         .target = target,
-                        .return_type = data_type,
+                        .return_type = return_type,
                         .parameters = parameters,
                     },
                 },
@@ -1656,16 +1668,7 @@ fn assertParser(buffer: anytype, expected: []const ast.StatementType) !void {
     const statements = try testParser(buffer);
     defer test_allocator.free(statements);
 
-    try test_lib.assertStatementTypes(expected, statements);
-}
-
-fn printStatements(file: []const u8) !void {
-    const statements = try testParser(file);
-    defer test_allocator.free(statements);
-
-    for (statements) |statement| {
-        std.log.err("{any}", .{@as(ast.StatementType, statement.data)});
-    }
+    try test_lib.assertStatementTypes(test_allocator, expected, statements);
 }
 
 //
@@ -1874,6 +1877,7 @@ test "data" {
     // Arrange
     const file = "data $d = {w 1}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .primitive_type,
         .literal,
@@ -1892,6 +1896,7 @@ test "data with trailing comma" {
     // Arrange
     const file = "data $d = {w 1, }";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .primitive_type,
         .literal,
@@ -1910,6 +1915,7 @@ test "data with alignment" {
     // Arrange
     const file = "data $d = align 1 {w 1}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .literal,
         .primitive_type,
@@ -1929,6 +1935,7 @@ test "data with global" {
     // Arrange
     const file = "data $d = {l $o}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .primitive_type,
         .identifier,
@@ -1947,6 +1954,7 @@ test "data with global offset" {
     // Arrange
     const file = "data $d = {l $o + 32 0}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .primitive_type,
         .identifier,
@@ -1992,6 +2000,7 @@ test "data with reused type" {
     // Arrange
     const file = "data $d = {w 1 2 3}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .primitive_type,
         .literal,
@@ -2018,6 +2027,7 @@ test "data with many types" {
     // Arrange
     const file = "data $d = {w 1, h 0, b \"test\"}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .primitive_type,
         .literal,
@@ -2044,6 +2054,7 @@ test "data with zeros" {
     // Arrange
     const file = "data $d = {z 1000}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .zero_type,
         .literal,
@@ -2062,6 +2073,8 @@ test "function" {
     // Arrange
     const file = "function $fun() {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2084,6 +2097,7 @@ test "function with linkage" {
         .literal,
         .literal,
         .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2103,6 +2117,7 @@ test "function with primitive return type" {
     // Arrange
     const file = "function w $fun() {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .primitive_type,
         .identifier,
         .function_signature,
@@ -2123,6 +2138,7 @@ test "function with custom return type" {
     // Arrange
     const file = "function :type $fun() {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
         .identifier,
         .identifier,
         .function_signature,
@@ -2143,6 +2159,8 @@ test "function with custom type parameter" {
     // Arrange
     const file = "function $fun(:type %p) {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .identifier,
         .identifier,
@@ -2166,6 +2184,8 @@ test "function with one parameter" {
     // Arrange
     const file = "function $fun(w %p) {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .primitive_type,
         .identifier,
@@ -2189,6 +2209,8 @@ test "function with trailing comma" {
     // Arrange
     const file = "function $fun(w %p, ) {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .primitive_type,
         .identifier,
@@ -2212,6 +2234,8 @@ test "function with many parameters" {
     // Arrange
     const file = "function $fun(w %p0, b %p1, h %p2) {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .primitive_type,
         .identifier,
@@ -2243,6 +2267,8 @@ test "function with env parameter" {
     // Arrange
     const file = "function $fun(env %e) {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .env_type,
         .identifier,
@@ -2266,6 +2292,8 @@ test "function with variable parameter" {
     // Arrange
     const file = "function $fun(w %fmt, ...) {@s ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .primitive_type,
         .identifier,
@@ -2291,6 +2319,8 @@ test "function many flow" {
     // Arrange
     const file = "function $fun() {@a jmp @b @b jnz %p, @c, @d @c hlt @d ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2326,6 +2356,8 @@ test "function fall-through block" {
     // Arrange
     const file = "function $fun() {@s @n ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2350,6 +2382,8 @@ test "allocate" {
     // Arrange
     const file = "function $fun() {@s %x =w alloc4 32 %y =:type alloc16 64 ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2383,6 +2417,8 @@ test "copy" {
     // Arrange
     const file = "function $fun() {@s %x =w copy 0 %y =w extsw %l %z =s ultof $g ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2424,6 +2460,8 @@ test "vastart" {
     // Arrange
     const file = "function $fun() {@s vastart %ap ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2446,6 +2484,8 @@ test "vaarg" {
     // Arrange
     const file = "function $fun() {@s %l =w vaarg %ap ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2471,6 +2511,8 @@ test "negate" {
     // Arrange
     const file = "function $fun() {@s %l =w neg %v ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2496,6 +2538,8 @@ test "blit" {
     // Arrange
     const file = "function $fun() {@s blit %a, $g, 16 ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2520,6 +2564,8 @@ test "binaryOperation" {
     // Arrange
     const file = "function $fun() {@s %t =w add %l, 0 %u =s div 0, $g ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2553,6 +2599,8 @@ test "comparison" {
     // Arrange
     const file = "function $fun() {@s %t =w ceqw $g, 1 %u =s ceqs 0, %f ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2588,6 +2636,8 @@ test "store" {
     // Arrange
     const file = "function $fun() {@s storew %l, 1 storeh 0, $g ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2617,6 +2667,8 @@ test "load" {
     // Arrange
     const file = "function $fun() {@s %l1 =w loadw %x %l2 =w loadsb $g %l3 =d loadd 0 ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2657,6 +2709,8 @@ test "phi" {
     // Arrange
     const file = "function $fun() {@s %x =w phi @a 1, @b %l, @c $g ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2693,9 +2747,12 @@ test "call" {
     // Arrange
     const file = "function $fun() {@s call $f() ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
+        .primitive_type,
         .identifier,
         .call,
         .node,
@@ -2715,6 +2772,8 @@ test "call assign" {
     // Arrange
     const file = "function $fun() {@s %x =w call $f() ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
@@ -2740,9 +2799,12 @@ test "call parameters" {
     // Arrange
     const file = "function $fun() {@s call $f(w %a, :type %b) ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
+        .primitive_type,
         .identifier,
         .primitive_type,
         .identifier,
@@ -2770,9 +2832,12 @@ test "call varargs" {
     // Arrange
     const file = "function $fun() {@s call $f(w %a, ..., w %b) ret}";
     const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
         .identifier,
         .function_signature,
         .identifier,
+        .primitive_type,
         .identifier,
         .primitive_type,
         .identifier,
