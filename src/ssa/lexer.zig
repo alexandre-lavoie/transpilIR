@@ -68,7 +68,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                     },
                 };
 
-                const end = self.offset;
+                const end = self.offset - 1;
 
                 next_token.span.start = start;
                 next_token.span.end = end;
@@ -264,19 +264,11 @@ fn testLex(buffer: anytype) ![]token.Token {
     return try tokens.toOwnedSlice();
 }
 
-fn assertLex(buffer: anytype, expected: []const token.TokenType) !void {
+fn assertLex(buffer: anytype, expected: []const token.Token) !void {
     const tokens = try testLex(buffer);
     defer test_allocator.free(tokens);
 
-    try assertTokenTypes(expected, tokens);
-}
-
-fn assertTokenTypes(types: []const token.TokenType, tokens: []const token.Token) !void {
-    try std.testing.expectEqual(types.len, tokens.len);
-
-    for (0..tokens.len) |i| {
-        try std.testing.expectEqual(types[i], tokens[i].token_type);
-    }
+    try std.testing.expectEqualSlices(token.Token, expected, tokens);
 }
 
 //
@@ -286,7 +278,16 @@ fn assertTokenTypes(types: []const token.TokenType, tokens: []const token.Token)
 test "comment" {
     // Arrange
     const file = "\n# Comment\n # Comment!\r\n\t#Comment";
-    const expected = [_]token.TokenType{ .module_start, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -295,7 +296,20 @@ test "comment" {
 test "globalIdentifier" {
     // Arrange
     const file = "$global# Comment";
-    const expected = [_]token.TokenType{ .module_start, .global_identifier, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .global_identifier,
+            .span = .{ .start = 0, .end = 7 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -304,16 +318,42 @@ test "globalIdentifier" {
 test "localIdentifier" {
     // Arrange
     const file = "%local# Comment";
-    const expected = [_]token.TokenType{ .module_start, .local_identifier, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .local_identifier,
+            .span = .{ .start = 0, .end = 6 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
 }
 
-test "label" {
+test "label_identifier" {
     // Arrange
     const file = "@label# Comment";
-    const expected = [_]token.TokenType{ .module_start, .label_identifier, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .label_identifier,
+            .span = .{ .start = 0, .end = 6 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -322,7 +362,36 @@ test "label" {
 test "reserved" {
     // Arrange
     const file = "alloc4 data function s";
-    const expected = [_]token.TokenType{ .module_start, .allocate, .integer_literal, .data, .function, .single, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .allocate,
+            .span = .{ .start = 0, .end = 5 },
+        },
+        .{
+            .token_type = .integer_literal,
+            .span = .{ .start = 5, .end = 6 },
+        },
+        .{
+            .token_type = .data,
+            .span = .{ .start = 7, .end = 11 },
+        },
+        .{
+            .token_type = .function,
+            .span = .{ .start = 12, .end = 20 },
+        },
+        .{
+            .token_type = .single,
+            .span = .{ .start = 21, .end = 22 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -331,7 +400,28 @@ test "reserved" {
 test "stringLiteral" {
     // Arrange
     const file = "\"string\" \"escape\\\"\" \"escape\\\"again\"";
-    const expected = [_]token.TokenType{ .module_start, .string_literal, .string_literal, .string_literal, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .string_literal,
+            .span = .{ .start = 0, .end = 8 },
+        },
+        .{
+            .token_type = .string_literal,
+            .span = .{ .start = 9, .end = 19 },
+        },
+        .{
+            .token_type = .string_literal,
+            .span = .{ .start = 20, .end = 35 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -340,7 +430,24 @@ test "stringLiteral" {
 test "singleLiteral" {
     // Arrange
     const file = "s_123 s_-1.2";
-    const expected = [_]token.TokenType{ .module_start, .single_literal, .single_literal, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .single_literal,
+            .span = .{ .start = 0, .end = 5 },
+        },
+        .{
+            .token_type = .single_literal,
+            .span = .{ .start = 6, .end = 12 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -349,7 +456,20 @@ test "singleLiteral" {
 test "doubleLiteral" {
     // Arrange
     const file = "d_-2.4";
-    const expected = [_]token.TokenType{ .module_start, .double_literal, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .double_literal,
+            .span = .{ .start = 0, .end = 6 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -358,7 +478,28 @@ test "doubleLiteral" {
 test "integerLiteral" {
     // Arrange
     const file = "-1 0 123";
-    const expected = [_]token.TokenType{ .module_start, .integer_literal, .integer_literal, .integer_literal, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .integer_literal,
+            .span = .{ .start = 0, .end = 2 },
+        },
+        .{
+            .token_type = .integer_literal,
+            .span = .{ .start = 3, .end = 4 },
+        },
+        .{
+            .token_type = .integer_literal,
+            .span = .{ .start = 5, .end = 8 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -367,7 +508,36 @@ test "integerLiteral" {
 test "assign" {
     // Arrange
     const file = "=w =s =";
-    const expected = [_]token.TokenType{ .module_start, .assign, .word, .assign, .single, .assign, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .assign,
+            .span = .{ .start = 0, .end = 1 },
+        },
+        .{
+            .token_type = .word,
+            .span = .{ .start = 1, .end = 2 },
+        },
+        .{
+            .token_type = .assign,
+            .span = .{ .start = 3, .end = 4 },
+        },
+        .{
+            .token_type = .single,
+            .span = .{ .start = 4, .end = 5 },
+        },
+        .{
+            .token_type = .assign,
+            .span = .{ .start = 6, .end = 7 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
@@ -376,7 +546,20 @@ test "assign" {
 test "variableArguments" {
     // Arrange
     const file = "...";
-    const expected = [_]token.TokenType{ .module_start, .variable_arguments, .module_end };
+    const expected = [_]token.Token{
+        .{
+            .token_type = .module_start,
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .{
+            .token_type = .variable_arguments,
+            .span = .{ .start = 0, .end = 3 },
+        },
+        .{
+            .token_type = .module_end,
+            .span = .{ .start = file.len, .end = file.len },
+        },
+    };
 
     // Act + Assert
     try assertLex(file, &expected);
