@@ -3,6 +3,11 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const statement = @import("statement.zig");
 
+const ASTWalkEntry = struct {
+    index: statement.StatementIndex,
+    enter: bool = true,
+};
+
 pub fn ASTWalk(comptime Callback: type) type {
     return struct {
         tree: *ast.AST,
@@ -31,166 +36,193 @@ pub fn ASTWalk(comptime Callback: type) type {
             };
         }
 
-        pub fn walk(self: *Self, optional_index: ?statement.StatementIndex) !void {
-            const index = optional_index orelse return;
+        pub fn walk(self: *Self, allocator: std.mem.Allocator, start_index: statement.StatementIndex) !void {
+            var queue = std.ArrayList(ASTWalkEntry).init(allocator);
+            defer queue.deinit();
 
-            const s = self.tree.getPtr(index) orelse return error.NotFound;
+            var stack = std.ArrayList(ASTWalkEntry).init(allocator);
+            defer stack.deinit();
 
-            try self.callback_enter(s);
+            try queue.append(.{ .index = start_index });
 
-            switch (s.data) {
-                .identifier => {},
-                .literal => {},
-                .linkage => |*d| {
-                    try self.walk(d.section);
-                    try self.walk(d.flags);
-                },
-                .node => |*d| {
-                    try self.walk(d.value);
-                    try self.walk(d.next);
-                },
-                .module => |*d| {
-                    try self.walk(d.types);
-                    try self.walk(d.data);
-                    try self.walk(d.functions);
-                },
-                .data_definition => |*d| {
-                    try self.walk(d.identifier);
-                    try self.walk(d.linkage);
-                    try self.walk(d.values);
-                },
-                .typed_data => |*d| {
-                    try self.walk(d.type);
-                    try self.walk(d.value);
-                },
-                .offset => |*d| {
-                    try self.walk(d.identifier);
-                    try self.walk(d.value);
-                },
-                .array_type => |*d| {
-                    try self.walk(d.item);
-                    try self.walk(d.count);
-                },
-                .env_type => {},
-                .opaque_type => |*d| {
-                    try self.walk(d.alignment);
-                    try self.walk(d.size);
-                },
-                .primitive_type => {},
-                .struct_type => |*d| {
-                    try self.walk(d.alignment);
-                    try self.walk(d.members);
-                },
-                .type_definition => |*d| {
-                    try self.walk(d.identifier);
-                    try self.walk(d.type);
-                },
-                .union_type => |*d| {
-                    try self.walk(d.alignment);
-                    try self.walk(d.types);
-                },
-                .zero_type => {},
-                .block => |*d| {
-                    try self.walk(d.label);
-                    try self.walk(d.phi_statements);
-                    try self.walk(d.statements);
-                    try self.walk(d.flow_statement);
-                },
-                .call => |*d| {
-                    try self.walk(d.target);
-                    try self.walk(d.return_type);
-                    try self.walk(d.parameters);
-                },
-                .function => |*d| {
-                    try self.walk(d.signature);
-                    try self.walk(d.body);
-                },
-                .function_signature => |*d| {
-                    try self.walk(d.name);
-                    try self.walk(d.linkage);
-                    try self.walk(d.return_type);
-                    try self.walk(d.parameters);
-                },
-                .type_parameter => |*d| {
-                    try self.walk(d.value);
-                    try self.walk(d.type_statement);
-                },
-                .variadic_parameter => {},
-                .vaarg => |*d| {
-                    try self.walk(d.data_type);
-                    try self.walk(d.parameter);
-                },
-                .vastart => |*d| {
-                    try self.walk(d.parameter);
-                },
-                .allocate => |*d| {
-                    try self.walk(d.data_type);
-                    try self.walk(d.alignment);
-                    try self.walk(d.size);
-                },
-                .assignment => |*d| {
-                    try self.walk(d.identifier);
-                    try self.walk(d.statement);
-                },
-                .blit => |*d| {
-                    try self.walk(d.source);
-                    try self.walk(d.target);
-                    try self.walk(d.size);
-                },
-                .copy => |*d| {
-                    try self.walk(d.data_type);
-                    try self.walk(d.to_type);
-                    try self.walk(d.from_type);
-                    try self.walk(d.value);
-                },
-                .load => |*d| {
-                    try self.walk(d.data_type);
-                    try self.walk(d.memory_type);
-                    try self.walk(d.source);
-                },
-                .store => |*d| {
-                    try self.walk(d.memory_type);
-                    try self.walk(d.source);
-                    try self.walk(d.target);
-                },
-                .branch => |*d| {
-                    try self.walk(d.condition);
-                    try self.walk(d.true);
-                    try self.walk(d.false);
-                },
-                .halt => {},
-                .jump => |*d| {
-                    try self.walk(d.identifier);
-                },
-                .phi => |*d| {
-                    try self.walk(d.data_type);
-                    try self.walk(d.parameters);
-                },
-                .phi_parameter => |*d| {
-                    try self.walk(d.identifier);
-                    try self.walk(d.value);
-                },
-                .@"return" => |*d| {
-                    try self.walk(d.value);
-                },
-                .binary_operation => |*d| {
-                    try self.walk(d.data_type);
-                    try self.walk(d.left);
-                    try self.walk(d.right);
-                },
-                .comparison => |*d| {
-                    try self.walk(d.data_type);
-                    try self.walk(d.comparison_type);
-                    try self.walk(d.left);
-                    try self.walk(d.right);
-                },
-                .negate => |*d| {
-                    try self.walk(d.data_type);
-                    try self.walk(d.value);
-                },
+            while (true) {
+                const entry = queue.popOrNull() orelse break;
+
+                const stat = self.tree.getPtr(entry.index) orelse return error.NotFound;
+
+                if (!entry.enter) {
+                    try self.callback_exit(stat);
+
+                    continue;
+                }
+
+                try self.callback_enter(stat);
+
+                var exit_after = true;
+                switch (stat.data) {
+                    .identifier => {},
+                    .literal => {},
+                    .linkage => |*d| {
+                        if (d.section) |section| try stack.append(.{ .index = section });
+                        if (d.flags) |flags| try stack.append(.{ .index = flags });
+                    },
+                    .node => |*d| {
+                        try stack.append(.{ .index = d.value });
+
+                        exit_after = false;
+                        try stack.append(.{ .index = entry.index, .enter = false });
+
+                        if (d.next) |next| try stack.append(.{ .index = next });
+                    },
+                    .module => |*d| {
+                        if (d.types) |types| try stack.append(.{ .index = types });
+                        if (d.data) |data| try stack.append(.{ .index = data });
+                        if (d.functions) |functions| try stack.append(.{ .index = functions });
+                    },
+                    .data_definition => |*d| {
+                        try stack.append(.{ .index = d.identifier });
+                        if (d.linkage) |linkage| try stack.append(.{ .index = linkage });
+                        try stack.append(.{ .index = d.values });
+                    },
+                    .typed_data => |*d| {
+                        try stack.append(.{ .index = d.type });
+                        try stack.append(.{ .index = d.value });
+                    },
+                    .offset => |*d| {
+                        try stack.append(.{ .index = d.identifier });
+                        try stack.append(.{ .index = d.value });
+                    },
+                    .array_type => |*d| {
+                        try stack.append(.{ .index = d.item });
+                        try stack.append(.{ .index = d.count });
+                    },
+                    .env_type => {},
+                    .opaque_type => |*d| {
+                        if (d.alignment) |alignment| try stack.append(.{ .index = alignment });
+                        try stack.append(.{ .index = d.size });
+                    },
+                    .primitive_type => {},
+                    .struct_type => |*d| {
+                        if (d.alignment) |alignment| try stack.append(.{ .index = alignment });
+                        try stack.append(.{ .index = d.members });
+                    },
+                    .type_definition => |*d| {
+                        try stack.append(.{ .index = d.identifier });
+                        try stack.append(.{ .index = d.type });
+                    },
+                    .union_type => |*d| {
+                        if (d.alignment) |alignment| try stack.append(.{ .index = alignment });
+                        try stack.append(.{ .index = d.types });
+                    },
+                    .zero_type => {},
+                    .block => |*d| {
+                        try stack.append(.{ .index = d.label });
+                        if (d.phi_statements) |phi_statements| try stack.append(.{ .index = phi_statements });
+                        if (d.statements) |statements| try stack.append(.{ .index = statements });
+                        try stack.append(.{ .index = d.flow_statement });
+                    },
+                    .call => |*d| {
+                        try stack.append(.{ .index = d.target });
+                        if (d.return_type) |return_type| try stack.append(.{ .index = return_type });
+                        if (d.parameters) |parameters| try stack.append(.{ .index = parameters });
+                    },
+                    .function => |*d| {
+                        try stack.append(.{ .index = d.signature });
+                        try stack.append(.{ .index = d.body });
+                    },
+                    .function_signature => |*d| {
+                        try stack.append(.{ .index = d.name });
+                        if (d.linkage) |linkage| try stack.append(.{ .index = linkage });
+                        if (d.return_type) |return_type| try stack.append(.{ .index = return_type });
+                        if (d.parameters) |parameters| try stack.append(.{ .index = parameters });
+                    },
+                    .type_parameter => |*d| {
+                        try stack.append(.{ .index = d.value });
+                        try stack.append(.{ .index = d.type_statement });
+                    },
+                    .variadic_parameter => {},
+                    .vaarg => |*d| {
+                        try stack.append(.{ .index = d.data_type });
+                        try stack.append(.{ .index = d.parameter });
+                    },
+                    .vastart => |*d| {
+                        try stack.append(.{ .index = d.parameter });
+                    },
+                    .allocate => |*d| {
+                        try stack.append(.{ .index = d.data_type });
+                        try stack.append(.{ .index = d.alignment });
+                        try stack.append(.{ .index = d.size });
+                    },
+                    .assignment => |*d| {
+                        try stack.append(.{ .index = d.identifier });
+                        try stack.append(.{ .index = d.statement });
+                    },
+                    .blit => |*d| {
+                        try stack.append(.{ .index = d.source });
+                        try stack.append(.{ .index = d.target });
+                        try stack.append(.{ .index = d.size });
+                    },
+                    .copy => |*d| {
+                        try stack.append(.{ .index = d.data_type });
+                        try stack.append(.{ .index = d.to_type });
+                        if (d.from_type) |from_type| try stack.append(.{ .index = from_type });
+                        try stack.append(.{ .index = d.value });
+                    },
+                    .load => |*d| {
+                        try stack.append(.{ .index = d.data_type });
+                        try stack.append(.{ .index = d.memory_type });
+                        try stack.append(.{ .index = d.source });
+                    },
+                    .store => |*d| {
+                        try stack.append(.{ .index = d.memory_type });
+                        try stack.append(.{ .index = d.source });
+                        try stack.append(.{ .index = d.target });
+                    },
+                    .branch => |*d| {
+                        try stack.append(.{ .index = d.condition });
+                        try stack.append(.{ .index = d.true });
+                        try stack.append(.{ .index = d.false });
+                    },
+                    .halt => {},
+                    .jump => |*d| {
+                        try stack.append(.{ .index = d.identifier });
+                    },
+                    .phi => |*d| {
+                        try stack.append(.{ .index = d.data_type });
+                        try stack.append(.{ .index = d.parameters });
+                    },
+                    .phi_parameter => |*d| {
+                        try stack.append(.{ .index = d.identifier });
+                        try stack.append(.{ .index = d.value });
+                    },
+                    .@"return" => |*d| {
+                        if (d.value) |value| try stack.append(.{ .index = value });
+                    },
+                    .binary_operation => |*d| {
+                        try stack.append(.{ .index = d.data_type });
+                        try stack.append(.{ .index = d.left });
+                        try stack.append(.{ .index = d.right });
+                    },
+                    .comparison => |*d| {
+                        try stack.append(.{ .index = d.data_type });
+                        try stack.append(.{ .index = d.comparison_type });
+                        try stack.append(.{ .index = d.left });
+                        try stack.append(.{ .index = d.right });
+                    },
+                    .negate => |*d| {
+                        try stack.append(.{ .index = d.data_type });
+                        try stack.append(.{ .index = d.value });
+                    },
+                }
+
+                if (exit_after) {
+                    try stack.append(.{ .index = entry.index, .enter = false });
+                }
+
+                while (true) {
+                    try queue.append(stack.popOrNull() orelse break);
+                }
             }
-
-            try self.callback_exit(s);
         }
     };
 }
@@ -239,7 +271,7 @@ fn testEnter(buffer: anytype) ![]statement.Statement {
     defer callback.deinit();
 
     var walk = ASTWalk(@TypeOf(callback)).init(&tree, &callback);
-    try walk.walk(tree.entrypoint() orelse return error.NotFound);
+    try walk.walk(test_allocator, tree.entrypoint() orelse return error.NotFound);
 
     return try callback.enter_types.toOwnedSlice();
 }

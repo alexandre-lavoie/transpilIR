@@ -54,7 +54,7 @@ pub fn main() !void {
 
         var callback = LogASTWalkCallback.init();
         var walk = lib.ast.ASTWalk(@TypeOf(callback)).init(&ast, &callback);
-        try walk.walk(ast.entrypoint() orelse return error.NotFound);
+        try walk.walk(allocator, ast.entrypoint() orelse return error.NotFound);
     }
 }
 
@@ -68,11 +68,6 @@ const LogASTWalkCallback = struct {
     }
 
     pub fn enter(self: *Self, statement: *lib.ast.Statement) !void {
-        switch (statement.data) {
-            .node => return,
-            else => {},
-        }
-
         var temp_buffer: [128]u8 = undefined;
         var depth_buffer = temp_buffer[0 .. self.depth * 2];
         @memset(depth_buffer[0..], ' ');
@@ -83,10 +78,7 @@ const LogASTWalkCallback = struct {
     }
 
     pub fn exit(self: *Self, statement: *lib.ast.Statement) !void {
-        switch (statement.data) {
-            .node => return,
-            else => {},
-        }
+        _ = statement;
 
         self.depth -= 1;
     }
