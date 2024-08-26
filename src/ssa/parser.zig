@@ -297,7 +297,7 @@ pub fn Parser(comptime Reader: type) type {
             return try self.new(
                 .{ .start = span.start + 1, .end = span.end - 1 },
                 .{ .literal = .{
-                    .type = .float,
+                    .type = .string,
                 } },
             );
         }

@@ -17,6 +17,38 @@ pub const SymbolSourceWalkCallback = struct {
         };
     }
 
+    pub fn escapeString(input: []const u8, output: []u8) ![]const u8 {
+        var i: usize = 0;
+        var o: usize = 0;
+        while (i < input.len) {
+            output[o] = switch (input[i]) {
+                '\\' => scope: {
+                    i += 1;
+
+                    break :scope switch (input[i]) {
+                        '0' => '\x00',
+                        't' => '\t',
+                        'n' => '\n',
+                        'r' => '\r',
+                        'x' => hex: {
+                            const vi = i + 1;
+                            i += 2;
+
+                            break :hex try std.fmt.parseInt(u8, input[vi .. vi + 2], 16);
+                        },
+                        else => input[i],
+                    };
+                },
+                else => input[i],
+            };
+
+            i += 1;
+            o += 1;
+        }
+
+        return output[0..o];
+    }
+
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
         const allocator = self.symbol_table.symbols.allocator;
 
@@ -45,10 +77,39 @@ pub const SymbolSourceWalkCallback = struct {
                 if (self.create_symbol) {
                     self.create_symbol = false;
 
-                    _ = try self.symbol_table.addSymbol(&symbol_identifier, statement.span.start);
+                    _ = try self.symbol_table.addSymbol(&symbol_identifier);
                 }
 
-                _ = try self.symbol_table.addSymbolInstance(&symbol_identifier, &statement.span);
+                const instance: table.Instance = .{
+                    .span = statement.span,
+                };
+
+                _ = try self.symbol_table.addSymbolInstance(&symbol_identifier, &instance);
+            },
+            .literal => |literal| {
+                _ = try self.stream.seekTo(statement.span.start);
+
+                const buffer = try allocator.alloc(u8, statement.span.end - statement.span.start);
+                defer allocator.free(buffer);
+
+                const output = try allocator.alloc(u8, buffer.len);
+                defer allocator.free(output);
+
+                _ = try self.stream.read(buffer);
+
+                const value: table.LiteralValue = switch (literal.type) {
+                    .integer => .{ .integer = try std.fmt.parseInt(isize, buffer, 10) },
+                    .float => .{ .float = try std.fmt.parseFloat(f64, buffer) },
+                    .string => .{ .string = try Self.escapeString(buffer, output) },
+                };
+
+                const index = try self.symbol_table.addLiteral(&value);
+
+                const instance: table.Instance = .{
+                    .span = statement.span,
+                };
+
+                _ = try self.symbol_table.addLiteralInstance(index, &instance);
             },
             else => {},
         }
@@ -62,26 +123,21 @@ pub const SymbolSourceWalkCallback = struct {
 const test_allocator = std.testing.allocator;
 const test_lib = @import("../test.zig");
 
-fn testSource(file: []const u8) !table.SymbolTable {
+fn testSource(file: []const u8, symbol_table: *table.SymbolTable) !void {
     var file_stream: std.io.StreamSource = .{
         .const_buffer = std.io.fixedBufferStream(file),
     };
-
-    var symbol_table = table.SymbolTable.init(test_allocator);
-    errdefer symbol_table.deinit();
 
     var tree = try test_lib.testAST(test_allocator, file);
     defer tree.deinit();
 
     var callback = SymbolSourceWalkCallback.init(
-        &symbol_table,
+        symbol_table,
         &file_stream,
     );
 
     var walk = ast.ASTWalk(@TypeOf(callback)).init(&tree, &callback);
     try walk.walk(test_allocator, tree.entrypoint() orelse return error.NotFound);
-
-    return symbol_table;
 }
 
 //
@@ -97,20 +153,20 @@ test "SymbolSourceWalk type" {
                 .name = "t",
                 .scope = .type,
             },
-            .position = 6,
         },
         .{
             .identifier = .{
                 .name = "t2",
                 .scope = .type,
             },
-            .position = 22,
         },
     };
 
-    // Act
-    var symbol_table = try testSource(file);
+    var symbol_table = table.SymbolTable.init(test_allocator);
     defer symbol_table.deinit();
+
+    // Act
+    try testSource(file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -125,23 +181,68 @@ test "SymbolSourceWalk function" {
                 .name = "test",
                 .scope = .global,
             },
-            .position = 10,
         },
         .{
             .identifier = .{
                 .name = "s",
                 .scope = .label,
             },
-            .position = 19,
         },
     };
 
-    // Act
-    var symbol_table = try testSource(file);
+    var symbol_table = table.SymbolTable.init(test_allocator);
     defer symbol_table.deinit();
+
+    // Act
+    try testSource(file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "SymbolSourceWalk data" {
+    // Arrange
+    const file = "data $d = { b \"A \\\"B\\\" \\x43 \\n\", w -1, s s_1, d d_-1.0 }";
+    const expected_symbols = [_]table.Symbol{
+        .{
+            .identifier = .{
+                .name = "d",
+                .scope = .global,
+            },
+        },
+    };
+    const expected_literals = [_]table.Literal{
+        .{
+            .value = .{
+                .string = "A \"B\" C \n",
+            },
+        },
+        .{
+            .value = .{
+                .integer = -1,
+            },
+        },
+        .{
+            .value = .{
+                .float = 1,
+            },
+        },
+        .{
+            .value = .{
+                .float = -1,
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try testSource(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected_symbols, symbol_table.symbols.items);
+    try std.testing.expectEqualDeep(&expected_literals, symbol_table.literals.items);
 }
 
 //
@@ -152,8 +253,11 @@ test "SymbolSourceWalk error.SymbolNotFound" {
     // Arrange
     const file = "type :t = { :dne }";
 
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
     // Act
-    const res = testSource(file);
+    const res = testSource(file, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
