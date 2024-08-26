@@ -15,6 +15,7 @@ pub fn Parser(comptime Reader: type) type {
         reader: *Reader,
         ast: *ast.AST,
         previous: *const token.Token = undefined,
+        previous_previous: *const token.Token = undefined,
 
         const Self = @This();
 
@@ -42,7 +43,9 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn next(self: *Self) *const token.Token {
+            self.previous_previous = self.previous;
             self.previous = self.reader_readToken();
+
             return self.previous;
         }
 
@@ -99,7 +102,7 @@ pub fn Parser(comptime Reader: type) type {
                     .type => self.typeDefinition(),
                     else => return error.ParseModuleInvalidToken,
                 };
-                const def_end = self.previous.span.start;
+                const def_end = self.previous_previous.span.end;
 
                 const head = switch (token_type) {
                     .function => &function_head,
@@ -330,10 +333,16 @@ pub fn Parser(comptime Reader: type) type {
                 false => null,
             };
 
-            const end = self.previous.span.start;
+            const span: common.SourceSpan = scope: {
+                if (self.previous.span.start == start) {
+                    break :scope .{ .start = start, .end = start };
+                } else {
+                    break :scope .{ .start = start, .end = t.span.end };
+                }
+            };
 
             return try self.new(
-                .{ .start = start, .end = end },
+                span,
                 .{ .linkage = .{
                     .@"export" = @"export",
                     .thread = thread,
@@ -356,7 +365,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const body = try self.typeDefinitionBody();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -398,7 +407,7 @@ pub fn Parser(comptime Reader: type) type {
 
                 const out = try self.structType(out_start, alignment);
 
-                const out_end = self.previous.span.end;
+                const out_end = self.previous_previous.span.end;
 
                 _ = try self.node(
                     &type_head,
@@ -416,7 +425,7 @@ pub fn Parser(comptime Reader: type) type {
 
             _ = self.next();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -433,7 +442,7 @@ pub fn Parser(comptime Reader: type) type {
             if (self.previous.token_type != .close_curly_brace) return error.ParseMissingCloseCurlyBrace;
             _ = self.next();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -458,7 +467,7 @@ pub fn Parser(comptime Reader: type) type {
                     else => variable_type,
                 };
 
-                const member_end = self.previous.span.end;
+                const member_end = self.previous_previous.span.end;
 
                 _ = try self.node(
                     &member_head,
@@ -476,7 +485,7 @@ pub fn Parser(comptime Reader: type) type {
 
             _ = self.next();
 
-            const end = self.previous.span.end;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -490,7 +499,7 @@ pub fn Parser(comptime Reader: type) type {
         fn arrayType(self: *Self, start: usize, item: ast.StatementIndex) !ast.StatementIndex {
             const count = try self.integer();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -564,7 +573,7 @@ pub fn Parser(comptime Reader: type) type {
 
                     const data_start = self.previous.span.start;
                     const data_value = try self.dataValue();
-                    const data_end = self.previous.span.start;
+                    const data_end = self.previous_previous.span.end;
 
                     const data_span = .{ .start = data_start, .end = data_end };
 
@@ -595,7 +604,7 @@ pub fn Parser(comptime Reader: type) type {
 
             _ = self.next();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -629,7 +638,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const offset = try self.integer();
 
-            const end = self.previous.span.end;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -644,7 +653,7 @@ pub fn Parser(comptime Reader: type) type {
             const function_signature = try self.functionSignature(start, link);
             const function_body = try self.functionBody();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -658,7 +667,7 @@ pub fn Parser(comptime Reader: type) type {
         fn functionSignature(self: *Self, start: usize, link: ast.StatementIndex) !ast.StatementIndex {
             const return_type: ast.StatementIndex = switch (self.next().token_type) {
                 .global_identifier => try self.new(
-                    .{ .start = self.previous.span.start, .end = self.previous.span.end },
+                    .{ .start = self.previous.span.start, .end = self.previous.span.start },
                     .{ .primitive_type = .void },
                 ),
                 else => try self.variableType(),
@@ -668,7 +677,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const parameters = try self.functionParameters();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -706,7 +715,7 @@ pub fn Parser(comptime Reader: type) type {
                     else => self.typeParameter(),
                 };
 
-                const param_end = self.previous.span.start;
+                const param_end = self.previous_previous.span.end;
 
                 _ = try self.node(
                     &parameter_head,
@@ -739,7 +748,7 @@ pub fn Parser(comptime Reader: type) type {
             const type_statement = try self.envType();
             const value = try self.blockValue();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -756,7 +765,7 @@ pub fn Parser(comptime Reader: type) type {
             if (self.previous.token_type != .variable_arguments) return error.ParseMissingVarArg;
             _ = self.next();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -770,7 +779,7 @@ pub fn Parser(comptime Reader: type) type {
             const type_statement = try self.variableType();
             const value = try self.localIdentifier();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -787,7 +796,7 @@ pub fn Parser(comptime Reader: type) type {
             const type_statement = try self.variableType();
             const value = try self.blockValue();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -812,7 +821,7 @@ pub fn Parser(comptime Reader: type) type {
                     .close_curly_brace => break,
                     else => try self.block(),
                 };
-                const block_end = self.previous.span.start;
+                const block_end = self.previous_previous.span.end;
 
                 _ = try self.node(
                     &block_head,
@@ -850,7 +859,7 @@ pub fn Parser(comptime Reader: type) type {
 
                     if (is_flow) break :scope next_statement;
 
-                    const statement_end = self.previous.span.start;
+                    const statement_end = self.previous_previous.span.end;
 
                     const head = switch (is_phi) {
                         true => &phi_statement_head,
@@ -871,7 +880,7 @@ pub fn Parser(comptime Reader: type) type {
                 }
             };
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -942,7 +951,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const statement = try self.assignmentBody(data_type);
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -1058,7 +1067,7 @@ pub fn Parser(comptime Reader: type) type {
             const alignment = try self.integer();
             const size = try self.integer();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1078,7 +1087,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const parameter = try self.blockValue();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1094,7 +1103,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const parameter = try self.blockValue();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1113,7 +1122,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const value = try self.blockValue();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1142,7 +1151,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const size = try self.blockValue();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1221,7 +1230,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const value = try self.blockValue();
 
-            const end = self.previous.span.end;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1263,7 +1272,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const target = try self.blockValue();
 
-            const end = self.previous.span.end;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1302,7 +1311,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const source = try self.blockValue();
 
-            const end = self.previous.span.end;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -1342,7 +1351,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const right = try self.blockValue();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -1394,7 +1403,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const right = try self.blockValue();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1426,7 +1435,7 @@ pub fn Parser(comptime Reader: type) type {
 
                 const parameter_start = self.previous.span.start;
                 const parameter = try self.phiParameter();
-                const parameter_end = self.previous.span.start;
+                const parameter_end = self.previous_previous.span.end;
 
                 _ = try self.node(
                     &parameter_head,
@@ -1438,7 +1447,7 @@ pub fn Parser(comptime Reader: type) type {
                 first = false;
             }
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1457,7 +1466,7 @@ pub fn Parser(comptime Reader: type) type {
             const identifier = try self.labelIdentifier();
             const value = try self.blockValue();
 
-            const end = self.previous.span.end;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1491,7 +1500,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const parameters = try self.callParameters();
 
-            const end = self.previous.span.end;
+            const end = self.previous_previous.span.end;
 
             return self.new(
                 .{ .start = start, .end = end },
@@ -1532,7 +1541,7 @@ pub fn Parser(comptime Reader: type) type {
                     else => self.callParameter(),
                 };
 
-                const param_end = self.previous.span.start;
+                const param_end = self.previous_previous.span.end;
 
                 _ = try self.node(
                     &parameter_head,
@@ -1575,7 +1584,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const false_label = try self.labelIdentifier();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -1602,7 +1611,7 @@ pub fn Parser(comptime Reader: type) type {
         fn fallThroughJump(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
             const label = try self.scopeIdentifier(.label_identifier, .label, false, true);
-            const end = self.previous.span.end;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -1620,7 +1629,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const label = try self.labelIdentifier();
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -1638,7 +1647,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const value: ?ast.StatementIndex = self.blockValue() catch undefined;
 
-            const end = self.previous.span.start;
+            const end = self.previous_previous.span.end;
 
             return try self.new(
                 .{ .start = start, .end = end },
@@ -1664,7 +1673,14 @@ fn testParser(buffer: anytype) ![]ast.Statement {
     return try tree.toSlice(test_allocator);
 }
 
-fn assertParser(buffer: anytype, expected: []const ast.StatementType) !void {
+fn assertParser(buffer: anytype, expected: []const ast.Statement) !void {
+    const statements = try testParser(buffer);
+    defer test_allocator.free(statements);
+
+    try std.testing.expectEqualDeep(expected, statements);
+}
+
+fn assertParserType(buffer: anytype, expected: []const ast.StatementType) !void {
     const statements = try testParser(buffer);
     defer test_allocator.free(statements);
 
@@ -1678,8 +1694,17 @@ fn assertParser(buffer: anytype, expected: []const ast.StatementType) !void {
 test "module" {
     // Arrange
     const file = "";
-    const expected = [_]ast.StatementType{
-        .module,
+    const expected = [_]ast.Statement{
+        .{
+            .span = .{ .start = 0, .end = 0 },
+            .data = .{
+                .module = .{
+                    .types = null,
+                    .data = null,
+                    .functions = null,
+                },
+            },
+        },
     };
 
     // Act + Assert
@@ -1688,15 +1713,70 @@ test "module" {
 
 test "type struct" {
     // Arrange
-    const file = "type :t = {w}";
-    const expected = [_]ast.StatementType{
-        .identifier,
-        .primitive_type,
-        .node,
-        .struct_type,
-        .type_definition,
-        .node,
-        .module,
+    const file = "type :t = { w } ";
+    const expected = [_]ast.Statement{
+        .{
+            .span = .{ .start = 6, .end = 7 },
+            .data = .{
+                .identifier = .{
+                    .scope = .type,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 12, .end = 13 },
+            .data = .{
+                .primitive_type = .word,
+            },
+        },
+        .{
+            .span = .{ .start = 12, .end = 13 },
+            .data = .{
+                .node = .{
+                    .value = 1,
+                    .next = null,
+                    .previous = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 10, .end = 15 },
+            .data = .{
+                .struct_type = .{
+                    .alignment = null,
+                    .members = 2,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = 15 },
+            .data = .{
+                .type_definition = .{
+                    .identifier = 0,
+                    .type = 3,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = 15 },
+            .data = .{
+                .node = .{
+                    .value = 4,
+                    .next = null,
+                    .previous = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = file.len },
+            .data = .{
+                .module = .{
+                    .types = 5,
+                    .data = null,
+                    .functions = null,
+                },
+            },
+        },
     };
 
     // Act + Assert
@@ -1718,7 +1798,7 @@ test "type struct alignment" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "type struct trailing comma" {
@@ -1735,7 +1815,7 @@ test "type struct trailing comma" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "type struct array" {
@@ -1754,7 +1834,7 @@ test "type struct array" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "type struct custom type" {
@@ -1771,7 +1851,7 @@ test "type struct custom type" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "type struct many members" {
@@ -1794,7 +1874,7 @@ test "type struct many members" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "type union" {
@@ -1817,7 +1897,7 @@ test "type union" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "type union alignment" {
@@ -1837,7 +1917,7 @@ test "type union alignment" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "type opaque" {
@@ -1853,7 +1933,7 @@ test "type opaque" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "type opaque alignment" {
@@ -1870,22 +1950,95 @@ test "type opaque alignment" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "data" {
     // Arrange
-    const file = "data $d = {w 1}";
-    const expected = [_]ast.StatementType{
-        .linkage,
-        .identifier,
-        .primitive_type,
-        .literal,
-        .typed_data,
-        .node,
-        .data_definition,
-        .node,
-        .module,
+    const file = "data $d = { w 1 } ";
+    const expected = [_]ast.Statement{
+        .{
+            .span = .{ .start = 0, .end = 0 },
+            .data = .{
+                .linkage = .{
+                    .@"export" = false,
+                    .thread = false,
+                    .section = null,
+                    .flags = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 6, .end = 7 },
+            .data = .{
+                .identifier = .{
+                    .scope = .global,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 12, .end = 13 },
+            .data = .{
+                .primitive_type = .word,
+            },
+        },
+        .{
+            .span = .{ .start = 14, .end = 15 },
+            .data = .{
+                .literal = .{
+                    .type = .integer,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 14, .end = 15 },
+            .data = .{
+                .typed_data = .{
+                    .type = 2,
+                    .value = 3,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 14, .end = 15 },
+            .data = .{
+                .node = .{
+                    .value = 4,
+                    .previous = null,
+                    .next = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = 17 },
+            .data = .{
+                .data_definition = .{
+                    .linkage = 0,
+                    .identifier = 1,
+                    .values = 5,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = 17 },
+            .data = .{
+                .node = .{
+                    .value = 6,
+                    .previous = null,
+                    .next = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = file.len },
+            .data = .{
+                .module = .{
+                    .types = null,
+                    .data = 7,
+                    .functions = null,
+                },
+            },
+        },
     };
 
     // Act + Assert
@@ -1908,7 +2061,7 @@ test "data with trailing comma" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "data with alignment" {
@@ -1928,7 +2081,7 @@ test "data with alignment" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "data with global" {
@@ -1947,7 +2100,7 @@ test "data with global" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "data with global offset" {
@@ -1972,7 +2125,7 @@ test "data with global offset" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "data with linkage" {
@@ -1993,7 +2146,7 @@ test "data with linkage" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "data with reused type" {
@@ -2020,7 +2173,7 @@ test "data with reused type" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "data with many types" {
@@ -2047,7 +2200,7 @@ test "data with many types" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "data with zeros" {
@@ -2066,24 +2219,115 @@ test "data with zeros" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function" {
     // Arrange
     const file = "function $fun() {@s ret}";
-    const expected = [_]ast.StatementType{
-        .linkage,
-        .primitive_type,
-        .identifier,
-        .function_signature,
-        .identifier,
-        .@"return",
-        .block,
-        .node,
-        .function,
-        .node,
-        .module,
+    const expected = [_]ast.Statement{
+        .{
+            .span = .{ .start = 0, .end = 0 },
+            .data = .{
+                .linkage = .{
+                    .@"export" = false,
+                    .thread = false,
+                    .section = null,
+                    .flags = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 9, .end = 9 },
+            .data = .{
+                .primitive_type = .void,
+            },
+        },
+        .{
+            .span = .{ .start = 10, .end = 13 },
+            .data = .{
+                .identifier = .{
+                    .scope = .global,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = 15 },
+            .data = .{
+                .function_signature = .{
+                    .linkage = 0,
+                    .return_type = 1,
+                    .name = 2,
+                    .parameters = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 18, .end = 19 },
+            .data = .{
+                .identifier = .{
+                    .scope = .label,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 20, .end = 23 },
+            .data = .{
+                .@"return" = .{
+                    .value = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 17, .end = 23 },
+            .data = .{
+                .block = .{
+                    .label = 4,
+                    .phi_statements = null,
+                    .statements = null,
+                    .flow_statement = 5,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 17, .end = 23 },
+            .data = .{
+                .node = .{
+                    .value = 6,
+                    .previous = null,
+                    .next = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = 24 },
+            .data = .{
+                .function = .{
+                    .signature = 3,
+                    .body = 7,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = 24 },
+            .data = .{
+                .node = .{
+                    .value = 8,
+                    .previous = null,
+                    .next = null,
+                },
+            },
+        },
+        .{
+            .span = .{ .start = 0, .end = file.len },
+            .data = .{
+                .module = .{
+                    .types = null,
+                    .data = null,
+                    .functions = 9,
+                },
+            },
+        },
     };
 
     // Act + Assert
@@ -2110,7 +2354,7 @@ test "function with linkage" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function with primitive return type" {
@@ -2131,7 +2375,7 @@ test "function with primitive return type" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function with custom return type" {
@@ -2152,7 +2396,7 @@ test "function with custom return type" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function with custom type parameter" {
@@ -2177,7 +2421,7 @@ test "function with custom type parameter" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function with one parameter" {
@@ -2202,7 +2446,7 @@ test "function with one parameter" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function with trailing comma" {
@@ -2227,7 +2471,7 @@ test "function with trailing comma" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function with many parameters" {
@@ -2260,7 +2504,7 @@ test "function with many parameters" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function with env parameter" {
@@ -2285,7 +2529,7 @@ test "function with env parameter" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function with variable parameter" {
@@ -2312,7 +2556,7 @@ test "function with variable parameter" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function many flow" {
@@ -2349,7 +2593,7 @@ test "function many flow" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "function fall-through block" {
@@ -2375,7 +2619,7 @@ test "function fall-through block" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "allocate" {
@@ -2410,7 +2654,7 @@ test "allocate" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "copy" {
@@ -2453,7 +2697,7 @@ test "copy" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "vastart" {
@@ -2477,7 +2721,7 @@ test "vastart" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "vaarg" {
@@ -2504,7 +2748,7 @@ test "vaarg" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "negate" {
@@ -2531,7 +2775,7 @@ test "negate" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "blit" {
@@ -2557,7 +2801,7 @@ test "blit" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "binaryOperation" {
@@ -2592,7 +2836,7 @@ test "binaryOperation" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "comparison" {
@@ -2629,7 +2873,7 @@ test "comparison" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "store" {
@@ -2660,7 +2904,7 @@ test "store" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "load" {
@@ -2702,7 +2946,7 @@ test "load" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "phi" {
@@ -2740,7 +2984,7 @@ test "phi" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "call" {
@@ -2765,7 +3009,7 @@ test "call" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "call assign" {
@@ -2792,7 +3036,7 @@ test "call assign" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "call parameters" {
@@ -2825,7 +3069,7 @@ test "call parameters" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 test "call varargs" {
@@ -2860,7 +3104,7 @@ test "call varargs" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParserType(file, &expected);
 }
 
 //
