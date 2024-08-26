@@ -138,7 +138,7 @@ pub fn ASTWalk(comptime Callback: type) type {
                     },
                     .type_parameter => |*d| {
                         try stack.append(.{ .index = d.value });
-                        try stack.append(.{ .index = d.type_statement });
+                        try stack.append(.{ .index = d.type });
                     },
                     .variadic_parameter => {},
                     .vaarg => |*d| {

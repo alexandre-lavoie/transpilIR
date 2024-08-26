@@ -202,7 +202,7 @@ pub const StatementData = union(StatementType) {
     },
 
     type_parameter: struct {
-        type_statement: StatementIndex,
+        type: StatementIndex,
         value: StatementIndex,
     },
 

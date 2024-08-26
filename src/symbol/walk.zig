@@ -28,6 +28,7 @@ pub const SymbolSourceWalkCallback = struct {
             .assignment,
             .data_definition,
             .type_definition,
+            .type_parameter,
             .block,
             => {
                 self.create_symbol = true;
@@ -106,6 +107,121 @@ pub const SymbolSourceWalkCallback = struct {
     }
 };
 
+const SymbolMemoryEntry = union(enum) {
+    local: usize,
+    global: usize,
+
+    primitive: ast.PrimitiveType,
+    type: usize,
+};
+
+pub const SymbolMemoryWalkCallback = struct {
+    symbol_table: *table.SymbolTable,
+
+    entries: EntryList,
+    count: usize = 1,
+
+    const Self = @This();
+    const EntryList = std.ArrayList(SymbolMemoryEntry);
+
+    pub fn init(symbol_table: *table.SymbolTable) Self {
+        return .{
+            .symbol_table = symbol_table,
+            .entries = EntryList.init(symbol_table.symbols.allocator),
+        };
+    }
+
+    pub fn enter(self: *Self, statement: *ast.Statement) !void {
+        const instance: table.Instance = .{ .span = statement.span };
+
+        switch (statement.data) {
+            .module => {
+                self.entries = EntryList.init(self.symbol_table.symbols.allocator);
+            },
+            .identifier => |*identifier| {
+                self.count = 1;
+
+                switch (identifier.scope) {
+                    .local,
+                    => {
+                        try self.entries.append(.{
+                            .local = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
+                        });
+                    },
+                    .global,
+                    => {
+                        try self.entries.append(.{
+                            .global = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
+                        });
+                    },
+                    .type => {
+                        try self.entries.append(.{
+                            .type = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
+                        });
+                    },
+                    else => {},
+                }
+            },
+            .literal => {
+                const literal = self.symbol_table.getLiteralByInstance(&instance) orelse unreachable;
+
+                self.count += switch (literal.value) {
+                    .float => 1,
+                    .integer => 1,
+                    .string => |s| s.len,
+                };
+            },
+            .primitive_type => |primitive| {
+                try self.entries.append(.{
+                    .primitive = primitive,
+                });
+            },
+            else => {},
+        }
+    }
+
+    pub fn exit(self: *Self, statement: *ast.Statement) !void {
+        switch (statement.data) {
+            .module => {
+                self.entries.deinit();
+            },
+            .identifier => {},
+            .literal => {},
+            .primitive_type => {},
+            .type_parameter => {
+                const @"type" = self.entries.pop();
+                const value = self.entries.pop();
+
+                switch (value) {
+                    .local => |local| {
+                        const symbol = &self.symbol_table.symbols.items[local];
+
+                        const memory: table.SymbolMemory = switch (@"type") {
+                            .primitive => |primitive| .{
+                                .primitive = primitive,
+                            },
+                            .type => |t| .{
+                                .type = t,
+                            },
+                            else => unreachable,
+                        };
+
+                        // TODO: If set, check memory equals previous.
+                        symbol.memory = memory;
+                    },
+                    else => unreachable,
+                }
+
+                self.entries.append(@"type");
+            },
+            else => {
+                // TODO: Handle all statements.
+                self.entries.clearAndFree();
+            },
+        }
+    }
+};
+
 //
 // Test Utils
 //
@@ -124,6 +240,18 @@ fn testSource(file: []const u8, symbol_table: *table.SymbolTable) !void {
     var callback = SymbolSourceWalkCallback.init(
         symbol_table,
         &file_stream,
+    );
+
+    var walk = ast.ASTWalk(@TypeOf(callback)).init(&tree, &callback);
+    try walk.walk(test_allocator, tree.entrypoint() orelse return error.NotFound);
+}
+
+fn testMemory(file: []const u8, symbol_table: *table.SymbolTable) !void {
+    var tree = try test_lib.testAST(test_allocator, file);
+    defer tree.deinit();
+
+    var callback = SymbolMemoryWalkCallback.init(
+        symbol_table,
     );
 
     var walk = ast.ASTWalk(@TypeOf(callback)).init(&tree, &callback);
@@ -276,6 +404,46 @@ test "SymbolSourceWalk data" {
     // Assert
     try std.testing.expectEqualDeep(&expected_symbols, symbol_table.symbols.items);
     try std.testing.expectEqualDeep(&expected_literals, symbol_table.literals.items);
+}
+
+test "SymbolMemoryWalk type_parameter" {
+    // Arrange
+    const file = "function $test(w %p) {@s ret}";
+    const expected = [_]table.Symbol{
+        .{
+            .identifier = .{
+                .name = "test",
+                .scope = .global,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "p",
+                .scope = .local,
+                .function = 0,
+            },
+            .memory = .{
+                .primitive = .word,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 0,
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try testSource(file, &symbol_table);
+    try testMemory(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
 //

@@ -40,8 +40,14 @@ pub const SymbolIdentifier = struct {
     }
 };
 
+pub const SymbolMemory = union(enum) {
+    primitive: ast.PrimitiveType,
+    type: usize,
+};
+
 pub const Symbol = struct {
     identifier: SymbolIdentifier,
+    memory: ?SymbolMemory = null,
 };
 
 pub const LiteralValueType = enum {
@@ -175,6 +181,10 @@ pub const SymbolTable = struct {
         const index = self.symbol_instance_map.get(instance.*) orelse return null;
 
         return &self.symbols.items[index];
+    }
+
+    pub fn getSymbolIndexByInstance(self: *const Self, instance: *const Instance) ?usize {
+        return self.symbol_instance_map.get(instance.*) orelse return null;
     }
 
     pub fn addLiteral(self: *Self, value: *const LiteralValue) !usize {

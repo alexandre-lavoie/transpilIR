@@ -753,7 +753,7 @@ pub fn Parser(comptime Reader: type) type {
             return try self.new(
                 .{ .start = start, .end = end },
                 .{ .type_parameter = .{
-                    .type_statement = type_statement,
+                    .type = type_statement,
                     .value = value,
                 } },
             );
@@ -784,7 +784,7 @@ pub fn Parser(comptime Reader: type) type {
             return try self.new(
                 .{ .start = start, .end = end },
                 .{ .type_parameter = .{
-                    .type_statement = type_statement,
+                    .type = type_statement,
                     .value = value,
                 } },
             );
@@ -801,7 +801,7 @@ pub fn Parser(comptime Reader: type) type {
             return try self.new(
                 .{ .start = start, .end = end },
                 .{ .type_parameter = .{
-                    .type_statement = type_statement,
+                    .type = type_statement,
                     .value = value,
                 } },
             );
