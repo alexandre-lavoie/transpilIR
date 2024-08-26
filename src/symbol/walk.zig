@@ -1,11 +1,13 @@
 const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
+const common = @import("../common.zig");
 const table = @import("table.zig");
 
 pub const SymbolSourceWalkCallback = struct {
     symbol_table: *table.SymbolTable,
     stream: *std.io.StreamSource,
+
     create_symbol: bool = false,
     create_function: bool = false,
     function: ?usize = null,
@@ -17,38 +19,6 @@ pub const SymbolSourceWalkCallback = struct {
             .symbol_table = symbol_table,
             .stream = stream,
         };
-    }
-
-    pub fn escapeString(input: []const u8, output: []u8) ![]const u8 {
-        var i: usize = 0;
-        var o: usize = 0;
-        while (i < input.len) {
-            output[o] = switch (input[i]) {
-                '\\' => scope: {
-                    i += 1;
-
-                    break :scope switch (input[i]) {
-                        '0' => '\x00',
-                        't' => '\t',
-                        'n' => '\n',
-                        'r' => '\r',
-                        'x' => hex: {
-                            const vi = i + 1;
-                            i += 2;
-
-                            break :hex try std.fmt.parseInt(u8, input[vi .. vi + 2], 16);
-                        },
-                        else => input[i],
-                    };
-                },
-                else => input[i],
-            };
-
-            i += 1;
-            o += 1;
-        }
-
-        return output[0..o];
     }
 
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
@@ -111,7 +81,7 @@ pub const SymbolSourceWalkCallback = struct {
                 const value: table.LiteralValue = switch (literal.type) {
                     .integer => .{ .integer = try std.fmt.parseInt(isize, buffer, 10) },
                     .float => .{ .float = try std.fmt.parseFloat(f64, buffer) },
-                    .string => .{ .string = try Self.escapeString(buffer, output) },
+                    .string => .{ .string = try common.parseString(buffer, output) },
                 };
 
                 const index = try self.symbol_table.addLiteral(&value);
