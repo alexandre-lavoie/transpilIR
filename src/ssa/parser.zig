@@ -405,7 +405,7 @@ pub fn Parser(comptime Reader: type) type {
 
                 _ = self.next();
 
-                const out = try self.structType(out_start, alignment);
+                const out = try self.structType(out_start, null);
 
                 const out_end = self.previous_previous.span.end;
 

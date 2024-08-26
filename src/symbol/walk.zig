@@ -3,6 +3,7 @@ const std = @import("std");
 const ast = @import("../ast/lib.zig");
 const common = @import("../common.zig");
 const table = @import("table.zig");
+const types = @import("types.zig");
 
 pub const SymbolSourceWalkCallback = struct {
     symbol_table: *table.SymbolTable,
@@ -45,7 +46,7 @@ pub const SymbolSourceWalkCallback = struct {
 
                 _ = try self.stream.read(name);
 
-                const symbol_identifier: table.SymbolIdentifier = .{
+                const symbol_identifier: types.SymbolIdentifier = .{
                     .name = name,
                     .scope = identifier.scope,
                     .function = self.function,
@@ -62,7 +63,7 @@ pub const SymbolSourceWalkCallback = struct {
                     }
                 }
 
-                const instance: table.Instance = .{
+                const instance: types.Instance = .{
                     .span = statement.span,
                 };
 
@@ -79,7 +80,7 @@ pub const SymbolSourceWalkCallback = struct {
 
                 _ = try self.stream.read(buffer);
 
-                const value: table.LiteralValue = switch (literal.type) {
+                const value: types.LiteralValue = switch (literal.type) {
                     .integer => .{ .integer = try std.fmt.parseInt(isize, buffer, 10) },
                     .float => .{ .float = try std.fmt.parseFloat(f64, buffer) },
                     .string => .{ .string = try common.parseString(buffer, output) },
@@ -87,7 +88,7 @@ pub const SymbolSourceWalkCallback = struct {
 
                 const index = try self.symbol_table.addLiteral(&value);
 
-                const instance: table.Instance = .{
+                const instance: types.Instance = .{
                     .span = statement.span,
                 };
 
@@ -110,16 +111,25 @@ pub const SymbolSourceWalkCallback = struct {
 const SymbolMemoryEntry = union(enum) {
     local: usize,
     global: usize,
-
+    literal: *types.Literal,
     primitive: ast.PrimitiveType,
     type: usize,
+    @"struct": void,
+    @"union": void,
+    @"opaque": void,
+    array: struct {
+        base: union(enum) {
+            primitive: ast.PrimitiveType,
+            type: usize,
+        },
+        count: usize,
+    },
 };
 
 pub const SymbolMemoryWalkCallback = struct {
     symbol_table: *table.SymbolTable,
 
     entries: EntryList,
-    count: usize = 1,
 
     const Self = @This();
     const EntryList = std.ArrayList(SymbolMemoryEntry);
@@ -132,15 +142,28 @@ pub const SymbolMemoryWalkCallback = struct {
     }
 
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
-        const instance: table.Instance = .{ .span = statement.span };
+        const instance: types.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
             .module => {
                 self.entries = EntryList.init(self.symbol_table.symbols.allocator);
             },
+            .struct_type => {
+                try self.entries.append(.{
+                    .@"struct" = undefined,
+                });
+            },
+            .union_type => {
+                try self.entries.append(.{
+                    .@"union" = undefined,
+                });
+            },
+            .opaque_type => {
+                try self.entries.append(.{
+                    .@"opaque" = undefined,
+                });
+            },
             .identifier => |*identifier| {
-                self.count = 1;
-
                 switch (identifier.scope) {
                     .local,
                     => {
@@ -165,11 +188,9 @@ pub const SymbolMemoryWalkCallback = struct {
             .literal => {
                 const literal = self.symbol_table.getLiteralByInstance(&instance) orelse unreachable;
 
-                self.count += switch (literal.value) {
-                    .float => 1,
-                    .integer => 1,
-                    .string => |s| s.len,
-                };
+                try self.entries.append(.{
+                    .literal = literal,
+                });
             },
             .primitive_type => |primitive| {
                 try self.entries.append(.{
@@ -181,6 +202,8 @@ pub const SymbolMemoryWalkCallback = struct {
     }
 
     pub fn exit(self: *Self, statement: *ast.Statement) !void {
+        const allocator = self.symbol_table.symbols.allocator;
+
         switch (statement.data) {
             .module => {
                 self.entries.deinit();
@@ -188,6 +211,39 @@ pub const SymbolMemoryWalkCallback = struct {
             .identifier => {},
             .literal => {},
             .primitive_type => {},
+            .node => {},
+            .struct_type => {},
+            .union_type => {},
+            .opaque_type => {},
+            .array_type => {
+                const count: usize = switch (self.entries.pop()) {
+                    .literal => |literal| switch (literal.value) {
+                        .integer => |integer| @as(usize, @intCast(integer)),
+                        else => unreachable,
+                    },
+                    else => unreachable,
+                };
+
+                try self.entries.append(switch (self.entries.pop()) {
+                    .primitive => |primitive| .{
+                        .array = .{
+                            .base = .{
+                                .primitive = primitive,
+                            },
+                            .count = count,
+                        },
+                    },
+                    .type => |t| .{
+                        .array = .{
+                            .base = .{
+                                .type = t,
+                            },
+                            .count = count,
+                        },
+                    },
+                    else => unreachable,
+                });
+            },
             .type_parameter => {
                 const @"type" = self.entries.pop();
                 const value = self.entries.pop();
@@ -196,7 +252,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     .local => |local| {
                         const symbol = &self.symbol_table.symbols.items[local];
 
-                        const memory: table.SymbolMemory = switch (@"type") {
+                        const memory: types.SymbolMemory = switch (@"type") {
                             .primitive => |primitive| .{
                                 .primitive = primitive,
                             },
@@ -212,7 +268,143 @@ pub const SymbolMemoryWalkCallback = struct {
                     else => unreachable,
                 }
 
-                self.entries.append(@"type");
+                try self.entries.append(@"type");
+            },
+            .type_definition => {
+                var i: usize = 0;
+
+                const identifier = &self.entries.items[i];
+                const symbol: *types.Symbol = switch (identifier.*) {
+                    .type => |index| &self.symbol_table.symbols.items[index],
+                    else => unreachable,
+                };
+                i += 1;
+
+                const type_entry = self.entries.items[i];
+                i += 1;
+
+                const alignment: ?usize = switch (self.entries.items[i]) {
+                    .literal => |literal| scope: {
+                        switch (literal.value) {
+                            .integer => |integer| {
+                                i += 1;
+
+                                break :scope @as(usize, @intCast(integer));
+                            },
+                            else => unreachable,
+                        }
+                    },
+                    else => null,
+                };
+
+                const memory: types.SymbolMemory = switch (type_entry) {
+                    .@"opaque" => scope: {
+                        const literal: *types.Literal = switch (self.entries.items[i]) {
+                            .literal => |v| v,
+                            else => unreachable,
+                        };
+
+                        const size: usize = switch (literal.value) {
+                            .integer => |s_size| @as(usize, @intCast(s_size)),
+                            else => unreachable,
+                        };
+
+                        break :scope .{
+                            .@"opaque" = .{
+                                .alignment = alignment,
+                                .size = size,
+                            },
+                        };
+                    },
+                    .@"struct",
+                    .@"union",
+                    => scope: {
+                        var structs = std.ArrayList([]types.SymbolMemoryStructEntry).init(allocator);
+                        defer structs.deinit();
+
+                        var members = std.ArrayList(types.SymbolMemoryStructEntry).init(allocator);
+                        defer members.deinit();
+
+                        while (i < self.entries.items.len) : (i += 1) {
+                            const entry = self.entries.items[i];
+
+                            switch (entry) {
+                                .@"struct" => {
+                                    if (members.items.len > 0) {
+                                        try structs.append(try members.toOwnedSlice());
+
+                                        members.clearAndFree();
+                                    }
+
+                                    continue;
+                                },
+                                else => {},
+                            }
+
+                            const next: types.SymbolMemoryStructEntry = switch (entry) {
+                                .primitive => |primitive| .{
+                                    .base = .{
+                                        .primitive = primitive,
+                                    },
+                                    .count = 1,
+                                },
+                                .type => |t| .{
+                                    .base = .{
+                                        .type = t,
+                                    },
+                                    .count = 1,
+                                },
+                                .array => |array| .{
+                                    .base = switch (array.base) {
+                                        .primitive => |v| .{ .primitive = v },
+                                        .type => |v| .{ .type = v },
+                                    },
+                                    .count = array.count,
+                                },
+                                else => undefined,
+                            };
+
+                            try members.append(next);
+                        }
+
+                        if (members.items.len > 0) {
+                            try structs.append(try members.toOwnedSlice());
+
+                            members.clearAndFree();
+                        }
+
+                        if (structs.items.len == 1) {
+                            break :scope .{
+                                .@"struct" = .{
+                                    .alignment = alignment,
+                                    .members = structs.items[0],
+                                },
+                            };
+                        } else {
+                            const union_structs = try allocator.alloc(types.SymbolMemoryStruct, structs.items.len);
+
+                            for (0..structs.items.len) |j| {
+                                union_structs[j] = .{
+                                    .alignment = alignment,
+                                    .members = structs.items[j],
+                                };
+                            }
+
+                            break :scope .{
+                                .@"union" = .{
+                                    .alignment = alignment,
+                                    .structs = union_structs,
+                                },
+                            };
+                        }
+                    },
+                    else => unreachable,
+                };
+
+                // TODO: If set, check memory equals previous.
+                symbol.memory = memory;
+
+                self.entries.clearAndFree();
             },
             else => {
                 // TODO: Handle all statements.
@@ -265,7 +457,7 @@ fn testMemory(file: []const u8, symbol_table: *table.SymbolTable) !void {
 test "SymbolSourceWalk type" {
     // Arrange
     const file = "type :t = { w } type :t2 = { :t } ";
-    const expected = [_]table.Symbol{
+    const expected = [_]types.Symbol{
         .{
             .identifier = .{
                 .name = "t",
@@ -293,7 +485,7 @@ test "SymbolSourceWalk type" {
 test "SymbolSourceWalk function" {
     // Arrange
     const file = "function $test() {@s ret}";
-    const expected = [_]table.Symbol{
+    const expected = [_]types.Symbol{
         .{
             .identifier = .{
                 .name = "test",
@@ -322,7 +514,7 @@ test "SymbolSourceWalk function" {
 test "SymbolSourceWalk function reused symbol" {
     // Arrange
     const file = "function $test() {@s ret} function $test2() {@s ret}";
-    const expected = [_]table.Symbol{
+    const expected = [_]types.Symbol{
         .{
             .identifier = .{
                 .name = "test",
@@ -364,7 +556,7 @@ test "SymbolSourceWalk function reused symbol" {
 test "SymbolSourceWalk data" {
     // Arrange
     const file = "data $d = { b \"A \\\"B\\\" \\x43 \\n\", w -1, s s_1, d d_-1.0 }";
-    const expected_symbols = [_]table.Symbol{
+    const expected_symbols = [_]types.Symbol{
         .{
             .identifier = .{
                 .name = "d",
@@ -372,7 +564,7 @@ test "SymbolSourceWalk data" {
             },
         },
     };
-    const expected_literals = [_]table.Literal{
+    const expected_literals = [_]types.Literal{
         .{
             .value = .{
                 .string = "A \"B\" C \n",
@@ -406,10 +598,99 @@ test "SymbolSourceWalk data" {
     try std.testing.expectEqualDeep(&expected_literals, symbol_table.literals.items);
 }
 
+test "SymbolMemoryWalk type_definition" {
+    // Arrange
+    const file = "type :o = align 8 { 32 } type :s = align 16 { w 100, :o } type :u = align 32 { { s 2 } { w } }";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "o",
+                .scope = .type,
+            },
+            .memory = .{
+                .@"opaque" = .{
+                    .alignment = 8,
+                    .size = 32,
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .type,
+            },
+            .memory = .{
+                .@"struct" = .{
+                    .alignment = 16,
+                    .members = &[_]types.SymbolMemoryStructEntry{
+                        .{
+                            .base = .{
+                                .primitive = .word,
+                            },
+                            .count = 100,
+                        },
+                        .{
+                            .base = .{
+                                .type = 0,
+                            },
+                            .count = 1,
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "u",
+                .scope = .type,
+            },
+            .memory = .{
+                .@"union" = .{
+                    .alignment = 32,
+                    .structs = &[_]types.SymbolMemoryStruct{
+                        .{
+                            .alignment = 32,
+                            .members = &[_]types.SymbolMemoryStructEntry{
+                                .{
+                                    .base = .{
+                                        .primitive = .single,
+                                    },
+                                    .count = 2,
+                                },
+                            },
+                        },
+                        .{
+                            .alignment = 32,
+                            .members = &[_]types.SymbolMemoryStructEntry{
+                                .{
+                                    .base = .{
+                                        .primitive = .word,
+                                    },
+                                    .count = 1,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try testSource(file, &symbol_table);
+    try testMemory(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
 test "SymbolMemoryWalk type_parameter" {
     // Arrange
     const file = "function $test(w %p) {@s ret}";
-    const expected = [_]table.Symbol{
+    const expected = [_]types.Symbol{
         .{
             .identifier = .{
                 .name = "test",
