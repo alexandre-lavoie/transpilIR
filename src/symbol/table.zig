@@ -10,13 +10,33 @@ pub const Instance = struct {
 pub const SymbolIdentifier = struct {
     name: []const u8,
     scope: ast.Scope,
+    function: ?usize = null,
 
     const Self = @This();
 
     pub fn key(self: *const Self, allocator: std.mem.Allocator) ![]const u8 {
         const scope_value = @intFromEnum(self.scope);
 
-        return try std.fmt.allocPrint(allocator, "{s}:{}", .{ self.name, scope_value });
+        if (self.function) |f| {
+            return try std.fmt.allocPrint(
+                allocator,
+                "{s}:{}:{}",
+                .{
+                    self.name,
+                    scope_value,
+                    f,
+                },
+            );
+        } else {
+            return try std.fmt.allocPrint(
+                allocator,
+                "{s}:{}",
+                .{
+                    self.name,
+                    scope_value,
+                },
+            );
+        }
     }
 };
 
@@ -104,6 +124,7 @@ pub const SymbolTable = struct {
         const identifier_copy: SymbolIdentifier = .{
             .name = name,
             .scope = identifier.scope,
+            .function = identifier.function,
         };
 
         const index = self.symbols.items.len;

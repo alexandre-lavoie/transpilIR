@@ -7,6 +7,8 @@ pub const SymbolSourceWalkCallback = struct {
     symbol_table: *table.SymbolTable,
     stream: *std.io.StreamSource,
     create_symbol: bool = false,
+    create_function: bool = false,
+    function: ?usize = null,
 
     const Self = @This();
 
@@ -56,10 +58,13 @@ pub const SymbolSourceWalkCallback = struct {
             .assignment,
             .data_definition,
             .type_definition,
-            .function_signature,
             .block,
             => {
                 self.create_symbol = true;
+            },
+            .function_signature => {
+                self.create_symbol = true;
+                self.create_function = true;
             },
             .identifier => |identifier| {
                 _ = try self.stream.seekTo(statement.span.start);
@@ -72,12 +77,18 @@ pub const SymbolSourceWalkCallback = struct {
                 const symbol_identifier: table.SymbolIdentifier = .{
                     .name = name,
                     .scope = identifier.scope,
+                    .function = self.function,
                 };
 
                 if (self.create_symbol) {
                     self.create_symbol = false;
 
-                    _ = try self.symbol_table.addSymbol(&symbol_identifier);
+                    const index = try self.symbol_table.addSymbol(&symbol_identifier);
+
+                    if (self.create_function) {
+                        self.create_function = false;
+                        self.function = index;
+                    }
                 }
 
                 const instance: table.Instance = .{
@@ -110,6 +121,15 @@ pub const SymbolSourceWalkCallback = struct {
                 };
 
                 _ = try self.symbol_table.addLiteralInstance(index, &instance);
+            },
+            else => {},
+        }
+    }
+
+    pub fn exit(self: *Self, statement: *ast.Statement) !void {
+        switch (statement.data) {
+            .function => {
+                self.function = null;
             },
             else => {},
         }
@@ -186,6 +206,49 @@ test "SymbolSourceWalk function" {
             .identifier = .{
                 .name = "s",
                 .scope = .label,
+                .function = 0,
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try testSource(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "SymbolSourceWalk function reused symbol" {
+    // Arrange
+    const file = "function $test() {@s ret} function $test2() {@s ret}";
+    const expected = [_]table.Symbol{
+        .{
+            .identifier = .{
+                .name = "test",
+                .scope = .global,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 0,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "test2",
+                .scope = .global,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 2,
             },
         },
     };
