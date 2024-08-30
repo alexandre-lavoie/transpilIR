@@ -3,5 +3,8 @@ pub const SymbolTable = table.SymbolTable;
 
 const types = @import("types.zig");
 
-const walk = @import("walk.zig");
-pub const SymbolSourceWalkCallback = walk.SymbolSourceWalkCallback;
+const source = @import("walk/source.zig");
+pub const SymbolSourceWalkCallback = source.SymbolSourceWalkCallback;
+
+const memory = @import("walk/memory.zig");
+pub const SymbolMemoryWalkCallback = memory.SymbolMemoryWalkCallback;
