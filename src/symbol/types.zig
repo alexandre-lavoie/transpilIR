@@ -61,16 +61,18 @@ pub const Literal = struct {
     value: LiteralValue,
 };
 
+pub const SymbolType = union(enum) {
+    primitive: ast.PrimitiveType,
+    type: usize,
+};
+
 pub const SymbolMemoryOpaque = struct {
     alignment: ?usize = null,
     size: usize,
 };
 
 pub const SymbolMemoryStructEntry = struct {
-    base: union(enum) {
-        primitive: ast.PrimitiveType,
-        type: usize,
-    },
+    base: SymbolType,
     count: usize,
 };
 
@@ -97,7 +99,7 @@ pub const SymbolMemoryDataValue = union(enum) {
 };
 
 pub const SymbolMemoryDataEntry = struct {
-    primitive: ast.PrimitiveType,
+    type: ast.PrimitiveType,
     value: SymbolMemoryDataValue,
 };
 
@@ -113,12 +115,27 @@ pub const SymbolMemoryData = struct {
     entries: []const SymbolMemoryDataEntry,
 };
 
+pub const SymbolMemoryParameterType = union(enum) {
+    primitive: ast.PrimitiveType,
+    type: usize,
+    env: void,
+};
+
+pub const SymbolMemoryFunction = struct {
+    linkage: SymbolMemoryLinkage,
+    @"return": ast.PrimitiveType,
+    parameters: []const SymbolMemoryParameterType,
+    vararg: bool = false,
+};
+
 pub const SymbolMemory = union(enum) {
     empty: void,
     primitive: ast.PrimitiveType,
     type: usize,
+    env: void,
     @"opaque": SymbolMemoryOpaque,
     @"struct": SymbolMemoryStruct,
     @"union": SymbolMemoryUnion,
     data: SymbolMemoryData,
+    function: SymbolMemoryFunction,
 };

@@ -6,17 +6,19 @@ const table = @import("table.zig");
 const types = @import("types.zig");
 
 const SymbolSourceWalkState = enum {
-    empty,
-    create_unique_symbol,
-    create_symbol,
-    create_function,
+    null,
+    unique,
+    symbol,
+    function,
+    parameter,
+    parameter_type,
 };
 
 pub const SymbolSourceWalkCallback = struct {
     symbol_table: *table.SymbolTable,
     stream: *std.io.StreamSource,
 
-    state: SymbolSourceWalkState = .empty,
+    state: SymbolSourceWalkState = .null,
     function: ?usize = null,
 
     const Self = @This();
@@ -34,17 +36,21 @@ pub const SymbolSourceWalkCallback = struct {
         switch (statement.data) {
             .assignment,
             => {
-                self.state = .create_unique_symbol;
+                self.state = .symbol;
             },
             .data_definition,
             .type_definition,
-            .type_parameter,
             .block,
             => {
-                self.state = .create_symbol;
+                self.state = .unique;
             },
             .function_signature => {
-                self.state = .create_function;
+                self.state = .function;
+            },
+            .type_parameter => {
+                if (self.state == .null) {
+                    self.state = .symbol;
+                }
             },
             .identifier => |identifier| {
                 _ = try self.stream.seekTo(statement.span.start);
@@ -57,39 +63,51 @@ pub const SymbolSourceWalkCallback = struct {
                 const symbol_identifier: types.SymbolIdentifier = .{
                     .name = name,
                     .scope = identifier.scope,
-                    .function = self.function,
+                    .function = switch (identifier.scope) {
+                        .local,
+                        .label,
+                        => self.function,
+                        else => null,
+                    },
                 };
 
-                const symbol_exists: bool = switch (self.state) {
-                    .create_symbol,
-                    .create_function,
-                    .create_unique_symbol,
-                    => self.symbol_table.containsSymbolIdentifier(&symbol_identifier),
-                    else => false,
-                };
+                const symbol_exists: bool = self.symbol_table.containsSymbolIdentifier(&symbol_identifier);
 
                 const check_unique: bool = switch (self.state) {
-                    .create_symbol, .create_function => true,
-                    else => false,
+                    .unique,
+                    .function,
+                    .parameter,
+                    => true,
+                    .null,
+                    .symbol,
+                    .parameter_type,
+                    => false,
                 };
 
                 if (symbol_exists and check_unique) {
                     return error.SymbolReuse;
                 }
 
-                if (!symbol_exists) {
-                    switch (self.state) {
-                        .create_symbol, .create_unique_symbol => {
-                            _ = try self.symbol_table.addSymbol(&symbol_identifier);
-                        },
-                        .create_function => {
-                            self.function = try self.symbol_table.addSymbol(&symbol_identifier);
-                        },
-                        else => {},
-                    }
-                }
+                self.state = switch (self.state) {
+                    .symbol, .unique => scope: {
+                        if (!symbol_exists) _ = try self.symbol_table.addSymbol(&symbol_identifier);
 
-                self.state = .empty;
+                        break :scope .null;
+                    },
+                    .function => scope: {
+                        self.function = try self.symbol_table.addSymbol(&symbol_identifier);
+
+                        break :scope .parameter;
+                    },
+                    .parameter => scope: {
+                        _ = try self.symbol_table.addSymbol(&symbol_identifier);
+
+                        break :scope .parameter_type;
+                    },
+                    .null,
+                    .parameter_type,
+                    => self.state,
+                };
 
                 const instance: types.Instance = .{
                     .span = statement.span,
@@ -131,6 +149,15 @@ pub const SymbolSourceWalkCallback = struct {
             .function => {
                 self.function = null;
             },
+            .function_signature => {
+                self.state = .null;
+            },
+            .node => {
+                self.state = switch (self.state) {
+                    .parameter_type => .parameter,
+                    else => self.state,
+                };
+            },
             else => {},
         }
     }
@@ -142,9 +169,11 @@ const SymbolMemoryEntry = union(enum) {
     literal: *types.Literal,
     primitive: ast.PrimitiveType,
     type: usize,
+    env: void,
     @"struct": void,
     @"union": void,
     @"opaque": void,
+    variadic: void,
     linkage: types.SymbolMemoryLinkage,
     data_offset: types.SymbolMemoryDataOffset,
     data_entry: struct {
@@ -200,6 +229,16 @@ pub const SymbolMemoryWalkCallback = struct {
                     .@"opaque" = undefined,
                 });
             },
+            .env_type => {
+                try self.entries.append(.{
+                    .env = undefined,
+                });
+            },
+            .variadic_parameter => {
+                try self.entries.append(.{
+                    .variadic = undefined,
+                });
+            },
             .identifier => |*identifier| {
                 switch (identifier.scope) {
                     .local,
@@ -245,13 +284,16 @@ pub const SymbolMemoryWalkCallback = struct {
             .module => {
                 self.entries.deinit();
             },
-            .identifier => {},
-            .literal => {},
-            .primitive_type => {},
-            .node => {},
-            .struct_type => {},
-            .union_type => {},
-            .opaque_type => {},
+            .identifier,
+            .literal,
+            .primitive_type,
+            .node,
+            .struct_type,
+            .union_type,
+            .opaque_type,
+            .env_type,
+            .variadic_parameter,
+            => {},
             .array_type => {
                 const count: usize = switch (self.entries.pop()) {
                     .literal => |literal| switch (literal.value) {
@@ -296,6 +338,9 @@ pub const SymbolMemoryWalkCallback = struct {
                             .type => |t| .{
                                 .type = t,
                             },
+                            .env => .{
+                                .env = undefined,
+                            },
                             else => unreachable,
                         };
 
@@ -320,18 +365,21 @@ pub const SymbolMemoryWalkCallback = struct {
                 const type_entry = self.entries.items[i];
                 i += 1;
 
-                const alignment: ?usize = switch (self.entries.items[i]) {
-                    .literal => |literal| scope: {
-                        switch (literal.value) {
-                            .integer => |integer| {
-                                i += 1;
+                const alignment: ?usize = switch (self.entries.items.len) {
+                    1, 2, 3 => null,
+                    else => switch (self.entries.items[i]) {
+                        .literal => |literal| scope: {
+                            switch (literal.value) {
+                                .integer => |integer| {
+                                    i += 1;
 
-                                break :scope @as(usize, @intCast(integer));
-                            },
-                            else => unreachable,
-                        }
+                                    break :scope @as(usize, @intCast(integer));
+                                },
+                                else => unreachable,
+                            }
+                        },
+                        else => null,
                     },
-                    else => null,
                 };
 
                 symbol.memory = switch (type_entry) {
@@ -532,14 +580,17 @@ pub const SymbolMemoryWalkCallback = struct {
                 var j: usize = 0;
                 while (i < self.entries.items.len) {
                     entries[j] = switch (self.entries.items[i]) {
-                        .data_entry => |data_entry| .{ .primitive = data_entry.primitive, .value = switch (data_entry.value) {
-                            .literal => |literal| switch (literal.value) {
-                                .integer => |v| .{ .integer = v },
-                                .float => |v| .{ .float = v },
-                                .string => |v| .{ .string = v },
+                        .data_entry => |data_entry| .{
+                            .type = data_entry.primitive,
+                            .value = switch (data_entry.value) {
+                                .literal => |literal| switch (literal.value) {
+                                    .integer => |v| .{ .integer = v },
+                                    .float => |v| .{ .float = v },
+                                    .string => |v| .{ .string = v },
+                                },
+                                .symbol => |v| .{ .symbol = v },
                             },
-                            .symbol => |v| .{ .symbol = v },
-                        } },
+                        },
                         else => unreachable,
                     };
 
@@ -551,6 +602,55 @@ pub const SymbolMemoryWalkCallback = struct {
                     .data = .{
                         .linkage = linkage,
                         .entries = entries,
+                    },
+                };
+
+                self.entries.clearAndFree();
+            },
+            .function_signature => {
+                const symbol: *types.Symbol = switch (self.entries.items[0]) {
+                    .global => |g| &self.symbol_table.symbols.items[g],
+                    else => unreachable,
+                };
+
+                const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[1]) {
+                    .linkage => |l| l,
+                    else => unreachable,
+                };
+
+                const @"return": ast.PrimitiveType = switch (self.entries.items[2]) {
+                    .primitive => |p| p,
+                    else => unreachable,
+                };
+
+                const vararg: bool = switch (self.entries.items[self.entries.items.len - 1]) {
+                    .variadic => scope: {
+                        _ = self.entries.pop();
+
+                        break :scope true;
+                    },
+                    else => false,
+                };
+
+                const offset = 3;
+                var parameters = try allocator.alloc(types.SymbolMemoryParameterType, self.entries.items.len - offset);
+
+                var i: usize = 0;
+                while (i < parameters.len) : (i += 1) {
+                    parameters[i] = switch (self.entries.items[i + offset]) {
+                        .primitive => |p| .{ .primitive = p },
+                        .type => |t| .{ .type = t },
+                        .env => .{ .env = undefined },
+                        else => unreachable,
+                    };
+                }
+
+                symbol.memory = .{
+                    .function = .{
+                        .linkage = linkage,
+                        .@"return" = @"return",
+                        .vararg = vararg,
+                        .parameters = parameters,
                     },
                 };
 
@@ -908,49 +1008,49 @@ test "SymbolMemoryWalk data_definition" {
                     },
                     .entries = &[_]types.SymbolMemoryDataEntry{
                         .{
-                            .primitive = .byte,
+                            .type = .byte,
                             .value = .{
                                 .integer = -1,
                             },
                         },
                         .{
-                            .primitive = .byte,
+                            .type = .byte,
                             .value = .{
                                 .integer = 1,
                             },
                         },
                         .{
-                            .primitive = .word,
+                            .type = .word,
                             .value = .{
                                 .integer = -1,
                             },
                         },
                         .{
-                            .primitive = .word,
+                            .type = .word,
                             .value = .{
                                 .integer = 1,
                             },
                         },
                         .{
-                            .primitive = .single,
+                            .type = .single,
                             .value = .{
                                 .float = -1,
                             },
                         },
                         .{
-                            .primitive = .single,
+                            .type = .single,
                             .value = .{
                                 .float = 1,
                             },
                         },
                         .{
-                            .primitive = .double,
+                            .type = .double,
                             .value = .{
                                 .float = -1,
                             },
                         },
                         .{
-                            .primitive = .double,
+                            .type = .double,
                             .value = .{
                                 .float = 1,
                             },
@@ -974,7 +1074,7 @@ test "SymbolMemoryWalk data_definition" {
                     },
                     .entries = &[_]types.SymbolMemoryDataEntry{
                         .{
-                            .primitive = .long,
+                            .type = .long,
                             .value = .{
                                 .symbol = .{
                                     .index = 0,
@@ -999,21 +1099,65 @@ test "SymbolMemoryWalk data_definition" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
-test "SymbolMemoryWalk type_parameter" {
+test "SymbolMemoryWalk function" {
     // Arrange
-    const file = "function $test(w %p) {@s ret}";
+    const file = "type :t = { 32 } export thread section \"function\" \"flags\" function $test(env %e, w %w, :t %s, ...) {@s ret}";
     const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "t",
+                .scope = .type,
+            },
+            .memory = .{
+                .@"opaque" = .{
+                    .size = 32,
+                },
+            },
+        },
         .{
             .identifier = .{
                 .name = "test",
                 .scope = .global,
             },
+            .memory = .{
+                .function = .{
+                    .linkage = .{
+                        .@"export" = true,
+                        .thread = true,
+                        .section = "function",
+                        .flags = "flags",
+                    },
+                    .@"return" = .void,
+                    .vararg = true,
+                    .parameters = &[_]types.SymbolMemoryParameterType{
+                        .{
+                            .env = undefined,
+                        },
+                        .{
+                            .primitive = .word,
+                        },
+                        .{
+                            .type = 0,
+                        },
+                    },
+                },
+            },
         },
         .{
             .identifier = .{
-                .name = "p",
+                .name = "e",
                 .scope = .local,
-                .function = 0,
+                .function = 1,
+            },
+            .memory = .{
+                .env = undefined,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "w",
+                .scope = .local,
+                .function = 1,
             },
             .memory = .{
                 .primitive = .word,
@@ -1022,8 +1166,18 @@ test "SymbolMemoryWalk type_parameter" {
         .{
             .identifier = .{
                 .name = "s",
+                .scope = .local,
+                .function = 1,
+            },
+            .memory = .{
+                .type = 0,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
                 .scope = .label,
-                .function = 0,
+                .function = 1,
             },
         },
     };
@@ -1043,9 +1197,51 @@ test "SymbolMemoryWalk type_parameter" {
 // Error Tests
 //
 
-test "SymbolSourceWalk error.SymbolNotFound" {
+test "SymbolSourceWalk type error.SymbolNotFound" {
     // Arrange
     const file = "type :t = { :dne }";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    const res = testSource(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.SymbolNotFound, res);
+}
+
+test "SymbolSourceWalk local type error.SymbolNotFound" {
+    // Arrange
+    const file = "function $fun(:dne %a) {@s ret}";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    const res = testSource(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.SymbolNotFound, res);
+}
+
+test "SymbolSourceWalk global error.SymbolNotFound" {
+    // Arrange
+    const file = "function $fun() {@s %t =w add $dne, 0 ret}";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    const res = testSource(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.SymbolNotFound, res);
+}
+
+test "SymbolSourceWalk label error.SymbolNotFound" {
+    // Arrange
+    const file = "function $fun() {@s jmp @dne}";
 
     var symbol_table = table.SymbolTable.init(test_allocator);
     defer symbol_table.deinit();
