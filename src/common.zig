@@ -44,3 +44,78 @@ pub fn parseString(input: []const u8, output: []u8) ![]const u8 {
 
     return output[0..o];
 }
+
+pub fn fileNewLines(allocator: std.mem.Allocator, reader: anytype) ![]usize {
+    var out = std.ArrayList(usize).init(allocator);
+    defer out.deinit();
+
+    try out.append(0);
+
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        switch (reader.readByte() catch break) {
+            '\n' => try out.append(i),
+            else => {},
+        }
+    }
+
+    return try out.toOwnedSlice();
+}
+
+pub fn indexToFile(newline_offsets: []const usize, index: usize) struct { line: usize, column: usize } {
+    var left: usize = 0;
+    const size = newline_offsets.len;
+    var right = size;
+
+    var mid: usize = 0;
+    while (left < right) {
+        mid = left + (right - left) / 2;
+
+        if (mid == size - 1) break;
+
+        const min = newline_offsets[mid];
+        const max = newline_offsets[mid + 1];
+
+        if (min <= index and index < max) break;
+
+        if (index < min) {
+            right = mid;
+        } else {
+            left = mid + 1;
+        }
+    }
+
+    const line = newline_offsets[mid];
+
+    var column: usize = 0;
+    if (line < index) column = index - line;
+    if (mid == 0) column += 1;
+
+    return .{
+        .line = mid + 1,
+        .column = column,
+    };
+}
+
+pub fn logError(err: anytype, file: []const u8, offsets: []const usize, span: *const SourceSpan) void {
+    const start = indexToFile(offsets, span.start);
+    const end = indexToFile(offsets, switch (span.end) {
+        0 => 0,
+        else => span.end - 1,
+    });
+
+    std.log.err("({any}) {s}:{}:{} - {s}:{}:{}", .{ err, file, start.line, start.column, file, end.line, end.column });
+}
+
+test "indexToFile" {
+    // Arrange
+    const offsets = [_]usize{ 0, 10, 20, 30 };
+    const index = 15;
+
+    // Act
+    const out = indexToFile(&offsets, index);
+
+    // Assert
+    try std.testing.expectEqual(2, out.line);
+    try std.testing.expectEqual(5, out.column);
+}

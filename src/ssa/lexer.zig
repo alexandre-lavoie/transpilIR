@@ -63,7 +63,6 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                         continue;
                     },
                     else => {
-                        std.log.err("{c}", .{self.previous});
                         return error.InvalidSymbol;
                     },
                 };

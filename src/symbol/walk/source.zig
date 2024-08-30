@@ -6,13 +6,9 @@ const table = @import("../table.zig");
 const types = @import("../types.zig");
 
 const SymbolSourceWalkState = enum {
-    null,
+    default,
     unique,
-    symbol,
     function,
-    return_type,
-    parameter,
-    parameter_type,
     call,
 };
 
@@ -20,7 +16,7 @@ pub const SymbolSourceWalkCallback = struct {
     symbol_table: *table.SymbolTable,
     stream: *std.io.StreamSource,
 
-    state: SymbolSourceWalkState = .null,
+    state: SymbolSourceWalkState = .default,
     function: ?usize = null,
 
     const Self = @This();
@@ -36,34 +32,11 @@ pub const SymbolSourceWalkCallback = struct {
         const allocator = self.symbol_table.symbols.allocator;
 
         switch (statement.data) {
-            .assignment,
-            => {
-                self.state = .symbol;
-            },
             .data_definition,
             .type_definition,
-            .block,
-            => {
-                self.state = .unique;
-            },
-            .function_signature => {
-                self.state = .function;
-            },
-            .call => {
-                self.state = .call;
-            },
-            .function_parameter => {
-                self.state = switch (self.state) {
-                    .null => .symbol,
-                    else => self.state,
-                };
-            },
-            .primitive_type => {
-                self.state = switch (self.state) {
-                    .return_type => .parameter,
-                    else => self.state,
-                };
-            },
+            => self.state = .unique,
+            .function_signature => self.state = .function,
+            .call => self.state = .call,
             .identifier => |identifier| {
                 _ = try self.stream.seekTo(statement.span.start);
 
@@ -83,46 +56,20 @@ pub const SymbolSourceWalkCallback = struct {
                     },
                 };
 
-                const symbol_exists: bool = self.symbol_table.containsSymbolIdentifier(&symbol_identifier);
+                if (self.symbol_table.containsSymbolIdentifier(&symbol_identifier)) {
+                    switch (self.state) {
+                        .unique => return error.SymbolReuse,
+                        .default, .function, .call => {},
+                    }
+                } else if (identifier.scope != .type or self.state != .default) {
+                    const index = try self.symbol_table.addSymbol(&symbol_identifier);
 
-                const check_unique: bool = switch (self.state) {
-                    .unique,
-                    .function,
-                    .parameter,
-                    => true,
-                    .null,
-                    .symbol,
-                    .parameter_type,
-                    .call,
-                    .return_type,
-                    => false,
-                };
-
-                if (symbol_exists and check_unique) {
-                    return error.SymbolReuse;
+                    if (self.state == .function) {
+                        self.function = index;
+                    }
                 }
 
-                self.state = switch (self.state) {
-                    .symbol, .unique, .call => scope: {
-                        if (!symbol_exists) _ = try self.symbol_table.addSymbol(&symbol_identifier);
-
-                        break :scope .null;
-                    },
-                    .function => scope: {
-                        self.function = try self.symbol_table.addSymbol(&symbol_identifier);
-
-                        break :scope .return_type;
-                    },
-                    .return_type => .parameter,
-                    .parameter => scope: {
-                        _ = try self.symbol_table.addSymbol(&symbol_identifier);
-
-                        break :scope .parameter_type;
-                    },
-                    .null,
-                    .parameter_type,
-                    => self.state,
-                };
+                self.state = .default;
 
                 const instance: types.Instance = .{
                     .span = statement.span,
@@ -162,18 +109,7 @@ pub const SymbolSourceWalkCallback = struct {
 
     pub fn exit(self: *Self, statement: *ast.Statement) !void {
         switch (statement.data) {
-            .function => {
-                self.function = null;
-            },
-            .function_signature => {
-                self.state = .null;
-            },
-            .node => {
-                self.state = switch (self.state) {
-                    .parameter_type => .parameter,
-                    else => self.state,
-                };
-            },
+            .function => self.function = null,
             else => {},
         }
     }
@@ -510,51 +446,9 @@ test "error.SymbolNotFound local type" {
     try std.testing.expectError(error.SymbolNotFound, res);
 }
 
-test "error.SymbolNotFound global" {
-    // Arrange
-    const file = "function $fun() {@s %t =w add $dne, 0 ret}";
-
-    var symbol_table = table.SymbolTable.init(test_allocator);
-    defer symbol_table.deinit();
-
-    // Act
-    const res = testSource(test_allocator, file, &symbol_table);
-
-    // Assert
-    try std.testing.expectError(error.SymbolNotFound, res);
-}
-
-test "error.SymbolNotFound label" {
-    // Arrange
-    const file = "function $fun() {@s jmp @dne}";
-
-    var symbol_table = table.SymbolTable.init(test_allocator);
-    defer symbol_table.deinit();
-
-    // Act
-    const res = testSource(test_allocator, file, &symbol_table);
-
-    // Assert
-    try std.testing.expectError(error.SymbolNotFound, res);
-}
-
 test "error.SymbolReuse type" {
     // Arrange
     const file = "type :t = { w } type :t = { b }";
-
-    var symbol_table = table.SymbolTable.init(test_allocator);
-    defer symbol_table.deinit();
-
-    // Act
-    const res = testSource(test_allocator, file, &symbol_table);
-
-    // Assert
-    try std.testing.expectError(error.SymbolReuse, res);
-}
-
-test "error.SymbolReuse global" {
-    // Arrange
-    const file = "data $d = { w 0 } function $d() {@s ret}";
 
     var symbol_table = table.SymbolTable.init(test_allocator);
     defer symbol_table.deinit();

@@ -27,17 +27,57 @@ pub fn main() !void {
         const file = try std.fs.openFileAbsolute(file_path, .{});
         defer file.close();
 
+        var file_stream = std.io.StreamSource{ .file = file };
+
+        try file.seekTo(0);
+        var line_reader = file.reader();
+
+        const newline_offsets = try lib.common.fileNewLines(allocator, &line_reader);
+        defer allocator.free(newline_offsets);
+
+        try file.seekTo(0);
         var file_reader = file.reader();
 
         std.log.info("=== Lexer ===", .{});
+
         var tokens = std.ArrayList(lib.ssa.Token).init(allocator);
         defer tokens.deinit();
 
         var lexer = lib.ssa.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
-        try lexer.lex();
+        lexer.lex() catch |err| {
+            const position = try file_stream.getPos();
+
+            lib.common.logError(
+                err,
+                file_arg,
+                newline_offsets,
+                &.{ .start = position, .end = position + 1 },
+            );
+
+            continue;
+        };
 
         for (tokens.items) |token| {
-            std.log.info("{s} {}:{}", .{ @tagName(token.token_type), token.span.start, token.span.end });
+            var type_column: [32]u8 = undefined;
+            @memset(&type_column, ' ');
+            const tag_name = @tagName(token.token_type);
+            @memcpy(type_column[0..tag_name.len], tag_name);
+
+            const start = lib.common.indexToFile(newline_offsets, token.span.start);
+            const end = lib.common.indexToFile(newline_offsets, switch (token.span.end) {
+                0 => 0,
+                else => token.span.end - 1,
+            });
+
+            std.log.info("{s}{s}:{}:{}, {s}:{}:{}", .{
+                type_column,
+                file_arg,
+                start.line,
+                start.column,
+                file_arg,
+                end.line,
+                end.column,
+            });
         }
 
         const token_slice = try tokens.toOwnedSlice();
@@ -46,40 +86,119 @@ pub fn main() !void {
         var token_reader = lib.ssa.TokenReader(@TypeOf(token_slice)).init(token_slice);
 
         std.log.info("=== Parser ===", .{});
+
         var ast = lib.ast.AST.init(allocator);
         defer ast.deinit();
 
         var parser = lib.ssa.Parser(@TypeOf(token_reader)).init(&token_reader, &ast);
-        _ = try parser.parse();
+        _ = parser.parse() catch |err| {
+            const span: lib.common.SourceSpan = scope: {
+                if (parser.previous == undefined) {
+                    break :scope .{ .start = 0, .end = 0 };
+                } else if (parser.previous == undefined) {
+                    break :scope parser.previous.span;
+                } else {
+                    break :scope parser.previous_previous.span;
+                }
+            };
 
-        var callback = LogASTWalkCallback.init();
-        var walk = lib.ast.ASTWalk(@TypeOf(callback)).init(&ast, &callback);
-        try walk.walk(allocator, ast.entrypoint() orelse return error.NotFound);
+            lib.common.logError(
+                err,
+                file_arg,
+                newline_offsets,
+                &span,
+            );
+
+            continue;
+        };
+
+        const entrypoint = ast.entrypoint() orelse unreachable;
+
+        var walk = lib.ast.ASTWalk.init(allocator, &ast);
+        defer walk.deinit();
+
+        var depth: usize = 0;
+
+        try walk.start(entrypoint);
+        while (try walk.next()) |out| {
+            switch (out.enter) {
+                true => {
+                    var type_column: [32]u8 = undefined;
+                    @memset(&type_column, ' ');
+                    const tag_name = @tagName(out.value.data);
+                    @memcpy(type_column[0..tag_name.len], tag_name);
+
+                    var depth_column: [4]u8 = undefined;
+                    @memset(&depth_column, ' ');
+                    _ = try std.fmt.bufPrint(&depth_column, "{}", .{depth});
+
+                    const start = lib.common.indexToFile(newline_offsets, out.value.span.start);
+                    const end = lib.common.indexToFile(newline_offsets, switch (out.value.span.end) {
+                        0 => 0,
+                        else => out.value.span.end - 1,
+                    });
+
+                    std.log.info("{s}{s}{s}:{}:{}, {s}:{}:{}", .{
+                        depth_column,
+                        type_column,
+                        file_arg,
+                        start.line,
+                        start.column,
+                        file_arg,
+                        end.line,
+                        end.column,
+                    });
+
+                    depth += 1;
+                },
+                false => {
+                    depth -= 1;
+                },
+            }
+        }
+
+        std.log.info("=== Symbols ===", .{});
+
+        var symbol_table = lib.symbol.SymbolTable.init(allocator);
+        defer symbol_table.deinit();
+
+        try file.seekTo(0);
+
+        var source_callback = lib.symbol.SymbolSourceWalkCallback.init(&symbol_table, &file_stream);
+
+        var error_exit = false;
+
+        try walk.start(entrypoint);
+        while (try walk.next()) |out| {
+            _ = switch (out.enter) {
+                true => source_callback.enter(out.value),
+                false => source_callback.exit(out.value),
+            } catch |err| {
+                error_exit = true;
+
+                lib.common.logError(
+                    err,
+                    file_arg,
+                    newline_offsets,
+                    &out.value.span,
+                );
+            };
+        }
+
+        if (error_exit) continue;
+
+        for (0..symbol_table.symbols.items.len) |i| {
+            const symbol = &symbol_table.symbols.items[i];
+
+            var index_column: [8]u8 = undefined;
+            @memset(&index_column, ' ');
+            _ = try std.fmt.bufPrint(&index_column, "{}", .{i});
+
+            if (symbol.identifier.function) |index| {
+                std.log.info("{s}{s} {} {s}", .{ index_column, @tagName(symbol.identifier.scope), index, symbol.identifier.name });
+            } else {
+                std.log.info("{s}{s} {s}", .{ index_column, @tagName(symbol.identifier.scope), symbol.identifier.name });
+            }
+        }
     }
 }
-
-const LogASTWalkCallback = struct {
-    depth: usize,
-
-    const Self = @This();
-
-    pub fn init() Self {
-        return Self{ .depth = 0 };
-    }
-
-    pub fn enter(self: *Self, statement: *lib.ast.Statement) !void {
-        var temp_buffer: [128]u8 = undefined;
-        var depth_buffer = temp_buffer[0 .. self.depth * 2];
-        @memset(depth_buffer[0..], ' ');
-
-        std.log.info("{s}{s} {}:{}", .{ depth_buffer, @tagName(statement.data), statement.span.start, statement.span.end });
-
-        self.depth += 1;
-    }
-
-    pub fn exit(self: *Self, statement: *lib.ast.Statement) !void {
-        _ = statement;
-
-        self.depth -= 1;
-    }
-};
