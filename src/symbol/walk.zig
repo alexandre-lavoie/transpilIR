@@ -5,12 +5,18 @@ const common = @import("../common.zig");
 const table = @import("table.zig");
 const types = @import("types.zig");
 
+const SymbolSourceWalkState = enum {
+    empty,
+    create_unique_symbol,
+    create_symbol,
+    create_function,
+};
+
 pub const SymbolSourceWalkCallback = struct {
     symbol_table: *table.SymbolTable,
     stream: *std.io.StreamSource,
 
-    create_symbol: bool = false,
-    create_function: bool = false,
+    state: SymbolSourceWalkState = .empty,
     function: ?usize = null,
 
     const Self = @This();
@@ -27,16 +33,18 @@ pub const SymbolSourceWalkCallback = struct {
 
         switch (statement.data) {
             .assignment,
+            => {
+                self.state = .create_unique_symbol;
+            },
             .data_definition,
             .type_definition,
             .type_parameter,
             .block,
             => {
-                self.create_symbol = true;
+                self.state = .create_symbol;
             },
             .function_signature => {
-                self.create_symbol = true;
-                self.create_function = true;
+                self.state = .create_function;
             },
             .identifier => |identifier| {
                 _ = try self.stream.seekTo(statement.span.start);
@@ -52,16 +60,36 @@ pub const SymbolSourceWalkCallback = struct {
                     .function = self.function,
                 };
 
-                if (self.create_symbol) {
-                    self.create_symbol = false;
+                const symbol_exists: bool = switch (self.state) {
+                    .create_symbol,
+                    .create_function,
+                    .create_unique_symbol,
+                    => self.symbol_table.containsSymbolIdentifier(&symbol_identifier),
+                    else => false,
+                };
 
-                    const index = try self.symbol_table.addSymbol(&symbol_identifier);
+                const check_unique: bool = switch (self.state) {
+                    .create_symbol, .create_function => true,
+                    else => false,
+                };
 
-                    if (self.create_function) {
-                        self.create_function = false;
-                        self.function = index;
+                if (symbol_exists and check_unique) {
+                    return error.SymbolReuse;
+                }
+
+                if (!symbol_exists) {
+                    switch (self.state) {
+                        .create_symbol, .create_unique_symbol => {
+                            _ = try self.symbol_table.addSymbol(&symbol_identifier);
+                        },
+                        .create_function => {
+                            self.function = try self.symbol_table.addSymbol(&symbol_identifier);
+                        },
+                        else => {},
                     }
                 }
+
+                self.state = .empty;
 
                 const instance: types.Instance = .{
                     .span = statement.span,
@@ -306,7 +334,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     else => null,
                 };
 
-                const memory: types.SymbolMemory = switch (type_entry) {
+                symbol.memory = switch (type_entry) {
                     .@"opaque" => scope: {
                         const literal: *types.Literal = switch (self.entries.items[i]) {
                             .literal => |v| v,
@@ -409,9 +437,6 @@ pub const SymbolMemoryWalkCallback = struct {
                     },
                     else => unreachable,
                 };
-
-                // TODO: If set, check memory equals previous.
-                symbol.memory = memory;
 
                 self.entries.clearAndFree();
             },
@@ -636,7 +661,7 @@ test "SymbolSourceWalk function" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
-test "SymbolSourceWalk function reused symbol" {
+test "SymbolSourceWalk reused local" {
     // Arrange
     const file = "function $test() {@s ret} function $test2() {@s ret}";
     const expected = [_]types.Symbol{
@@ -664,6 +689,42 @@ test "SymbolSourceWalk function reused symbol" {
                 .name = "s",
                 .scope = .label,
                 .function = 2,
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try testSource(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "SymbolSourceWalk reassigned local" {
+    // Arrange
+    const file = "function $fun() {@s %p =w add 0, 0 %p =w add 0, 0 ret}";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "fun",
+                .scope = .global,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 0,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "p",
+                .scope = .local,
+                .function = 0,
             },
         },
     };
@@ -978,4 +1039,32 @@ test "SymbolSourceWalk error.SymbolNotFound" {
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
+}
+
+test "SymbolSourceWalk type error.SymbolReuse" {
+    // Arrange
+    const file = "type :t = { w } type :t = { b }";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    const res = testSource(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.SymbolReuse, res);
+}
+
+test "SymbolSourceWalk global error.SymbolReuse" {
+    // Arrange
+    const file = "data $d = { w 0 } function $d() {@s ret}";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    const res = testSource(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.SymbolReuse, res);
 }
