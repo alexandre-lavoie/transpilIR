@@ -128,7 +128,11 @@ pub const ASTWalk = struct {
                 try self.stack.append(.{ .index = d.return_type });
                 if (d.parameters) |parameters| try self.stack.append(.{ .index = parameters });
             },
-            .type_parameter => |*d| {
+            .function_parameter => |*d| {
+                try self.stack.append(.{ .index = d.value });
+                try self.stack.append(.{ .index = d.type });
+            },
+            .call_parameter => |*d| {
                 try self.stack.append(.{ .index = d.value });
                 try self.stack.append(.{ .index = d.type });
             },
@@ -342,11 +346,11 @@ test "function" {
         .linkage,
         .primitive_type,
         .node,
-        .type_parameter,
+        .function_parameter,
         .identifier,
         .primitive_type,
         .node,
-        .type_parameter,
+        .function_parameter,
         .identifier,
         .identifier,
         .node,

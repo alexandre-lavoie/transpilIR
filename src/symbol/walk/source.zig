@@ -12,6 +12,7 @@ const SymbolSourceWalkState = enum {
     function,
     parameter,
     parameter_type,
+    call,
 };
 
 pub const SymbolSourceWalkCallback = struct {
@@ -47,7 +48,10 @@ pub const SymbolSourceWalkCallback = struct {
             .function_signature => {
                 self.state = .function;
             },
-            .type_parameter => {
+            .call => {
+                self.state = .call;
+            },
+            .function_parameter => {
                 if (self.state == .null) {
                     self.state = .symbol;
                 }
@@ -81,6 +85,7 @@ pub const SymbolSourceWalkCallback = struct {
                     .null,
                     .symbol,
                     .parameter_type,
+                    .call,
                     => false,
                 };
 
@@ -89,7 +94,7 @@ pub const SymbolSourceWalkCallback = struct {
                 }
 
                 self.state = switch (self.state) {
-                    .symbol, .unique => scope: {
+                    .symbol, .unique, .call => scope: {
                         if (!symbol_exists) _ = try self.symbol_table.addSymbol(&symbol_identifier);
 
                         break :scope .null;
@@ -320,6 +325,41 @@ test "reassigned local" {
                 .name = "p",
                 .scope = .local,
                 .function = 0,
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try testSource(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "call" {
+    // Arrange
+    const file = "function $fun() {@s call $other(w 0) call $fun() ret}";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "fun",
+                .scope = .global,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 0,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "other",
+                .scope = .global,
             },
         },
     };

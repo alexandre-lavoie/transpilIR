@@ -705,14 +705,14 @@ pub fn Parser(comptime Reader: type) type {
 
                 const param = try switch (param_token_type) {
                     .env => switch (first) {
-                        true => self.envParameter(),
+                        true => self.functionEnvParameter(),
                         false => return error.ParseInvalidEnv,
                     },
                     .variable_arguments => switch (first) {
                         true => return error.ParseInvalidVarArgs,
                         false => self.varArgParameter(),
                     },
-                    else => self.typeParameter(),
+                    else => self.functionParameter(),
                 };
 
                 const param_end = self.previous_previous.span.end;
@@ -742,7 +742,7 @@ pub fn Parser(comptime Reader: type) type {
             return parameter_head;
         }
 
-        fn envParameter(self: *Self) !ast.StatementIndex {
+        fn functionEnvParameter(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
             const type_statement = try self.envType();
@@ -752,10 +752,31 @@ pub fn Parser(comptime Reader: type) type {
 
             return try self.new(
                 .{ .start = start, .end = end },
-                .{ .type_parameter = .{
-                    .type = type_statement,
-                    .value = value,
-                } },
+                .{
+                    .function_parameter = .{
+                        .type = type_statement,
+                        .value = value,
+                    },
+                },
+            );
+        }
+
+        fn callEnvParameter(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            const type_statement = try self.envType();
+            const value = try self.blockValue();
+
+            const end = self.previous_previous.span.end;
+
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{
+                    .call_parameter = .{
+                        .type = type_statement,
+                        .value = value,
+                    },
+                },
             );
         }
 
@@ -773,7 +794,7 @@ pub fn Parser(comptime Reader: type) type {
             );
         }
 
-        fn typeParameter(self: *Self) !ast.StatementIndex {
+        fn functionParameter(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
             const type_statement = try self.variableType();
@@ -783,7 +804,7 @@ pub fn Parser(comptime Reader: type) type {
 
             return try self.new(
                 .{ .start = start, .end = end },
-                .{ .type_parameter = .{
+                .{ .function_parameter = .{
                     .type = type_statement,
                     .value = value,
                 } },
@@ -800,7 +821,7 @@ pub fn Parser(comptime Reader: type) type {
 
             return try self.new(
                 .{ .start = start, .end = end },
-                .{ .type_parameter = .{
+                .{ .call_parameter = .{
                     .type = type_statement,
                     .value = value,
                 } },
@@ -1528,7 +1549,7 @@ pub fn Parser(comptime Reader: type) type {
 
                 const param = try switch (self.previous.token_type) {
                     .env => switch (first) {
-                        true => self.envParameter(),
+                        true => self.callEnvParameter(),
                         false => return error.ParseInvalidEnv,
                     },
                     .variable_arguments => switch (first or hasVarArgs) {
@@ -2408,7 +2429,7 @@ test "function with custom type parameter" {
         .identifier,
         .identifier,
         .identifier,
-        .type_parameter,
+        .function_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -2433,7 +2454,7 @@ test "function with one parameter" {
         .identifier,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .function_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -2458,7 +2479,7 @@ test "function with trailing comma" {
         .identifier,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .function_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -2483,15 +2504,15 @@ test "function with many parameters" {
         .identifier,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .function_parameter,
         .node,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .function_parameter,
         .node,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .function_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -2516,7 +2537,7 @@ test "function with env parameter" {
         .identifier,
         .env_type,
         .identifier,
-        .type_parameter,
+        .function_parameter,
         .node,
         .function_signature,
         .identifier,
@@ -2541,7 +2562,7 @@ test "function with variable parameter" {
         .identifier,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .function_parameter,
         .node,
         .variadic_parameter,
         .node,
@@ -3052,11 +3073,11 @@ test "call parameters" {
         .identifier,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .call_parameter,
         .node,
         .identifier,
         .identifier,
-        .type_parameter,
+        .call_parameter,
         .node,
         .call,
         .node,
@@ -3085,13 +3106,13 @@ test "call varargs" {
         .identifier,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .call_parameter,
         .node,
         .variadic_parameter,
         .node,
         .primitive_type,
         .identifier,
-        .type_parameter,
+        .call_parameter,
         .node,
         .call,
         .node,
