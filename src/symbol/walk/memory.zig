@@ -949,7 +949,7 @@ test "function" {
 
 test "call" {
     // Arrange
-    const file = "type :t = { 32 } function $test(env %e, l %l, :t %s, ...) {@s call $other(w 0, ..., l %l) call $test(env %e, l $test, :t %s, ..., l %l) ret}";
+    const file = "type :t = { 32 } function $test(env %e, l %l, :t %s, ...) {@s call $other(env %e, w 0, :t %s, ..., l %l) call $test(env %e, l $test, :t %s, ..., l %l) ret}";
     const expected = [_]types.Symbol{
         .{
             .identifier = .{
@@ -1035,7 +1035,13 @@ test "call" {
                     .vararg = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .{
+                            .env = undefined,
+                        },
+                        .{
                             .primitive = .word,
+                        },
+                        .{
+                            .type = 0,
                         },
                     },
                 },
