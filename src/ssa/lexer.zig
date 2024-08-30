@@ -79,7 +79,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn comment(self: *Self) !void {
-            if (self.previous != '#') return error.CommentError;
+            if (self.previous != '#') return error.InvalidComment;
 
             while (true) {
                 switch (self.reader_readByte()) {
@@ -90,7 +90,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn identifier(self: *Self, previous: u8, token_type: token.TokenType) !token.Token {
-            if (previous != self.previous) return error.IdentifierSymbolError;
+            if (previous != self.previous) return error.InvalidIdentifier;
 
             while (true) {
                 switch (self.reader_readByte()) {
@@ -119,7 +119,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn stringLiteral(self: *Self) !token.Token {
-            if ('"' != self.previous) return error.StringOpenError;
+            if ('"' != self.previous) return error.InvalidString;
 
             while (true) {
                 switch (self.reader_readByte()) {
@@ -128,7 +128,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
 
                         return token.Token.init(.string_literal);
                     },
-                    '\x00' => return error.StringCloseError,
+                    '\x00' => return error.StringNotClosed,
                     '\\' => {
                         _ = self.reader_readByte();
                         continue;
@@ -143,9 +143,9 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                 '0'...'9' => {},
                 '-' => switch (self.reader_readByte()) {
                     '0'...'9' => {},
-                    else => return error.IntegerNegativeError,
+                    else => return error.InvalidNegativeDigit,
                 },
-                else => return error.IntegerDigitError,
+                else => return error.InvalidDigit,
             }
 
             while (true) {
@@ -165,9 +165,9 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         fn variableArguments(self: *Self) !token.Token {
-            if (self.previous != '.') return error.ArgumentSpreadError;
-            if (self.reader_readByte() != '.') return error.ArgumentSpreadError;
-            if (self.reader_readByte() != '.') return error.ArgumentSpreadError;
+            if (self.previous != '.') return error.InvalidArgumentSpread;
+            if (self.reader_readByte() != '.') return error.InvalidArgumentSpread;
+            if (self.reader_readByte() != '.') return error.InvalidArgumentSpread;
 
             _ = self.reader_readByte();
 
@@ -204,18 +204,18 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             const token_type: token.TokenType = switch (ftype) {
                 'd' => .double_literal,
                 's' => .single_literal,
-                else => return error.FloatingInvalidTypeError,
+                else => return error.InvalidFloatType,
             };
 
-            if ('_' != self.previous) return error.FloatingSymbolError;
+            if ('_' != self.previous) return error.InvalidFloatType;
 
             switch (self.reader_readByte()) {
                 '0'...'9' => {},
                 '-' => switch (self.reader_readByte()) {
                     '0'...'9' => {},
-                    else => return error.FloatingNegativeError,
+                    else => return error.InvalidNegativeDigit,
                 },
-                else => return error.FloatingDigitError,
+                else => return error.InvalidDigit,
             }
 
             scope: {
@@ -224,7 +224,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                         '0'...'9' => continue,
                         '.' => switch (self.reader_readByte()) {
                             '0'...'9' => break,
-                            else => return error.FloatingDecimalError,
+                            else => return error.InvalidDecimal,
                         },
                         else => break :scope,
                     }
@@ -568,62 +568,57 @@ test "variableArguments" {
 // Error Tests
 //
 
-test "error.StringCloseError" {
+test "error.StringNotClosed" {
     // Arrange
     const file = "\"not closed";
-    const expected = error.StringCloseError;
 
     // Act
     const res = testLex(file);
 
     // Assert
-    try std.testing.expectError(expected, res);
+    try std.testing.expectError(error.StringNotClosed, res);
 }
 
-test "error.FloatingNegativeError" {
+test "error.InvalidNegativeDigit" {
     // Arrange
     const file = "s_- ";
-    const expected = error.FloatingNegativeError;
 
     // Act
     const res = testLex(file);
 
     // Assert
-    try std.testing.expectError(expected, res);
+    try std.testing.expectError(error.InvalidNegativeDigit, res);
 }
 
-test "error.FloatingDecimalError" {
+test "error.InvalidDecimal" {
     // Arrange
     const file = "d_0. ";
-    const expected = error.FloatingDecimalError;
 
     // Act
     const res = testLex(file);
 
     // Assert
-    try std.testing.expectError(expected, res);
+    try std.testing.expectError(error.InvalidDecimal, res);
 }
 
-test "error.FloatingDigitError" {
+test "error.InvalidDigit" {
     // Arrange
     const file = "s_ ";
-    const expected = error.FloatingDigitError;
 
     // Act
     const res = testLex(file);
 
     // Assert
-    try std.testing.expectError(expected, res);
+    try std.testing.expectError(error.InvalidDigit, res);
 }
 
-test "error.ArgumentSpreadError" {
+test "error.InvalidArgumentSpread" {
     // Arrange
     const file = ".. ";
-    const expected = error.ArgumentSpreadError;
 
     // Act
     const res = testLex(file);
 
     // Assert
-    try std.testing.expectError(expected, res);
+    try std.testing.expectError(error.InvalidArgumentSpread, res);
 }

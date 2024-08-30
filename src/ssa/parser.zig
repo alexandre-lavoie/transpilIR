@@ -80,7 +80,7 @@ pub fn Parser(comptime Reader: type) type {
         fn module(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .module_start) return error.ParseMissingModule;
+            if (self.previous.token_type != .module_start) return error.MissingModule;
             _ = self.next();
 
             var function_head: ?ast.StatementIndex = null;
@@ -100,7 +100,7 @@ pub fn Parser(comptime Reader: type) type {
                     .module_end => break,
                     .@"export", .thread, .section, .function, .data => self.linkageDefinition(&token_type),
                     .type => self.typeDefinition(),
-                    else => return error.ParseModuleInvalidToken,
+                    else => return error.ModuleInvalidToken,
                 };
                 const def_end = self.previous_previous.span.end;
 
@@ -108,14 +108,14 @@ pub fn Parser(comptime Reader: type) type {
                     .function => &function_head,
                     .data => &data_head,
                     .type => &type_head,
-                    else => return error.ParseUnexpectedType,
+                    else => return error.UnexpectedType,
                 };
 
                 const tail = switch (token_type) {
                     .function => &function_tail,
                     .data => &data_tail,
                     .type => &type_tail,
-                    else => return error.ParseUnexpectedType,
+                    else => return error.UnexpectedType,
                 };
 
                 _ = try self.node(
@@ -139,7 +139,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn scopeIdentifier(self: *Self, token_type: token.TokenType, scope: ast.Scope, thread: bool, skip_read: bool) !ast.StatementIndex {
-            if (self.previous.token_type != token_type) return error.ParseInvalidIdentifier;
+            if (self.previous.token_type != token_type) return error.InvalidIdentifier;
 
             const span = self.previous.span;
             if (!skip_read) _ = self.next();
@@ -170,18 +170,18 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn threadIdentifier(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .thread) return error.ParseMissingThread;
+            if (self.previous.token_type != .thread) return error.MissingThread;
             _ = self.next();
 
             return try switch (self.previous.token_type) {
                 .global_identifier => self.scopeIdentifier(.global_identifier, .global, true, false),
                 .local_identifier => self.scopeIdentifier(.local_identifier, .local, true, false),
-                else => return error.ParseInvalidThread,
+                else => return error.InvalidThread,
             };
         }
 
         fn stackAlignment(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .@"align") return error.ParseMissingAlign;
+            if (self.previous.token_type != .@"align") return error.MissingAlign;
 
             _ = self.next();
 
@@ -199,7 +199,7 @@ pub fn Parser(comptime Reader: type) type {
                 .single => .single,
                 .word_unsigned => .word_unsigned,
                 .word => .word,
-                else => return error.ParseInvalidPrimitiveType,
+                else => return error.InvalidPrimitiveType,
             };
         }
 
@@ -216,7 +216,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn zeroType(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .zero) return error.ParseMissingZero;
+            if (self.previous.token_type != .zero) return error.MissingZero;
 
             const span = self.previous.span;
             _ = self.next();
@@ -235,7 +235,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn envType(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .env) return error.ParseMissingEnv;
+            if (self.previous.token_type != .env) return error.MissingEnv;
 
             const span = self.previous.span;
             _ = self.next();
@@ -247,7 +247,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn integer(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .integer_literal) return error.ParseMissingIntegerLiteral;
+            if (self.previous.token_type != .integer_literal) return error.MissingIntegerLiteral;
 
             const span = self.previous.span;
             _ = self.next();
@@ -261,7 +261,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn single(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .single_literal) return error.ParseMissingSingleLiteral;
+            if (self.previous.token_type != .single_literal) return error.MissingSingleLiteral;
 
             const span = self.previous.span;
             _ = self.next();
@@ -275,7 +275,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn double(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .double_literal) return error.ParseMissingDoubleLiteral;
+            if (self.previous.token_type != .double_literal) return error.MissingDoubleLiteral;
 
             const span = self.previous.span;
             _ = self.next();
@@ -289,7 +289,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn string(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .string_literal) return error.ParseMissingStringLiteral;
+            if (self.previous.token_type != .string_literal) return error.MissingStringLiteral;
 
             const span = self.previous.span;
             _ = self.next();
@@ -355,12 +355,12 @@ pub fn Parser(comptime Reader: type) type {
         fn typeDefinition(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .type) return error.ParseMissingType;
+            if (self.previous.token_type != .type) return error.MissingType;
             _ = self.next();
 
             const identifier = try self.typeIdentifier();
 
-            if (self.previous.token_type != .assign) return error.ParseMissingEqual;
+            if (self.previous.token_type != .assign) return error.MissingEqual;
             _ = self.next();
 
             const body = try self.typeDefinitionBody();
@@ -384,7 +384,7 @@ pub fn Parser(comptime Reader: type) type {
                 else => null,
             };
 
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
+            if (self.previous.token_type != .open_curly_brace) return error.MissingOpenCurlyBrace;
             _ = self.next();
 
             return try switch (self.previous.token_type) {
@@ -398,7 +398,7 @@ pub fn Parser(comptime Reader: type) type {
             var type_head: ?ast.StatementIndex = null;
             var type_tail: ?ast.StatementIndex = null;
 
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
+            if (self.previous.token_type != .open_curly_brace) return error.MissingOpenCurlyBrace;
 
             while (true) {
                 const out_start = self.previous.span.start;
@@ -419,7 +419,7 @@ pub fn Parser(comptime Reader: type) type {
                 switch (self.previous.token_type) {
                     .close_curly_brace => break,
                     .open_curly_brace => continue,
-                    else => return error.ParseMissingOpenCurlyBrace,
+                    else => return error.MissingOpenCurlyBrace,
                 }
             }
 
@@ -431,7 +431,7 @@ pub fn Parser(comptime Reader: type) type {
                 .{ .start = start, .end = end },
                 .{ .union_type = .{
                     .alignment = alignment,
-                    .types = type_head orelse return error.ParseEmptyUnion,
+                    .types = type_head orelse return error.EmptyUnion,
                 } },
             );
         }
@@ -439,7 +439,7 @@ pub fn Parser(comptime Reader: type) type {
         fn opaqueType(self: *Self, start: usize, alignment: ?ast.StatementIndex) !ast.StatementIndex {
             const size = try self.integer();
 
-            if (self.previous.token_type != .close_curly_brace) return error.ParseMissingCloseCurlyBrace;
+            if (self.previous.token_type != .close_curly_brace) return error.MissingCloseCurlyBrace;
             _ = self.next();
 
             const end = self.previous_previous.span.end;
@@ -479,7 +479,7 @@ pub fn Parser(comptime Reader: type) type {
                 switch (self.previous.token_type) {
                     .close_curly_brace => break,
                     .comma => _ = self.next(),
-                    else => return error.ParseMissingComma,
+                    else => return error.MissingComma,
                 }
             }
 
@@ -491,7 +491,7 @@ pub fn Parser(comptime Reader: type) type {
                 .{ .start = start, .end = end },
                 .{ .struct_type = .{
                     .alignment = alignment,
-                    .members = member_head orelse return error.ParseEmptyStruct,
+                    .members = member_head orelse return error.EmptyStruct,
                 } },
             );
         }
@@ -518,23 +518,23 @@ pub fn Parser(comptime Reader: type) type {
             out_token_type.* = switch (self.previous.token_type) {
                 .data => .data,
                 .function => .function,
-                else => return error.ParseInvalidLinkageType,
+                else => return error.InvalidLinkageType,
             };
 
             return try switch (self.previous.token_type) {
                 .data => self.dataDefinition(start, link),
                 .function => self.functionDefinition(start, link),
-                else => return error.ParseInvalidLinkageType,
+                else => return error.InvalidLinkageType,
             };
         }
 
         fn dataDefinition(self: *Self, start: usize, link: ast.StatementIndex) !ast.StatementIndex {
-            if (self.previous.token_type != .data) return error.ParseInvalidData;
+            if (self.previous.token_type != .data) return error.InvalidData;
             _ = self.next();
 
             const identifier = try self.globalIdentifier();
 
-            if (self.previous.token_type != .assign) return error.ParseMissingEqual;
+            if (self.previous.token_type != .assign) return error.MissingEqual;
             _ = self.next();
 
             var alignment: ?ast.StatementIndex = null;
@@ -543,7 +543,7 @@ pub fn Parser(comptime Reader: type) type {
                 else => {},
             }
 
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
+            if (self.previous.token_type != .open_curly_brace) return error.MissingOpenCurlyBrace;
             _ = self.next();
 
             var value_head: ?ast.StatementIndex = null;
@@ -593,12 +593,12 @@ pub fn Parser(comptime Reader: type) type {
                     );
                 }
 
-                if (!has_data) return error.ParseEmptyData;
+                if (!has_data) return error.EmptyData;
 
                 switch (self.previous.token_type) {
                     .close_curly_brace => break,
                     .comma => _ = self.next(),
-                    else => return error.ParseMissingComma,
+                    else => return error.MissingComma,
                 }
             }
 
@@ -611,7 +611,7 @@ pub fn Parser(comptime Reader: type) type {
                 .{ .data_definition = .{
                     .linkage = link,
                     .identifier = identifier,
-                    .values = value_head orelse return error.ParseEmptyData,
+                    .values = value_head orelse return error.EmptyData,
                 } },
             );
         }
@@ -627,14 +627,14 @@ pub fn Parser(comptime Reader: type) type {
                 .single_literal => self.single(),
                 .double_literal => self.double(),
                 .string_literal => self.string(),
-                else => return error.ParseInvalidDataValue,
+                else => return error.InvalidDataValue,
             };
 
             if (self.previous.token_type != .plus) return left;
 
-            if (!canOffset) return error.ParseInvalidDataOffset;
+            if (!canOffset) return error.InvalidDataOffset;
 
-            if (self.next().token_type != .integer_literal) return error.ParseInvalidOffset;
+            if (self.next().token_type != .integer_literal) return error.InvalidOffset;
 
             const offset = try self.integer();
 
@@ -691,7 +691,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn functionParameters(self: *Self) !?ast.StatementIndex {
-            if (self.previous.token_type != .open_parenthesis) return error.ParseMissingOpenParenthesis;
+            if (self.previous.token_type != .open_parenthesis) return error.MissingOpenParenthesis;
             _ = self.next();
 
             var parameter_head: ?ast.StatementIndex = null;
@@ -706,10 +706,10 @@ pub fn Parser(comptime Reader: type) type {
                 const param = try switch (param_token_type) {
                     .env => switch (first) {
                         true => self.functionEnvParameter(),
-                        false => return error.ParseInvalidEnv,
+                        false => return error.InvalidEnv,
                     },
                     .variable_arguments => switch (first) {
-                        true => return error.ParseInvalidVarArgs,
+                        true => return error.InvalidVarArgs,
                         false => self.varArgParameter(),
                     },
                     else => self.functionParameter(),
@@ -729,13 +729,13 @@ pub fn Parser(comptime Reader: type) type {
                 switch (self.previous.token_type) {
                     .close_parenthesis => break,
                     .comma => _ = self.next(),
-                    else => return error.ParseMissingComma,
+                    else => return error.MissingComma,
                 }
 
                 first = false;
             }
 
-            if (self.previous.token_type != .close_parenthesis) return error.ParseMissingCloseParenthesis;
+            if (self.previous.token_type != .close_parenthesis) return error.MissingCloseParenthesis;
 
             _ = self.next();
 
@@ -783,7 +783,7 @@ pub fn Parser(comptime Reader: type) type {
         fn varArgParameter(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .variable_arguments) return error.ParseMissingVarArg;
+            if (self.previous.token_type != .variable_arguments) return error.MissingVarArg;
             _ = self.next();
 
             const end = self.previous_previous.span.end;
@@ -829,7 +829,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn functionBody(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .open_curly_brace) return error.ParseMissingOpenCurlyBrace;
+            if (self.previous.token_type != .open_curly_brace) return error.MissingOpenCurlyBrace;
 
             _ = self.next();
 
@@ -854,13 +854,13 @@ pub fn Parser(comptime Reader: type) type {
 
             _ = self.next();
 
-            return block_head orelse error.ParseEmptyFunctionBody;
+            return block_head orelse error.EmptyFunctionBody;
         }
 
         fn block(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .label_identifier) return error.ParseMissingLabel;
+            if (self.previous.token_type != .label_identifier) return error.MissingLabel;
 
             const label = try self.labelIdentifier();
 
@@ -941,7 +941,7 @@ pub fn Parser(comptime Reader: type) type {
                 .jump_not_zero => self.branch(),
                 .@"return" => try self.@"return"(),
                 .label_identifier => try self.fallThroughJump(),
-                else => return error.ParseInvalidBlockLine,
+                else => return error.InvalidBlockLine,
             };
 
             const end = self.previous_previous.span.end;
@@ -966,7 +966,7 @@ pub fn Parser(comptime Reader: type) type {
                 .integer_literal => self.integer(),
                 .single_literal => self.single(),
                 .double_literal => self.double(),
-                else => return error.ParseInvalidBlockValue,
+                else => return error.InvalidBlockValue,
             };
         }
 
@@ -975,7 +975,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const identifier = try self.localIdentifier();
 
-            if (self.previous.token_type != .assign) return error.ParseMissingEqual;
+            if (self.previous.token_type != .assign) return error.MissingEqual;
             _ = self.next();
 
             const data_type = try self.variableType();
@@ -1089,7 +1089,7 @@ pub fn Parser(comptime Reader: type) type {
                 => self.comparison(data_type),
                 else => {
                     std.log.err("{s}", .{@tagName(self.previous.token_type)});
-                    return error.ParseInvalidAssignment;
+                    return error.InvalidAssignment;
                 },
             };
         }
@@ -1097,7 +1097,7 @@ pub fn Parser(comptime Reader: type) type {
         fn allocate(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .allocate) return error.ParseMissingAllocate;
+            if (self.previous.token_type != .allocate) return error.MissingAllocate;
             _ = self.next();
 
             const alignment = try self.integer();
@@ -1118,7 +1118,7 @@ pub fn Parser(comptime Reader: type) type {
         fn vastart(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .vastart) return error.ParseMissingVastart;
+            if (self.previous.token_type != .vastart) return error.MissingVastart;
             _ = self.next();
 
             const parameter = try self.blockValue();
@@ -1134,7 +1134,7 @@ pub fn Parser(comptime Reader: type) type {
         fn vaarg(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .vaarg) return error.ParseMissingVaarg;
+            if (self.previous.token_type != .vaarg) return error.MissingVaarg;
             _ = self.next();
 
             const parameter = try self.blockValue();
@@ -1153,7 +1153,7 @@ pub fn Parser(comptime Reader: type) type {
         fn negate(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .negate) return error.ParseMissingVaarg;
+            if (self.previous.token_type != .negate) return error.MissingVaarg;
             _ = self.next();
 
             const value = try self.blockValue();
@@ -1172,17 +1172,17 @@ pub fn Parser(comptime Reader: type) type {
         fn blit(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .blit) return error.ParseMissingBlit;
+            if (self.previous.token_type != .blit) return error.MissingBlit;
             _ = self.next();
 
             const source = try self.blockValue();
 
-            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            if (self.previous.token_type != .comma) return error.MissingComma;
             _ = self.next();
 
             const target = try self.blockValue();
 
-            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            if (self.previous.token_type != .comma) return error.MissingComma;
             _ = self.next();
 
             const size = try self.blockValue();
@@ -1223,7 +1223,7 @@ pub fn Parser(comptime Reader: type) type {
                     .word_to_long => .long,
                     .word_to_single_unsigned => .single,
                     .word_to_single => .single,
-                    else => return error.ParseMissingCopy,
+                    else => return error.MissingCopy,
                 };
 
                 break :scope try self.new(
@@ -1253,7 +1253,7 @@ pub fn Parser(comptime Reader: type) type {
                     .word_to_long => .word,
                     .word_to_single_unsigned => .word_unsigned,
                     .word_to_single => .word,
-                    else => return error.ParseMissingCopy,
+                    else => return error.MissingCopy,
                 };
 
                 break :scope try self.new(
@@ -1290,7 +1290,7 @@ pub fn Parser(comptime Reader: type) type {
                 .long_store => .long,
                 .single_store => .single,
                 .word_store => .word,
-                else => return error.ParseMissingStore,
+                else => return error.MissingStore,
             };
 
             const memory_type = try self.new(
@@ -1303,7 +1303,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const source = try self.blockValue();
 
-            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            if (self.previous.token_type != .comma) return error.MissingComma;
             _ = self.next();
 
             const target = try self.blockValue();
@@ -1334,7 +1334,7 @@ pub fn Parser(comptime Reader: type) type {
                 .single_load => .single,
                 .word_load_unsigned => .word_unsigned,
                 .word_load => .word,
-                else => return error.ParseMissingStore,
+                else => return error.MissingStore,
             };
 
             const memory_type = try self.new(
@@ -1376,13 +1376,13 @@ pub fn Parser(comptime Reader: type) type {
                 .shift_right => .logical_shift_right,
                 .shift_left => .shift_left,
                 .bitwise_xor => .xor,
-                else => return error.ParseInvalidBinaryOperation,
+                else => return error.InvalidBinaryOperation,
             };
             _ = self.next();
 
             const left = try self.blockValue();
 
-            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            if (self.previous.token_type != .comma) return error.MissingComma;
             _ = self.next();
 
             const right = try self.blockValue();
@@ -1412,7 +1412,7 @@ pub fn Parser(comptime Reader: type) type {
                 .double_less_than, .long_less_than, .long_less_than_unsigned, .single_less_than, .word_less_than, .word_less_than_unsigned => .less_than,
                 .double_all_nan, .single_all_nan => .all_nan,
                 .double_any_nan, .single_any_nan => .any_nan,
-                else => return error.ParseInvalidComparison,
+                else => return error.InvalidComparison,
             };
 
             const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
@@ -1422,7 +1422,7 @@ pub fn Parser(comptime Reader: type) type {
                 .single_equal, .single_not_equal, .single_greater_than_equal, .single_greater_than, .single_less_than_equal, .single_less_than, .single_all_nan, .single_any_nan => .single,
                 .word_equal, .word_not_equal, .word_greater_than_equal, .word_greater_than, .word_less_than_equal, .word_less_than => .word,
                 .word_greater_than_equal_unsigned, .word_greater_than_unsigned, .word_less_than_equal_unsigned, .word_less_than_unsigned => .word_unsigned,
-                else => return error.ParseInvalidComparison,
+                else => return error.InvalidComparison,
             };
 
             const comparison_type = try self.new(
@@ -1434,7 +1434,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const left = try self.blockValue();
 
-            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            if (self.previous.token_type != .comma) return error.MissingComma;
             _ = self.next();
 
             const right = try self.blockValue();
@@ -1456,7 +1456,7 @@ pub fn Parser(comptime Reader: type) type {
         fn phi(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .phi) return error.ParseMissingPhi;
+            if (self.previous.token_type != .phi) return error.MissingPhi;
             _ = self.next();
 
             var parameter_head: ?ast.StatementIndex = null;
@@ -1490,7 +1490,7 @@ pub fn Parser(comptime Reader: type) type {
                 .{
                     .phi = .{
                         .data_type = data_type,
-                        .parameters = parameter_head orelse return error.ParseEmptyPhi,
+                        .parameters = parameter_head orelse return error.EmptyPhi,
                     },
                 },
             );
@@ -1529,7 +1529,7 @@ pub fn Parser(comptime Reader: type) type {
                 );
             };
 
-            if (self.previous.token_type != .call) return error.ParseMissingCall;
+            if (self.previous.token_type != .call) return error.MissingCall;
             _ = self.next();
 
             const target = try self.blockValue();
@@ -1551,7 +1551,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn callParameters(self: *Self) !?ast.StatementIndex {
-            if (self.previous.token_type != .open_parenthesis) return error.ParseMissingOpenParenthesis;
+            if (self.previous.token_type != .open_parenthesis) return error.MissingOpenParenthesis;
             _ = self.next();
 
             var parameter_head: ?ast.StatementIndex = null;
@@ -1565,10 +1565,10 @@ pub fn Parser(comptime Reader: type) type {
                 const param = try switch (self.previous.token_type) {
                     .env => switch (first) {
                         true => self.callEnvParameter(),
-                        false => return error.ParseInvalidEnv,
+                        false => return error.InvalidEnv,
                     },
                     .variable_arguments => switch (first or hasVarArgs) {
-                        true => return error.ParseInvalidVarArgs,
+                        true => return error.InvalidVarArgs,
                         false => scope: {
                             hasVarArgs = true;
                             break :scope self.varArgParameter();
@@ -1589,13 +1589,13 @@ pub fn Parser(comptime Reader: type) type {
                 switch (self.previous.token_type) {
                     .close_parenthesis => break,
                     .comma => _ = self.next(),
-                    else => return error.ParseMissingComma,
+                    else => return error.MissingComma,
                 }
 
                 first = false;
             }
 
-            if (self.previous.token_type != .close_parenthesis) return error.ParseMissingCloseParenthesis;
+            if (self.previous.token_type != .close_parenthesis) return error.MissingCloseParenthesis;
 
             _ = self.next();
 
@@ -1605,17 +1605,17 @@ pub fn Parser(comptime Reader: type) type {
         fn branch(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .jump_not_zero) return error.ParseMissingJump;
+            if (self.previous.token_type != .jump_not_zero) return error.MissingJump;
             _ = self.next();
 
             const condition = try self.blockValue();
 
-            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            if (self.previous.token_type != .comma) return error.MissingComma;
             _ = self.next();
 
             const true_label = try self.labelIdentifier();
 
-            if (self.previous.token_type != .comma) return error.ParseMissingComma;
+            if (self.previous.token_type != .comma) return error.MissingComma;
             _ = self.next();
 
             const false_label = try self.labelIdentifier();
@@ -1633,7 +1633,7 @@ pub fn Parser(comptime Reader: type) type {
         }
 
         fn halt(self: *Self) !ast.StatementIndex {
-            if (self.previous.token_type != .halt) return error.ParseMissingHalt;
+            if (self.previous.token_type != .halt) return error.MissingHalt;
 
             const span = self.previous.span;
             _ = self.next();
@@ -1660,7 +1660,7 @@ pub fn Parser(comptime Reader: type) type {
         fn jump(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .jump) return error.ParseMissingJump;
+            if (self.previous.token_type != .jump) return error.MissingJump;
             _ = self.next();
 
             const label = try self.labelIdentifier();
@@ -1678,7 +1678,7 @@ pub fn Parser(comptime Reader: type) type {
         fn @"return"(self: *Self) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            if (self.previous.token_type != .@"return") return error.ParseMissingReturn;
+            if (self.previous.token_type != .@"return") return error.MissingReturn;
             _ = self.next();
 
             const value: ?ast.StatementIndex = self.blockValue() catch undefined;
@@ -3169,10 +3169,10 @@ test "call varargs" {
 // Error Tests
 //
 
-test "data error.ParseInvalidIdentifier" {
+test "data error.InvalidIdentifier" {
     // Arrange
     const file = "data";
-    const expected = error.ParseInvalidIdentifier;
+    const expected = error.InvalidIdentifier;
 
     // Act
     const res = testParser(file);
@@ -3181,10 +3181,10 @@ test "data error.ParseInvalidIdentifier" {
     try std.testing.expectError(expected, res);
 }
 
-test "data error.ParseInvalidIdentifier 2" {
+test "data error.InvalidIdentifier 2" {
     // Arrange
     const file = "data @d";
-    const expected = error.ParseInvalidIdentifier;
+    const expected = error.InvalidIdentifier;
 
     // Act
     const res = testParser(file);
@@ -3193,10 +3193,10 @@ test "data error.ParseInvalidIdentifier 2" {
     try std.testing.expectError(expected, res);
 }
 
-test "data error.ParseMissingEqual" {
+test "data error.MissingEqual" {
     // Arrange
     const file = "data $d 1";
-    const expected = error.ParseMissingEqual;
+    const expected = error.MissingEqual;
 
     // Act
     const res = testParser(file);
@@ -3205,10 +3205,10 @@ test "data error.ParseMissingEqual" {
     try std.testing.expectError(expected, res);
 }
 
-test "data error.ParseInvalidPrimitiveType" {
+test "data error.InvalidPrimitiveType" {
     // Arrange
     const file = "data $d = {1}";
-    const expected = error.ParseInvalidPrimitiveType;
+    const expected = error.InvalidPrimitiveType;
 
     // Act
     const res = testParser(file);
@@ -3217,10 +3217,10 @@ test "data error.ParseInvalidPrimitiveType" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseInvalidPrimitiveType" {
+test "function error.InvalidPrimitiveType" {
     // Arrange
     const file = "function";
-    const expected = error.ParseInvalidPrimitiveType;
+    const expected = error.InvalidPrimitiveType;
 
     // Act
     const res = testParser(file);
@@ -3229,10 +3229,10 @@ test "function error.ParseInvalidPrimitiveType" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseInvalidPrimitiveType 2" {
+test "function error.InvalidPrimitiveType 2" {
     // Arrange
     const file = "function @fun() {@s ret}";
-    const expected = error.ParseInvalidPrimitiveType;
+    const expected = error.InvalidPrimitiveType;
 
     // Act
     const res = testParser(file);
@@ -3241,10 +3241,10 @@ test "function error.ParseInvalidPrimitiveType 2" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseInvalidVarArgs" {
+test "function error.InvalidVarArgs" {
     // Arrange
     const file = "function $fun(...) {@s ret}";
-    const expected = error.ParseInvalidVarArgs;
+    const expected = error.InvalidVarArgs;
 
     // Act
     const res = testParser(file);
@@ -3253,10 +3253,10 @@ test "function error.ParseInvalidVarArgs" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseInvalidIdentifier" {
+test "function error.InvalidIdentifier" {
     // Arrange
     const file = "function $fun(w) {@s ret}";
-    const expected = error.ParseInvalidIdentifier;
+    const expected = error.InvalidIdentifier;
 
     // Act
     const res = testParser(file);
@@ -3265,10 +3265,10 @@ test "function error.ParseInvalidIdentifier" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseInvalidIdentifier 2" {
+test "function error.InvalidIdentifier 2" {
     // Arrange
     const file = "function $fun(w @a) {@s ret}";
-    const expected = error.ParseInvalidIdentifier;
+    const expected = error.InvalidIdentifier;
 
     // Act
     const res = testParser(file);
@@ -3277,10 +3277,10 @@ test "function error.ParseInvalidIdentifier 2" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseEmptyFunctionBody" {
+test "function error.EmptyFunctionBody" {
     // Arrange
     const file = "function $fun() {}";
-    const expected = error.ParseEmptyFunctionBody;
+    const expected = error.EmptyFunctionBody;
 
     // Act
     const res = testParser(file);
@@ -3289,10 +3289,10 @@ test "function error.ParseEmptyFunctionBody" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseMissingCloseParenthesis" {
+test "function error.MissingCloseParenthesis" {
     // Arrange
     const file = "function $fun(w %a, ..., w %b) {}";
-    const expected = error.ParseMissingCloseParenthesis;
+    const expected = error.MissingCloseParenthesis;
 
     // Act
     const res = testParser(file);
@@ -3301,10 +3301,10 @@ test "function error.ParseMissingCloseParenthesis" {
     try std.testing.expectError(expected, res);
 }
 
-test "function error.ParseMissingCloseParenthesis 2" {
+test "function error.MissingCloseParenthesis 2" {
     // Arrange
     const file = "function $fun(w %a, ..., ) {}";
-    const expected = error.ParseMissingCloseParenthesis;
+    const expected = error.MissingCloseParenthesis;
 
     // Act
     const res = testParser(file);
