@@ -117,6 +117,15 @@ const SymbolMemoryEntry = union(enum) {
     @"struct": void,
     @"union": void,
     @"opaque": void,
+    linkage: types.SymbolMemoryLinkage,
+    data_offset: types.SymbolMemoryDataOffset,
+    data_entry: struct {
+        primitive: ast.PrimitiveType,
+        value: union(enum) {
+            symbol: types.SymbolMemoryDataOffset,
+            literal: *types.Literal,
+        },
+    },
     array: struct {
         base: union(enum) {
             primitive: ast.PrimitiveType,
@@ -406,6 +415,122 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 self.entries.clearAndFree();
             },
+            .linkage => |*linkage| {
+                const flags: ?[]const u8 = switch (self.entries.items.len) {
+                    1, 2 => null,
+                    3 => switch (self.entries.pop()) {
+                        .literal => |literal| switch (literal.value) {
+                            .string => |v| v,
+                            else => unreachable,
+                        },
+                        else => unreachable,
+                    },
+                    else => unreachable,
+                };
+
+                const section: ?[]const u8 = switch (self.entries.items.len) {
+                    1 => null,
+                    2 => switch (self.entries.pop()) {
+                        .literal => |literal| switch (literal.value) {
+                            .string => |v| v,
+                            else => unreachable,
+                        },
+                        else => unreachable,
+                    },
+                    else => unreachable,
+                };
+
+                try self.entries.append(.{
+                    .linkage = .{
+                        .@"export" = linkage.@"export",
+                        .thread = linkage.thread,
+                        .section = section,
+                        .flags = flags,
+                    },
+                });
+            },
+            .offset => {
+                const offset = self.entries.pop();
+                const index = self.entries.pop();
+
+                try self.entries.append(.{
+                    .data_offset = .{
+                        .index = switch (index) {
+                            .global => |v| v,
+                            else => unreachable,
+                        },
+                        .offset = switch (offset) {
+                            .literal => |literal| switch (literal.value) {
+                                .integer => |v| v,
+                                else => unreachable,
+                            },
+                            else => unreachable,
+                        },
+                    },
+                });
+            },
+            .typed_data => {
+                const value = self.entries.pop();
+                const primitive = self.entries.pop();
+
+                try self.entries.append(.{
+                    .data_entry = .{
+                        .primitive = switch (primitive) {
+                            .primitive => |v| v,
+                            else => unreachable,
+                        },
+                        .value = switch (value) {
+                            .literal => |v| .{ .literal = v },
+                            .data_offset => |v| .{ .symbol = v },
+                            else => unreachable,
+                        },
+                    },
+                });
+            },
+            .data_definition => {
+                var i: usize = 0;
+
+                var symbol: *types.Symbol = switch (self.entries.items[i]) {
+                    .global => |g| &self.symbol_table.symbols.items[g],
+                    else => unreachable,
+                };
+                i += 1;
+
+                const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[i]) {
+                    .linkage => |l| l,
+                    else => unreachable,
+                };
+                i += 1;
+
+                var entries = try allocator.alloc(types.SymbolMemoryDataEntry, self.entries.items.len - i);
+
+                var j: usize = 0;
+                while (i < self.entries.items.len) {
+                    entries[j] = switch (self.entries.items[i]) {
+                        .data_entry => |data_entry| .{ .primitive = data_entry.primitive, .value = switch (data_entry.value) {
+                            .literal => |literal| switch (literal.value) {
+                                .integer => |v| .{ .integer = v },
+                                .float => |v| .{ .float = v },
+                                .string => |v| .{ .string = v },
+                            },
+                            .symbol => |v| .{ .symbol = v },
+                        } },
+                        else => unreachable,
+                    };
+
+                    i += 1;
+                    j += 1;
+                }
+
+                symbol.memory = .{
+                    .data = .{
+                        .linkage = linkage,
+                        .entries = entries,
+                    },
+                };
+
+                self.entries.clearAndFree();
+            },
             else => {
                 // TODO: Handle all statements.
                 self.entries.clearAndFree();
@@ -667,6 +792,116 @@ test "SymbolMemoryWalk type_definition" {
                                         .primitive = .word,
                                     },
                                     .count = 1,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try testSource(file, &symbol_table);
+    try testMemory(file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "SymbolMemoryWalk data_definition" {
+    // Arrange
+    const file = "export thread section \"data\" \"flags\" data $d = { b -1 1, w -1 1, s s_-1 s_1, d d_-1 d_1 } data $o = { l $d+32 }";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "d",
+                .scope = .global,
+            },
+            .memory = .{
+                .data = .{
+                    .linkage = .{
+                        .@"export" = true,
+                        .thread = true,
+                        .section = "data",
+                        .flags = "flags",
+                    },
+                    .entries = &[_]types.SymbolMemoryDataEntry{
+                        .{
+                            .primitive = .byte,
+                            .value = .{
+                                .integer = -1,
+                            },
+                        },
+                        .{
+                            .primitive = .byte,
+                            .value = .{
+                                .integer = 1,
+                            },
+                        },
+                        .{
+                            .primitive = .word,
+                            .value = .{
+                                .integer = -1,
+                            },
+                        },
+                        .{
+                            .primitive = .word,
+                            .value = .{
+                                .integer = 1,
+                            },
+                        },
+                        .{
+                            .primitive = .single,
+                            .value = .{
+                                .float = -1,
+                            },
+                        },
+                        .{
+                            .primitive = .single,
+                            .value = .{
+                                .float = 1,
+                            },
+                        },
+                        .{
+                            .primitive = .double,
+                            .value = .{
+                                .float = -1,
+                            },
+                        },
+                        .{
+                            .primitive = .double,
+                            .value = .{
+                                .float = 1,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "o",
+                .scope = .global,
+            },
+            .memory = .{
+                .data = .{
+                    .linkage = .{
+                        .@"export" = false,
+                        .thread = false,
+                        .section = null,
+                        .flags = null,
+                    },
+                    .entries = &[_]types.SymbolMemoryDataEntry{
+                        .{
+                            .primitive = .long,
+                            .value = .{
+                                .symbol = .{
+                                    .index = 0,
+                                    .offset = 32,
                                 },
                             },
                         },

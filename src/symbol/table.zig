@@ -46,6 +46,9 @@ pub const SymbolTable = struct {
 
                     allocator.free(u.structs);
                 },
+                .data => |d| {
+                    allocator.free(d.entries);
+                },
                 else => {},
             }
 

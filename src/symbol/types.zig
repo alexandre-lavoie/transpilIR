@@ -84,6 +84,35 @@ pub const SymbolMemoryUnion = struct {
     structs: []const SymbolMemoryStruct,
 };
 
+pub const SymbolMemoryDataOffset = struct {
+    index: usize,
+    offset: isize,
+};
+
+pub const SymbolMemoryDataValue = union(enum) {
+    integer: isize,
+    float: f64,
+    string: []const u8,
+    symbol: SymbolMemoryDataOffset,
+};
+
+pub const SymbolMemoryDataEntry = struct {
+    primitive: ast.PrimitiveType,
+    value: SymbolMemoryDataValue,
+};
+
+pub const SymbolMemoryLinkage = struct {
+    thread: bool = false,
+    @"export": bool = false,
+    section: ?[]const u8 = null,
+    flags: ?[]const u8 = null,
+};
+
+pub const SymbolMemoryData = struct {
+    linkage: SymbolMemoryLinkage,
+    entries: []const SymbolMemoryDataEntry,
+};
+
 pub const SymbolMemory = union(enum) {
     empty: void,
     primitive: ast.PrimitiveType,
@@ -91,4 +120,5 @@ pub const SymbolMemory = union(enum) {
     @"opaque": SymbolMemoryOpaque,
     @"struct": SymbolMemoryStruct,
     @"union": SymbolMemoryUnion,
+    data: SymbolMemoryData,
 };
