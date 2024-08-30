@@ -17,15 +17,19 @@ const SymbolMemoryEntry = union(enum) {
     @"struct": void,
     @"union": void,
     @"opaque": void,
+    zero: void,
     variadic: void,
     linkage: types.SymbolMemoryLinkage,
     data_offset: types.SymbolMemoryDataOffset,
-    data_entry: struct {
-        primitive: ast.PrimitiveType,
-        value: union(enum) {
-            symbol: types.SymbolMemoryDataOffset,
-            literal: *types.Literal,
+    data_entry: union(enum) {
+        init: struct {
+            primitive: ast.PrimitiveType,
+            value: union(enum) {
+                symbol: types.SymbolMemoryDataOffset,
+                literal: *types.Literal,
+            },
         },
+        zero: usize,
     },
     array: struct {
         base: union(enum) {
@@ -110,6 +114,11 @@ pub const SymbolMemoryWalkCallback = struct {
                     .env = undefined,
                 });
             },
+            .zero_type => {
+                try self.entries.append(.{
+                    .zero = undefined,
+                });
+            },
             .variadic_parameter => {
                 try self.entries.append(.{
                     .variadic = undefined,
@@ -158,7 +167,6 @@ pub const SymbolMemoryWalkCallback = struct {
 
         switch (statement.data) {
             // TODO: Handle all statements.
-            .zero_type,
             .vaarg,
             .vastart,
             .allocate,
@@ -185,6 +193,7 @@ pub const SymbolMemoryWalkCallback = struct {
             .struct_type,
             .union_type,
             .variadic_parameter,
+            .zero_type,
             => {},
             .line => {
                 self.entries.clearAndFree();
@@ -490,20 +499,33 @@ pub const SymbolMemoryWalkCallback = struct {
             },
             .typed_data => {
                 const value = self.entries.pop();
-                const primitive = self.entries.pop();
+                const value_type = self.entries.pop();
 
-                try self.entries.append(.{
-                    .data_entry = .{
-                        .primitive = switch (primitive) {
-                            .primitive => |v| v,
-                            else => unreachable,
-                        },
-                        .value = switch (value) {
-                            .literal => |v| .{ .literal = v },
-                            .data_offset => |v| .{ .symbol = v },
-                            else => unreachable,
+                try self.entries.append(switch (value_type) {
+                    .primitive => |primitive| .{
+                        .data_entry = .{
+                            .init = .{
+                                .primitive = primitive,
+                                .value = switch (value) {
+                                    .literal => |v| .{ .literal = v },
+                                    .data_offset => |v| .{ .symbol = v },
+                                    else => unreachable,
+                                },
+                            },
                         },
                     },
+                    .zero => .{
+                        .data_entry = .{
+                            .zero = switch (value) {
+                                .literal => |literal| switch (literal.value) {
+                                    .integer => |v| @intCast(v),
+                                    else => return error.InvalidSize,
+                                },
+                                else => return error.InvalidSize,
+                            },
+                        },
+                    },
+                    else => unreachable,
                 });
             },
             .data_definition => {
@@ -526,16 +548,23 @@ pub const SymbolMemoryWalkCallback = struct {
                 var j: usize = 0;
                 while (i < self.entries.items.len) {
                     entries[j] = switch (self.entries.items[i]) {
-                        .data_entry => |data_entry| .{
-                            .type = data_entry.primitive,
-                            .value = switch (data_entry.value) {
-                                .literal => |literal| switch (literal.value) {
-                                    .integer => |v| .{ .integer = v },
-                                    .single => |v| .{ .single = v },
-                                    .double => |v| .{ .double = v },
-                                    .string => |v| .{ .string = v },
+                        .data_entry => |data_entry| switch (data_entry) {
+                            .init => |*vi| .{
+                                .init = .{
+                                    .type = vi.primitive,
+                                    .value = switch (vi.value) {
+                                        .literal => |literal| switch (literal.value) {
+                                            .integer => |v| .{ .integer = v },
+                                            .single => |v| .{ .single = v },
+                                            .double => |v| .{ .double = v },
+                                            .string => |v| .{ .string = v },
+                                        },
+                                        .symbol => |v| .{ .symbol = v },
+                                    },
                                 },
-                                .symbol => |v| .{ .symbol = v },
+                            },
+                            .zero => |size| .{
+                                .zero = size,
                             },
                         },
                         else => unreachable,
@@ -823,7 +852,7 @@ test "type_definition" {
 
 test "data_definition" {
     // Arrange
-    const file = "export thread section \"data\" \"flags\" data $d = { b -1 1, w -1 1, s s_-1 s_1, d d_-1 d_1 } data $o = { l $d+32 }";
+    const file = "export thread section \"data\" \"flags\" data $d = { b -1 1, w -1 1, s s_-1 s_1, d d_-1 d_1, z 10 } data $o = { l $d+32 }";
     const expected = [_]types.Symbol{
         .{
             .identifier = .{
@@ -840,53 +869,70 @@ test "data_definition" {
                     },
                     .entries = &[_]types.SymbolMemoryDataEntry{
                         .{
-                            .type = .byte,
-                            .value = .{
-                                .integer = -1,
+                            .init = .{
+                                .type = .byte,
+                                .value = .{
+                                    .integer = -1,
+                                },
                             },
                         },
                         .{
-                            .type = .byte,
-                            .value = .{
-                                .integer = 1,
+                            .init = .{
+                                .type = .byte,
+                                .value = .{
+                                    .integer = 1,
+                                },
                             },
                         },
                         .{
-                            .type = .word,
-                            .value = .{
-                                .integer = -1,
+                            .init = .{
+                                .type = .word,
+                                .value = .{
+                                    .integer = -1,
+                                },
                             },
                         },
                         .{
-                            .type = .word,
-                            .value = .{
-                                .integer = 1,
+                            .init = .{
+                                .type = .word,
+                                .value = .{
+                                    .integer = 1,
+                                },
                             },
                         },
                         .{
-                            .type = .single,
-                            .value = .{
-                                .single = -1,
+                            .init = .{
+                                .type = .single,
+                                .value = .{
+                                    .single = -1,
+                                },
                             },
                         },
                         .{
-                            .type = .single,
-                            .value = .{
-                                .single = 1,
+                            .init = .{
+                                .type = .single,
+                                .value = .{
+                                    .single = 1,
+                                },
                             },
                         },
                         .{
-                            .type = .double,
-                            .value = .{
-                                .double = -1,
+                            .init = .{
+                                .type = .double,
+                                .value = .{
+                                    .double = -1,
+                                },
                             },
                         },
                         .{
-                            .type = .double,
-                            .value = .{
-                                .double = 1,
+                            .init = .{
+                                .type = .double,
+                                .value = .{
+                                    .double = 1,
+                                },
                             },
                         },
+                        .{ .zero = 10 },
                     },
                 },
             },
@@ -906,11 +952,13 @@ test "data_definition" {
                     },
                     .entries = &[_]types.SymbolMemoryDataEntry{
                         .{
-                            .type = .long,
-                            .value = .{
-                                .symbol = .{
-                                    .index = 0,
-                                    .offset = 32,
+                            .init = .{
+                                .type = .long,
+                                .value = .{
+                                    .symbol = .{
+                                        .index = 0,
+                                        .offset = 32,
+                                    },
                                 },
                             },
                         },
@@ -1167,14 +1215,14 @@ test "assignment" {
             .memory = .{
                 .data = .{
                     .linkage = .{},
-                    .entries = &[_]types.SymbolMemoryDataEntry{
-                        .{
+                    .entries = &[_]types.SymbolMemoryDataEntry{.{
+                        .init = .{
                             .type = .word,
                             .value = .{
                                 .integer = 0,
                             },
                         },
-                    },
+                    }},
                 },
             },
         },
@@ -1257,14 +1305,14 @@ test "return" {
             .memory = .{
                 .data = .{
                     .linkage = .{},
-                    .entries = &[_]types.SymbolMemoryDataEntry{
-                        .{
+                    .entries = &[_]types.SymbolMemoryDataEntry{.{
+                        .init = .{
                             .type = .word,
                             .value = .{
                                 .integer = 0,
                             },
                         },
-                    },
+                    }},
                 },
             },
         },
@@ -1381,4 +1429,34 @@ test "error.TypeError binary_operation" {
 
     // Assert
     try std.testing.expectError(error.TypeError, res);
+}
+
+test "error.InvalidSize literal" {
+    // Arrange
+    const file = "data $d = { z s_1 }";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(test_allocator, file, &symbol_table);
+    const res = testMemory(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.InvalidSize, res);
+}
+
+test "error.InvalidSize global" {
+    // Arrange
+    const file = "data $d = { z $d }";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(test_allocator, file, &symbol_table);
+    const res = testMemory(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.InvalidSize, res);
 }

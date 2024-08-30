@@ -101,9 +101,12 @@ pub const SymbolMemoryDataValue = union(enum) {
     symbol: SymbolMemoryDataOffset,
 };
 
-pub const SymbolMemoryDataEntry = struct {
-    type: ast.PrimitiveType,
-    value: SymbolMemoryDataValue,
+pub const SymbolMemoryDataEntry = union(enum) {
+    init: struct {
+        type: ast.PrimitiveType,
+        value: SymbolMemoryDataValue,
+    },
+    zero: usize,
 };
 
 pub const SymbolMemoryLinkage = struct {
