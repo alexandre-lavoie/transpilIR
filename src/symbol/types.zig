@@ -47,13 +47,15 @@ pub const Symbol = struct {
 
 pub const LiteralValueType = enum {
     integer,
-    float,
+    single,
+    double,
     string,
 };
 
 pub const LiteralValue = union(LiteralValueType) {
     integer: isize,
-    float: f64,
+    single: f32,
+    double: f64,
     string: []const u8,
 };
 
@@ -93,7 +95,8 @@ pub const SymbolMemoryDataOffset = struct {
 
 pub const SymbolMemoryDataValue = union(enum) {
     integer: isize,
-    float: f64,
+    single: f32,
+    double: f64,
     string: []const u8,
     symbol: SymbolMemoryDataOffset,
 };
@@ -123,7 +126,7 @@ pub const SymbolMemoryParameterType = union(enum) {
 
 pub const SymbolMemoryFunction = struct {
     linkage: SymbolMemoryLinkage,
-    @"return": ast.PrimitiveType,
+    @"return": SymbolType,
     parameters: []const SymbolMemoryParameterType,
     vararg: bool = false,
 };

@@ -269,7 +269,7 @@ pub fn Parser(comptime Reader: type) type {
             return try self.new(
                 .{ .start = span.start + 2, .end = span.end },
                 .{ .literal = .{
-                    .type = .float,
+                    .type = .single,
                 } },
             );
         }
@@ -283,7 +283,7 @@ pub fn Parser(comptime Reader: type) type {
             return try self.new(
                 .{ .start = span.start + 2, .end = span.end },
                 .{ .literal = .{
-                    .type = .float,
+                    .type = .double,
                 } },
             );
         }
@@ -907,9 +907,9 @@ pub fn Parser(comptime Reader: type) type {
                 .{ .start = start, .end = end },
                 .{ .block = .{
                     .label = label,
-                    .phi_statements = phi_statement_head,
-                    .statements = statement_head,
-                    .flow_statement = flow_statement,
+                    .phis = phi_statement_head,
+                    .lines = statement_head,
+                    .flow = flow_statement,
                 } },
             );
         }
@@ -920,7 +920,9 @@ pub fn Parser(comptime Reader: type) type {
                 else => false,
             };
 
-            return try switch (self.previous.token_type) {
+            const start = self.previous.span.start;
+
+            var out = try switch (self.previous.token_type) {
                 // Block
                 .blit => self.blit(),
                 .call => self.call(null),
@@ -941,6 +943,19 @@ pub fn Parser(comptime Reader: type) type {
                 .label_identifier => try self.fallThroughJump(),
                 else => return error.ParseInvalidBlockLine,
             };
+
+            const end = self.previous_previous.span.end;
+
+            if (!is_phi.* and !is_flow.*) {
+                out = try self.new(
+                    .{ .start = start, .end = end },
+                    .{
+                        .line = out,
+                    },
+                );
+            }
+
+            return out;
         }
 
         fn blockValue(self: *Self) !ast.StatementIndex {
@@ -2304,9 +2319,9 @@ test "function" {
             .data = .{
                 .block = .{
                     .label = 4,
-                    .phi_statements = null,
-                    .statements = null,
-                    .flow_statement = 5,
+                    .phis = null,
+                    .lines = null,
+                    .flow = 5,
                 },
             },
         },
@@ -2658,6 +2673,7 @@ test "allocate" {
         .literal,
         .allocate,
         .assignment,
+        .line,
         .node,
         .identifier,
         .identifier,
@@ -2665,6 +2681,7 @@ test "allocate" {
         .literal,
         .allocate,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2692,6 +2709,7 @@ test "copy" {
         .literal,
         .copy,
         .assignment,
+        .line,
         .node,
         .identifier,
         .primitive_type,
@@ -2700,6 +2718,7 @@ test "copy" {
         .identifier,
         .copy,
         .assignment,
+        .line,
         .node,
         .identifier,
         .primitive_type,
@@ -2708,6 +2727,7 @@ test "copy" {
         .identifier,
         .copy,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2732,6 +2752,7 @@ test "vastart" {
         .identifier,
         .identifier,
         .vastart,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2759,6 +2780,7 @@ test "vaarg" {
         .identifier,
         .vaarg,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2786,6 +2808,7 @@ test "negate" {
         .identifier,
         .negate,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2812,6 +2835,7 @@ test "blit" {
         .identifier,
         .literal,
         .blit,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2840,6 +2864,7 @@ test "binaryOperation" {
         .literal,
         .binary_operation,
         .assignment,
+        .line,
         .node,
         .identifier,
         .primitive_type,
@@ -2847,6 +2872,7 @@ test "binaryOperation" {
         .identifier,
         .binary_operation,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2876,6 +2902,7 @@ test "comparison" {
         .literal,
         .comparison,
         .assignment,
+        .line,
         .node,
         .identifier,
         .primitive_type,
@@ -2884,6 +2911,7 @@ test "comparison" {
         .identifier,
         .comparison,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2910,11 +2938,13 @@ test "store" {
         .identifier,
         .literal,
         .store,
+        .line,
         .node,
         .primitive_type,
         .literal,
         .identifier,
         .store,
+        .line,
         .node,
         .@"return",
         .block,
@@ -2943,6 +2973,7 @@ test "load" {
         .identifier,
         .load,
         .assignment,
+        .line,
         .node,
         .identifier,
         .primitive_type,
@@ -2950,6 +2981,7 @@ test "load" {
         .identifier,
         .load,
         .assignment,
+        .line,
         .node,
         .identifier,
         .primitive_type,
@@ -2957,6 +2989,7 @@ test "load" {
         .literal,
         .load,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
@@ -3020,6 +3053,7 @@ test "call" {
         .primitive_type,
         .identifier,
         .call,
+        .line,
         .node,
         .@"return",
         .block,
@@ -3047,6 +3081,7 @@ test "call assign" {
         .identifier,
         .call,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
@@ -3080,6 +3115,7 @@ test "call parameters" {
         .call_parameter,
         .node,
         .call,
+        .line,
         .node,
         .@"return",
         .block,
@@ -3115,6 +3151,7 @@ test "call varargs" {
         .call_parameter,
         .node,
         .call,
+        .line,
         .node,
         .@"return",
         .block,

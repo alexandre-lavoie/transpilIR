@@ -109,9 +109,12 @@ pub const ASTWalk = struct {
             .zero_type => {},
             .block => |*d| {
                 try self.stack.append(.{ .index = d.label });
-                if (d.phi_statements) |phi_statements| try self.stack.append(.{ .index = phi_statements });
-                if (d.statements) |statements| try self.stack.append(.{ .index = statements });
-                try self.stack.append(.{ .index = d.flow_statement });
+                if (d.phis) |phis| try self.stack.append(.{ .index = phis });
+                if (d.lines) |lines| try self.stack.append(.{ .index = lines });
+                try self.stack.append(.{ .index = d.flow });
+            },
+            .line => |d| {
+                try self.stack.append(.{ .index = d });
             },
             .call => |*d| {
                 try self.stack.append(.{ .index = d.target });
@@ -357,6 +360,7 @@ test "function" {
         .block,
         .identifier,
         .node,
+        .line,
         .assignment,
         .identifier,
         .binary_operation,
@@ -364,6 +368,7 @@ test "function" {
         .literal,
         .identifier,
         .node,
+        .line,
         .assignment,
         .identifier,
         .comparison,

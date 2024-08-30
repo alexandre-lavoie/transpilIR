@@ -53,6 +53,7 @@ pub const StatementType = enum {
     // Function
 
     block,
+    line,
     call,
     function,
     function_signature,
@@ -179,10 +180,12 @@ pub const StatementData = union(StatementType) {
 
     block: struct {
         label: StatementIndex,
-        phi_statements: ?StatementIndex,
-        statements: ?StatementIndex,
-        flow_statement: StatementIndex,
+        phis: ?StatementIndex,
+        lines: ?StatementIndex,
+        flow: StatementIndex,
     },
+
+    line: StatementIndex,
 
     call: struct {
         target: StatementIndex,
@@ -335,7 +338,8 @@ pub const PrimitiveType = enum(u4) {
 
 pub const LiteralType = enum(u2) {
     integer,
-    float,
+    single,
+    double,
     string,
 };
 

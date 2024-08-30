@@ -10,6 +10,7 @@ const SymbolSourceWalkState = enum {
     unique,
     symbol,
     function,
+    return_type,
     parameter,
     parameter_type,
     call,
@@ -52,9 +53,16 @@ pub const SymbolSourceWalkCallback = struct {
                 self.state = .call;
             },
             .function_parameter => {
-                if (self.state == .null) {
-                    self.state = .symbol;
-                }
+                self.state = switch (self.state) {
+                    .null => .symbol,
+                    else => self.state,
+                };
+            },
+            .primitive_type => {
+                self.state = switch (self.state) {
+                    .return_type => .parameter,
+                    else => self.state,
+                };
             },
             .identifier => |identifier| {
                 _ = try self.stream.seekTo(statement.span.start);
@@ -86,6 +94,7 @@ pub const SymbolSourceWalkCallback = struct {
                     .symbol,
                     .parameter_type,
                     .call,
+                    .return_type,
                     => false,
                 };
 
@@ -102,8 +111,9 @@ pub const SymbolSourceWalkCallback = struct {
                     .function => scope: {
                         self.function = try self.symbol_table.addSymbol(&symbol_identifier);
 
-                        break :scope .parameter;
+                        break :scope .return_type;
                     },
+                    .return_type => .parameter,
                     .parameter => scope: {
                         _ = try self.symbol_table.addSymbol(&symbol_identifier);
 
@@ -133,7 +143,8 @@ pub const SymbolSourceWalkCallback = struct {
 
                 const value: types.LiteralValue = switch (literal.type) {
                     .integer => .{ .integer = try std.fmt.parseInt(isize, buffer, 10) },
-                    .float => .{ .float = try std.fmt.parseFloat(f64, buffer) },
+                    .single => .{ .single = try std.fmt.parseFloat(f32, buffer) },
+                    .double => .{ .double = try std.fmt.parseFloat(f64, buffer) },
                     .string => .{ .string = try common.parseString(buffer, output) },
                 };
 
@@ -261,6 +272,41 @@ test "function" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
+test "function type" {
+    // Arrange
+    const file = "type :t = { w } function :t $test() {@s ret}";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "t",
+                .scope = .type,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "test",
+                .scope = .global,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 1,
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try testSource(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
 test "reused local" {
     // Arrange
     const file = "function $test() {@s ret} function $test2() {@s ret}";
@@ -341,8 +387,14 @@ test "reassigned local" {
 
 test "call" {
     // Arrange
-    const file = "function $fun() {@s call $other(w 0) call $fun() ret}";
+    const file = "type :t = { w } function $fun() {@s %v =:t call $other(w 0) %v =l call $fun() ret}";
     const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "t",
+                .scope = .type,
+            },
+        },
         .{
             .identifier = .{
                 .name = "fun",
@@ -353,7 +405,14 @@ test "call" {
             .identifier = .{
                 .name = "s",
                 .scope = .label,
-                .function = 0,
+                .function = 1,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "v",
+                .scope = .local,
+                .function = 1,
             },
         },
         .{
@@ -398,12 +457,12 @@ test "data" {
         },
         .{
             .value = .{
-                .float = 1,
+                .single = 1,
             },
         },
         .{
             .value = .{
-                .float = -1,
+                .double = -1,
             },
         },
     };

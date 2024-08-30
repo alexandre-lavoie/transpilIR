@@ -154,7 +154,8 @@ pub const SymbolTable = struct {
 
         const value_copy: types.LiteralValue = switch (value.*) {
             .integer => |i| .{ .integer = i },
-            .float => |f| .{ .float = f },
+            .single => |f| .{ .single = f },
+            .double => |f| .{ .double = f },
             .string => |s| scope: {
                 const t = try allocator.alloc(u8, s.len);
                 errdefer allocator.free(t);

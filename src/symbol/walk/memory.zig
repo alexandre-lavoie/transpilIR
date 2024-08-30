@@ -51,6 +51,40 @@ pub const SymbolMemoryWalkCallback = struct {
         };
     }
 
+    pub fn deinit(self: *Self) void {
+        self.entries.deinit();
+    }
+
+    fn entryToType(self: *Self, entry: *const SymbolMemoryEntry) ast.PrimitiveType {
+        return switch (entry.*) {
+            .local => |i| switch (self.symbol_table.symbols.items[i].memory) {
+                .primitive => |v| v,
+                .type => .long,
+                else => unreachable,
+            },
+            .global => .long,
+            .literal => |v| switch (v.value) {
+                .integer => .void,
+                .single => .single,
+                .double => .double,
+                .string => .long,
+            },
+            else => unreachable,
+        };
+    }
+
+    fn matchType(left: ast.PrimitiveType, right: ast.PrimitiveType) !ast.PrimitiveType {
+        if (left == right) return left;
+
+        if (left == .void) {
+            return right;
+        } else if (right == .void) {
+            return left;
+        }
+
+        return error.TypeError;
+    }
+
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
         const instance: types.Instance = .{ .span = statement.span };
 
@@ -137,8 +171,10 @@ pub const SymbolMemoryWalkCallback = struct {
             .opaque_type,
             .env_type,
             .variadic_parameter,
-            .binary_operation,
             => {},
+            .line => {
+                self.entries.clearAndFree();
+            },
             .array_type => {
                 const count: usize = switch (self.entries.pop()) {
                     .literal => |literal| switch (literal.value) {
@@ -176,7 +212,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     .local => |local| {
                         const symbol = &self.symbol_table.symbols.items[local];
 
-                        const memory: types.SymbolMemory = switch (@"type") {
+                        symbol.memory = switch (@"type") {
                             .primitive => |primitive| .{
                                 .primitive = primitive,
                             },
@@ -188,14 +224,19 @@ pub const SymbolMemoryWalkCallback = struct {
                             },
                             else => unreachable,
                         };
-
-                        // TODO: If set, check memory equals previous.
-                        symbol.memory = memory;
                     },
                     else => unreachable,
                 }
 
                 try self.entries.append(@"type");
+            },
+            .binary_operation, .comparison => {
+                const right = self.entries.pop();
+                const left = self.entries.pop();
+
+                const @"type" = try Self.matchType(self.entryToType(&left), self.entryToType(&right));
+
+                try self.entries.append(.{ .primitive = @"type" });
             },
             .call_parameter => {
                 const @"type" = self.entries.pop();
@@ -476,7 +517,8 @@ pub const SymbolMemoryWalkCallback = struct {
                             .value = switch (data_entry.value) {
                                 .literal => |literal| switch (literal.value) {
                                     .integer => |v| .{ .integer = v },
-                                    .float => |v| .{ .float = v },
+                                    .single => |v| .{ .single = v },
+                                    .double => |v| .{ .double = v },
                                     .string => |v| .{ .string = v },
                                 },
                                 .symbol => |v| .{ .symbol = v },
@@ -509,8 +551,9 @@ pub const SymbolMemoryWalkCallback = struct {
                     else => unreachable,
                 };
 
-                const @"return": ast.PrimitiveType = switch (self.entries.items[2]) {
-                    .primitive => |p| p,
+                const @"return": types.SymbolType = switch (self.entries.items[2]) {
+                    .primitive => |p| .{ .primitive = p },
+                    .type => |t| .{ .type = t },
                     else => unreachable,
                 };
 
@@ -545,6 +588,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     },
                 };
 
+                // TODO: Check definition matches.
                 switch (symbol.memory) {
                     .empty => {
                         symbol.memory = memory;
@@ -565,8 +609,10 @@ pub const SymbolMemoryWalkCallback = struct {
                     else => unreachable,
                 };
 
-                const @"return": ast.PrimitiveType = switch (self.entries.items[1]) {
-                    .primitive => |p| p,
+                const return_entry = self.entries.items[1];
+                const @"return": types.SymbolType = switch (return_entry) {
+                    .primitive => |p| .{ .primitive = p },
+                    .type => |t| .{ .type = t },
                     else => unreachable,
                 };
 
@@ -614,6 +660,7 @@ pub const SymbolMemoryWalkCallback = struct {
                 }
 
                 self.entries.clearAndFree();
+                try self.entries.append(return_entry);
             },
             else => {
                 // TODO: Handle all statements.
@@ -637,6 +684,7 @@ fn testMemory(allocator: std.mem.Allocator, file: []const u8, symbol_table: *tab
     var callback = SymbolMemoryWalkCallback.init(
         symbol_table,
     );
+    defer callback.deinit();
 
     var walk = ast.ASTWalk.init(allocator, &tree);
     defer walk.deinit();
@@ -788,25 +836,25 @@ test "data_definition" {
                         .{
                             .type = .single,
                             .value = .{
-                                .float = -1,
+                                .single = -1,
                             },
                         },
                         .{
                             .type = .single,
                             .value = .{
-                                .float = 1,
+                                .single = 1,
                             },
                         },
                         .{
                             .type = .double,
                             .value = .{
-                                .float = -1,
+                                .double = -1,
                             },
                         },
                         .{
                             .type = .double,
                             .value = .{
-                                .float = 1,
+                                .double = 1,
                             },
                         },
                     },
@@ -855,7 +903,7 @@ test "data_definition" {
 
 test "function" {
     // Arrange
-    const file = "type :t = { 32 } export thread section \"function\" \"flags\" function $test(env %e, w %w, :t %s, ...) {@s ret}";
+    const file = "type :t = { 32 } export thread section \"function\" \"flags\" function :t $test(env %e, w %w, :t %s, ...) {@s ret}";
     const expected = [_]types.Symbol{
         .{
             .identifier = .{
@@ -881,7 +929,9 @@ test "function" {
                         .section = "function",
                         .flags = "flags",
                     },
-                    .@"return" = .void,
+                    .@"return" = .{
+                        .type = 0,
+                    },
                     .vararg = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .{
@@ -970,7 +1020,9 @@ test "call" {
             .memory = .{
                 .function = .{
                     .linkage = .{},
-                    .@"return" = .void,
+                    .@"return" = .{
+                        .primitive = .void,
+                    },
                     .vararg = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .{
@@ -1031,7 +1083,9 @@ test "call" {
             .memory = .{
                 .function = .{
                     .linkage = .{},
-                    .@"return" = .void,
+                    .@"return" = .{
+                        .primitive = .void,
+                    },
                     .vararg = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .{
@@ -1062,7 +1116,7 @@ test "call" {
 
 test "assignment" {
     // Arrange
-    const file = "type :t = { 32 } function $test() {@s %f =w add 0, 0 %s =:t add 0, 0 ret}";
+    const file = "type :t = { 32 } data $d = { w 0 } function $test() {@s %f =l add $d, 1 %s =:t add $d, %f ret}";
     const expected = [_]types.Symbol{
         .{
             .identifier = .{
@@ -1077,13 +1131,34 @@ test "assignment" {
         },
         .{
             .identifier = .{
+                .name = "d",
+                .scope = .global,
+            },
+            .memory = .{
+                .data = .{
+                    .linkage = .{},
+                    .entries = &[_]types.SymbolMemoryDataEntry{
+                        .{
+                            .type = .word,
+                            .value = .{
+                                .integer = 0,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .identifier = .{
                 .name = "test",
                 .scope = .global,
             },
             .memory = .{
                 .function = .{
                     .linkage = .{},
-                    .@"return" = .void,
+                    .@"return" = .{
+                        .primitive = .void,
+                    },
                     .vararg = false,
                     .parameters = &[_]types.SymbolMemoryParameterType{},
                 },
@@ -1093,24 +1168,24 @@ test "assignment" {
             .identifier = .{
                 .name = "s",
                 .scope = .label,
-                .function = 1,
+                .function = 2,
             },
         },
         .{
             .identifier = .{
                 .name = "f",
                 .scope = .local,
-                .function = 1,
+                .function = 2,
             },
             .memory = .{
-                .primitive = .word,
+                .primitive = .long,
             },
         },
         .{
             .identifier = .{
                 .name = "s",
                 .scope = .local,
-                .function = 1,
+                .function = 2,
             },
             .memory = .{
                 .type = 0,
@@ -1132,3 +1207,18 @@ test "assignment" {
 //
 // Error Tests
 //
+
+test "error.TypeError binary_operation" {
+    // Arrange
+    const file = "function $test(w %a, s %b) {@s %c =w add %a, %b ret}";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(test_allocator, file, &symbol_table);
+    const res = testMemory(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.TypeError, res);
+}
