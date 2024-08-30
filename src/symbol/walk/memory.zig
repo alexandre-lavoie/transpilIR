@@ -712,8 +712,6 @@ pub const SymbolMemoryWalkCallback = struct {
                 try self.entries.append(return_entry);
             },
             .@"return" => {
-                if (self.entries.items.len == 0) return;
-
                 const expected: ast.PrimitiveType = switch (self.symbol_table.symbols.items[self.function orelse unreachable].memory) {
                     .function => |function| switch (function.@"return") {
                         .primitive => |p| p,
@@ -721,6 +719,13 @@ pub const SymbolMemoryWalkCallback = struct {
                     },
                     else => unreachable,
                 };
+
+                if (self.entries.items.len == 0) {
+                    if (expected != .void) {
+                        return error.TypeError;
+                    } else return;
+                }
+
                 const actual = self.entryToType(&self.entries.pop());
 
                 if (actual != .void and expected != actual) return error.TypeError;
@@ -981,7 +986,7 @@ test "data_definition" {
 
 test "function" {
     // Arrange
-    const file = "type :t = { 32 } export thread section \"function\" \"flags\" function :t $test(env %e, w %w, :t %s, ...) {@s ret}";
+    const file = "type :t = { 32 } export thread section \"function\" \"flags\" function :t $test(env %e, w %w, :t %s, ...) {@s ret %s}";
     const expected = [_]types.Symbol{
         .{
             .identifier = .{
@@ -1419,6 +1424,36 @@ test "return" {
 test "error.TypeError binary_operation" {
     // Arrange
     const file = "function $test(w %a, s %b) {@s %c =w add %a, %b ret}";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(test_allocator, file, &symbol_table);
+    const res = testMemory(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.TypeError, res);
+}
+
+test "error.TypeError return void" {
+    // Arrange
+    const file = "function w $test(w %a) {@s ret}";
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(test_allocator, file, &symbol_table);
+    const res = testMemory(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.TypeError, res);
+}
+
+test "error.TypeError return non-void" {
+    // Arrange
+    const file = "function $test(w %a) {@s ret %a}";
 
     var symbol_table = table.SymbolTable.init(test_allocator);
     defer symbol_table.deinit();
