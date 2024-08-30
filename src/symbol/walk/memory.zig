@@ -40,6 +40,7 @@ pub const SymbolMemoryWalkCallback = struct {
     symbol_table: *table.SymbolTable,
 
     entries: EntryList,
+    function: ?usize = null,
 
     const Self = @This();
     const EntryList = std.ArrayList(SymbolMemoryEntry);
@@ -89,9 +90,6 @@ pub const SymbolMemoryWalkCallback = struct {
         const instance: types.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
-            .module => {
-                self.entries = EntryList.init(self.symbol_table.symbols.allocator);
-            },
             .struct_type => {
                 try self.entries.append(.{
                     .@"struct" = undefined,
@@ -159,17 +157,33 @@ pub const SymbolMemoryWalkCallback = struct {
         const allocator = self.symbol_table.symbols.allocator;
 
         switch (statement.data) {
-            .module => {
-                self.entries.deinit();
-            },
+            // TODO: Handle all statements.
+            .zero_type,
+            .vaarg,
+            .vastart,
+            .allocate,
+            .blit,
+            .copy,
+            .load,
+            .store,
+            .branch,
+            .halt,
+            .jump,
+            .phi,
+            .phi_parameter,
+            .negate,
+            => unreachable,
+            // ----------------------------
+            .block,
+            .env_type,
             .identifier,
             .literal,
-            .primitive_type,
+            .module,
             .node,
+            .opaque_type,
+            .primitive_type,
             .struct_type,
             .union_type,
-            .opaque_type,
-            .env_type,
             .variadic_parameter,
             => {},
             .line => {
@@ -540,11 +554,17 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 self.entries.clearAndFree();
             },
+            .function => {
+                self.function = null;
+            },
             .function_signature => {
-                const symbol: *types.Symbol = switch (self.entries.items[0]) {
-                    .global => |g| &self.symbol_table.symbols.items[g],
+                const symbol_index: usize = switch (self.entries.items[0]) {
+                    .global => |g| g,
                     else => unreachable,
                 };
+                self.function = symbol_index;
+
+                const symbol: *types.Symbol = &self.symbol_table.symbols.items[symbol_index];
 
                 const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[1]) {
                     .linkage => |l| l,
@@ -662,9 +682,19 @@ pub const SymbolMemoryWalkCallback = struct {
                 self.entries.clearAndFree();
                 try self.entries.append(return_entry);
             },
-            else => {
-                // TODO: Handle all statements.
-                self.entries.clearAndFree();
+            .@"return" => {
+                if (self.entries.items.len == 0) return;
+
+                const expected: ast.PrimitiveType = switch (self.symbol_table.symbols.items[self.function orelse unreachable].memory) {
+                    .function => |function| switch (function.@"return") {
+                        .primitive => |p| p,
+                        .type => .long,
+                    },
+                    else => unreachable,
+                };
+                const actual = self.entryToType(&self.entries.pop());
+
+                if (actual != .void and expected != actual) return error.TypeError;
             },
         }
     }
@@ -1189,6 +1219,136 @@ test "assignment" {
             },
             .memory = .{
                 .type = 0,
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(test_allocator, file, &symbol_table);
+    try testMemory(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "return" {
+    // Arrange
+    const file = "type :t = { 32 } data $d = { w 0 } function w $ret1(w %p) {@s ret %p} function :t $ret2() {@s ret $d} function l $ret3() {@s ret 0}";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "t",
+                .scope = .type,
+            },
+            .memory = .{
+                .@"opaque" = .{
+                    .size = 32,
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "d",
+                .scope = .global,
+            },
+            .memory = .{
+                .data = .{
+                    .linkage = .{},
+                    .entries = &[_]types.SymbolMemoryDataEntry{
+                        .{
+                            .type = .word,
+                            .value = .{
+                                .integer = 0,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "ret1",
+                .scope = .global,
+            },
+            .memory = .{
+                .function = .{
+                    .linkage = .{},
+                    .@"return" = .{
+                        .primitive = .word,
+                    },
+                    .vararg = false,
+                    .parameters = &[_]types.SymbolMemoryParameterType{
+                        .{
+                            .primitive = .word,
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "p",
+                .scope = .local,
+                .function = 2,
+            },
+            .memory = .{
+                .primitive = .word,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 2,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "ret2",
+                .scope = .global,
+            },
+            .memory = .{
+                .function = .{
+                    .linkage = .{},
+                    .@"return" = .{
+                        .type = 0,
+                    },
+                    .vararg = false,
+                    .parameters = &[_]types.SymbolMemoryParameterType{},
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 5,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "ret3",
+                .scope = .global,
+            },
+            .memory = .{
+                .function = .{
+                    .linkage = .{},
+                    .@"return" = .{
+                        .primitive = .long,
+                    },
+                    .vararg = false,
+                    .parameters = &[_]types.SymbolMemoryParameterType{},
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 7,
             },
         },
     };
