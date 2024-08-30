@@ -584,8 +584,16 @@ fn testSource(file: []const u8, symbol_table: *table.SymbolTable) !void {
         &file_stream,
     );
 
-    var walk = ast.ASTWalk(@TypeOf(callback)).init(&tree, &callback);
-    try walk.walk(test_allocator, tree.entrypoint() orelse return error.NotFound);
+    var walk = ast.ASTWalk.init(test_allocator, &tree);
+    defer walk.deinit();
+
+    try walk.start(tree.entrypoint() orelse return error.NotFound);
+    while (try walk.next()) |out| {
+        try switch (out.enter) {
+            true => callback.enter(out.value),
+            false => callback.exit(out.value),
+        };
+    }
 }
 
 fn testMemory(file: []const u8, symbol_table: *table.SymbolTable) !void {
@@ -596,8 +604,16 @@ fn testMemory(file: []const u8, symbol_table: *table.SymbolTable) !void {
         symbol_table,
     );
 
-    var walk = ast.ASTWalk(@TypeOf(callback)).init(&tree, &callback);
-    try walk.walk(test_allocator, tree.entrypoint() orelse return error.NotFound);
+    var walk = ast.ASTWalk.init(test_allocator, &tree);
+    defer walk.deinit();
+
+    try walk.start(tree.entrypoint() orelse return error.NotFound);
+    while (try walk.next()) |out| {
+        try switch (out.enter) {
+            true => callback.enter(out.value),
+            false => callback.exit(out.value),
+        };
+    }
 }
 
 //
