@@ -137,6 +137,7 @@ pub const SymbolMemoryWalkCallback = struct {
             .opaque_type,
             .env_type,
             .variadic_parameter,
+            .binary_operation,
             => {},
             .array_type => {
                 const count: usize = switch (self.entries.pop()) {
@@ -196,11 +197,24 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 try self.entries.append(@"type");
             },
+            .assignment => {
+                const symbol: *types.Symbol = switch (self.entries.items[0]) {
+                    .local => |index| &self.symbol_table.symbols.items[index],
+                    else => unreachable,
+                };
+
+                symbol.memory = switch (self.entries.items[1]) {
+                    .primitive => |v| .{ .primitive = v },
+                    .type => |v| .{ .type = v },
+                    else => unreachable,
+                };
+
+                self.entries.clearAndFree();
+            },
             .type_definition => {
                 var i: usize = 0;
 
-                const identifier = &self.entries.items[i];
-                const symbol: *types.Symbol = switch (identifier.*) {
+                const symbol: *types.Symbol = switch (self.entries.items[i]) {
                     .type => |index| &self.symbol_table.symbols.items[index],
                     else => unreachable,
                 };
@@ -817,6 +831,75 @@ test "function" {
                 .name = "s",
                 .scope = .label,
                 .function = 1,
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(test_allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(test_allocator, file, &symbol_table);
+    try testMemory(test_allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "assignment" {
+    // Arrange
+    const file = "type :t = { 32 } function $test() {@s %f =w add 0, 0 %s =:t add 0, 0 ret}";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "t",
+                .scope = .type,
+            },
+            .memory = .{
+                .@"opaque" = .{
+                    .size = 32,
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "test",
+                .scope = .global,
+            },
+            .memory = .{
+                .function = .{
+                    .linkage = .{},
+                    .@"return" = .void,
+                    .vararg = false,
+                    .parameters = &[_]types.SymbolMemoryParameterType{},
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 1,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "f",
+                .scope = .local,
+                .function = 1,
+            },
+            .memory = .{
+                .primitive = .word,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .local,
+                .function = 1,
+            },
+            .memory = .{
+                .type = 0,
             },
         },
     };
