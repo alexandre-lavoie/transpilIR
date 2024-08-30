@@ -199,7 +199,7 @@ pub fn testSource(allocator: std.mem.Allocator, file: []const u8, symbol_table: 
 // Valid Tests
 //
 
-test "SymbolSourceWalk type" {
+test "type" {
     // Arrange
     const file = "type :t = { w } type :t2 = { :t } ";
     const expected = [_]types.Symbol{
@@ -227,7 +227,7 @@ test "SymbolSourceWalk type" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
-test "SymbolSourceWalk function" {
+test "function" {
     // Arrange
     const file = "function $test() {@s ret}";
     const expected = [_]types.Symbol{
@@ -256,7 +256,7 @@ test "SymbolSourceWalk function" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
-test "SymbolSourceWalk reused local" {
+test "reused local" {
     // Arrange
     const file = "function $test() {@s ret} function $test2() {@s ret}";
     const expected = [_]types.Symbol{
@@ -298,7 +298,7 @@ test "SymbolSourceWalk reused local" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
-test "SymbolSourceWalk reassigned local" {
+test "reassigned local" {
     // Arrange
     const file = "function $fun() {@s %p =w add 0, 0 %p =w add 0, 0 ret}";
     const expected = [_]types.Symbol{
@@ -334,7 +334,7 @@ test "SymbolSourceWalk reassigned local" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
-test "SymbolSourceWalk data" {
+test "data" {
     // Arrange
     const file = "data $d = { b \"A \\\"B\\\" \\x43 \\n\", w -1, s s_1, d d_-1.0 }";
     const expected_symbols = [_]types.Symbol{
@@ -383,7 +383,7 @@ test "SymbolSourceWalk data" {
 // Error Tests
 //
 
-test "SymbolSourceWalk type error.SymbolNotFound" {
+test "error.SymbolNotFound type" {
     // Arrange
     const file = "type :t = { :dne }";
 
@@ -397,7 +397,7 @@ test "SymbolSourceWalk type error.SymbolNotFound" {
     try std.testing.expectError(error.SymbolNotFound, res);
 }
 
-test "SymbolSourceWalk local type error.SymbolNotFound" {
+test "error.SymbolNotFound local type" {
     // Arrange
     const file = "function $fun(:dne %a) {@s ret}";
 
@@ -411,7 +411,7 @@ test "SymbolSourceWalk local type error.SymbolNotFound" {
     try std.testing.expectError(error.SymbolNotFound, res);
 }
 
-test "SymbolSourceWalk global error.SymbolNotFound" {
+test "error.SymbolNotFound global" {
     // Arrange
     const file = "function $fun() {@s %t =w add $dne, 0 ret}";
 
@@ -425,7 +425,7 @@ test "SymbolSourceWalk global error.SymbolNotFound" {
     try std.testing.expectError(error.SymbolNotFound, res);
 }
 
-test "SymbolSourceWalk label error.SymbolNotFound" {
+test "error.SymbolNotFound label" {
     // Arrange
     const file = "function $fun() {@s jmp @dne}";
 
@@ -439,7 +439,7 @@ test "SymbolSourceWalk label error.SymbolNotFound" {
     try std.testing.expectError(error.SymbolNotFound, res);
 }
 
-test "SymbolSourceWalk type error.SymbolReuse" {
+test "error.SymbolReuse type" {
     // Arrange
     const file = "type :t = { w } type :t = { b }";
 
@@ -453,7 +453,7 @@ test "SymbolSourceWalk type error.SymbolReuse" {
     try std.testing.expectError(error.SymbolReuse, res);
 }
 
-test "SymbolSourceWalk global error.SymbolReuse" {
+test "error.SymbolReuse global" {
     // Arrange
     const file = "data $d = { w 0 } function $d() {@s ret}";
 

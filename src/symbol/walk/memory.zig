@@ -539,7 +539,7 @@ fn testMemory(allocator: std.mem.Allocator, file: []const u8, symbol_table: *tab
 // Valid Tests
 //
 
-test "SymbolMemoryWalk type_definition" {
+test "type_definition" {
     // Arrange
     const file = "type :o = align 8 { 32 } type :s = align 16 { w 100, :o } type :u = align 32 { { s 2 } { w } }";
     const expected = [_]types.Symbol{
@@ -628,7 +628,7 @@ test "SymbolMemoryWalk type_definition" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
-test "SymbolMemoryWalk data_definition" {
+test "data_definition" {
     // Arrange
     const file = "export thread section \"data\" \"flags\" data $d = { b -1 1, w -1 1, s s_-1 s_1, d d_-1 d_1 } data $o = { l $d+32 }";
     const expected = [_]types.Symbol{
@@ -738,7 +738,7 @@ test "SymbolMemoryWalk data_definition" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
-test "SymbolMemoryWalk function" {
+test "function" {
     // Arrange
     const file = "type :t = { 32 } export thread section \"function\" \"flags\" function $test(env %e, w %w, :t %s, ...) {@s ret}";
     const expected = [_]types.Symbol{
