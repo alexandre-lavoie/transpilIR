@@ -45,6 +45,7 @@ pub const SymbolMemoryWalkCallback = struct {
 
     entries: EntryList,
     function: ?usize = null,
+    assignment: bool = false,
 
     const Self = @This();
     const EntryList = std.ArrayList(SymbolMemoryEntry);
@@ -58,36 +59,6 @@ pub const SymbolMemoryWalkCallback = struct {
 
     pub fn deinit(self: *Self) void {
         self.entries.deinit();
-    }
-
-    fn entryToType(self: *Self, entry: *const SymbolMemoryEntry) ast.PrimitiveType {
-        return switch (entry.*) {
-            .local => |i| switch (self.symbol_table.symbols.items[i].memory) {
-                .primitive => |v| v,
-                .type => .long,
-                else => unreachable,
-            },
-            .global => .long,
-            .literal => |v| switch (v.value) {
-                .integer => .void,
-                .single => .single,
-                .double => .double,
-                .string => .long,
-            },
-            else => unreachable,
-        };
-    }
-
-    fn matchType(left: ast.PrimitiveType, right: ast.PrimitiveType) !ast.PrimitiveType {
-        if (left == right) return left;
-
-        if (left == .void) {
-            return right;
-        } else if (right == .void) {
-            return left;
-        }
-
-        return error.TypeError;
     }
 
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
@@ -126,14 +97,12 @@ pub const SymbolMemoryWalkCallback = struct {
             },
             .identifier => |*identifier| {
                 switch (identifier.scope) {
-                    .local,
-                    => {
+                    .local => {
                         try self.entries.append(.{
                             .local = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
                         });
                     },
-                    .global,
-                    => {
+                    .global => {
                         try self.entries.append(.{
                             .global = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
                         });
@@ -158,6 +127,9 @@ pub const SymbolMemoryWalkCallback = struct {
                     .primitive = primitive,
                 });
             },
+            .assignment => {
+                self.assignment = true;
+            },
             else => {},
         }
     }
@@ -166,36 +138,36 @@ pub const SymbolMemoryWalkCallback = struct {
         const allocator = self.symbol_table.symbols.allocator;
 
         switch (statement.data) {
-            // TODO: Handle all statements.
-            .vaarg,
-            .vastart,
             .allocate,
+            .binary_operation,
             .blit,
-            .copy,
-            .load,
-            .store,
             .branch,
-            .halt,
-            .jump,
-            .phi,
-            .phi_parameter,
-            .negate,
-            => unreachable,
-            // ----------------------------
-            .block,
+            .comparison,
+            .copy,
             .env_type,
+            .halt,
             .identifier,
+            .jump,
             .literal,
+            .load,
             .module,
+            .negate,
             .node,
             .opaque_type,
+            .phi,
             .primitive_type,
+            .@"return",
+            .store,
             .struct_type,
             .union_type,
+            .vaarg,
             .variadic_parameter,
+            .vastart,
             .zero_type,
             => {},
-            .line => {
+            .block,
+            .line,
+            => {
                 self.entries.clearAndFree();
             },
             .array_type => {
@@ -253,44 +225,9 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 try self.entries.append(@"type");
             },
-            .binary_operation, .comparison => {
-                const right = self.entries.pop();
-                const left = self.entries.pop();
-
-                const @"type" = try Self.matchType(self.entryToType(&left), self.entryToType(&right));
-
-                try self.entries.append(.{ .primitive = @"type" });
-            },
             .call_parameter => {
                 const @"type" = self.entries.pop();
-                const value = self.entries.pop();
-
-                switch (value) {
-                    .local => |local| {
-                        const symbol = &self.symbol_table.symbols.items[local];
-
-                        const memory: types.SymbolMemory = switch (@"type") {
-                            .primitive => |primitive| .{
-                                .primitive = primitive,
-                            },
-                            .type => |t| .{
-                                .type = t,
-                            },
-                            .env => .{
-                                .env = undefined,
-                            },
-                            else => unreachable,
-                        };
-
-                        if (!std.meta.eql(symbol.memory, memory)) {
-                            return error.InvalidType;
-                        }
-                    },
-                    .global,
-                    .literal,
-                    => {},
-                    else => unreachable,
-                }
+                _ = self.entries.pop();
 
                 try self.entries.append(@"type");
             },
@@ -300,13 +237,16 @@ pub const SymbolMemoryWalkCallback = struct {
                     else => unreachable,
                 };
 
-                symbol.memory = switch (self.entries.items[1]) {
-                    .primitive => |v| .{ .primitive = v },
-                    .type => |v| .{ .type = v },
-                    else => unreachable,
-                };
+                if (symbol.memory == .empty) {
+                    symbol.memory = switch (self.entries.items[1]) {
+                        .primitive => |v| .{ .primitive = v },
+                        .type => |v| .{ .type = v },
+                        else => unreachable,
+                    };
+                }
 
                 self.entries.clearAndFree();
+                self.assignment = false;
             },
             .type_definition => {
                 var i: usize = 0;
@@ -443,6 +383,11 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 self.entries.clearAndFree();
             },
+            .phi_parameter => {
+                const local = self.entries.pop();
+
+                _ = local;
+            },
             .linkage => |*linkage| {
                 const flags: ?[]const u8 = switch (self.entries.items.len) {
                     1, 2 => null,
@@ -457,7 +402,7 @@ pub const SymbolMemoryWalkCallback = struct {
                 };
 
                 const section: ?[]const u8 = switch (self.entries.items.len) {
-                    1 => null,
+                    0, 1 => null,
                     2 => switch (self.entries.pop()) {
                         .literal => |literal| switch (literal.value) {
                             .string => |v| v,
@@ -637,7 +582,6 @@ pub const SymbolMemoryWalkCallback = struct {
                     },
                 };
 
-                // TODO: Check definition matches.
                 switch (symbol.memory) {
                     .empty => {
                         symbol.memory = memory;
@@ -653,26 +597,33 @@ pub const SymbolMemoryWalkCallback = struct {
                 self.entries.clearAndFree();
             },
             .call => {
-                const symbol: *types.Symbol = switch (self.entries.items[0]) {
-                    .global => |g| &self.symbol_table.symbols.items[g],
-                    else => unreachable,
+                var i: usize = switch (self.assignment) {
+                    true => 1,
+                    false => 0,
                 };
 
-                const return_entry = self.entries.items[1];
+                const symbol: *types.Symbol = switch (self.entries.items[i]) {
+                    .global => |g| &self.symbol_table.symbols.items[g],
+                    .local => |l| &self.symbol_table.symbols.items[l],
+                    else => unreachable,
+                };
+                i += 1;
+
+                const return_entry = self.entries.items[i];
                 const @"return": types.SymbolType = switch (return_entry) {
                     .primitive => |p| .{ .primitive = p },
                     .type => |t| .{ .type = t },
                     else => unreachable,
                 };
+                i += 1;
 
-                const offset = 2;
-                const length = self.entries.items.len - offset;
+                const length = self.entries.items.len - i;
                 var parameters = try allocator.alloc(types.SymbolMemoryParameterType, length);
 
                 var vararg: bool = false;
-                var i: usize = 0;
-                while (i < parameters.len) : (i += 1) {
-                    parameters[i] = switch (self.entries.items[i + offset]) {
+                var j: usize = 0;
+                while (j < parameters.len) : (j += 1) {
+                    parameters[j] = switch (self.entries.items[j + i]) {
                         .primitive => |p| .{ .primitive = p },
                         .type => |t| .{ .type = t },
                         .env => .{ .env = undefined },
@@ -684,8 +635,8 @@ pub const SymbolMemoryWalkCallback = struct {
                     };
                 }
 
-                if (i < length) {
-                    parameters = try allocator.realloc(parameters, i);
+                if (j < length) {
+                    parameters = try allocator.realloc(parameters, j);
                 }
 
                 const memory: types.SymbolMemory = .{
@@ -697,38 +648,27 @@ pub const SymbolMemoryWalkCallback = struct {
                     },
                 };
 
-                // TODO: Check definition matches.
                 switch (symbol.memory) {
                     .empty => {
                         symbol.memory = memory;
                     },
-                    .function => {
+                    .function,
+                    .primitive,
+                    => {
                         allocator.free(parameters);
                     },
                     else => unreachable,
                 }
 
-                self.entries.clearAndFree();
-                try self.entries.append(return_entry);
-            },
-            .@"return" => {
-                const expected: ast.PrimitiveType = switch (self.symbol_table.symbols.items[self.function orelse unreachable].memory) {
-                    .function => |function| switch (function.@"return") {
-                        .primitive => |p| p,
-                        .type => .long,
-                    },
-                    else => unreachable,
-                };
-
-                if (self.entries.items.len == 0) {
-                    if (expected != .void) {
-                        return error.TypeError;
-                    } else return;
+                if (self.assignment) {
+                    const local_copy = self.entries.items[0];
+                    self.entries.clearAndFree();
+                    try self.entries.append(local_copy);
+                } else {
+                    self.entries.clearAndFree();
                 }
 
-                const actual = self.entryToType(&self.entries.pop());
-
-                if (actual != .void and expected != actual) return error.TypeError;
+                try self.entries.append(return_entry);
             },
         }
     }
@@ -738,7 +678,6 @@ pub const SymbolMemoryWalkCallback = struct {
 // Test Utils
 //
 
-const test_allocator = std.testing.allocator;
 const test_lib = @import("../../test.zig");
 
 fn testMemory(allocator: std.mem.Allocator, file: []const u8, symbol_table: *table.SymbolTable) !void {
@@ -768,6 +707,8 @@ fn testMemory(allocator: std.mem.Allocator, file: []const u8, symbol_table: *tab
 
 test "type_definition" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :o = align 8 { 32 } type :s = align 16 { w 100, :o } type :u = align 32 { { s 2 } { w } }";
     const expected = [_]types.Symbol{
         .{
@@ -844,12 +785,12 @@ test "type_definition" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    try testMemory(test_allocator, file, &symbol_table);
+    try source.testSource(allocator, file, &symbol_table);
+    try testMemory(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -857,6 +798,8 @@ test "type_definition" {
 
 test "data_definition" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "export thread section \"data\" \"flags\" data $d = { b -1 1, w -1 1, s s_-1 s_1, d d_-1 d_1, z 10 } data $o = { l $d+32 }";
     const expected = [_]types.Symbol{
         .{
@@ -973,12 +916,12 @@ test "data_definition" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    try testMemory(test_allocator, file, &symbol_table);
+    try source.testSource(allocator, file, &symbol_table);
+    try testMemory(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -986,6 +929,8 @@ test "data_definition" {
 
 test "function" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { 32 } export thread section \"function\" \"flags\" function :t $test(env %e, w %w, :t %s, ...) {@s ret %s}";
     const expected = [_]types.Symbol{
         .{
@@ -1069,12 +1014,12 @@ test "function" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    try testMemory(test_allocator, file, &symbol_table);
+    try source.testSource(allocator, file, &symbol_table);
+    try testMemory(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1082,7 +1027,9 @@ test "function" {
 
 test "call" {
     // Arrange
-    const file = "type :t = { 32 } function $test(env %e, l %l, :t %s, ...) {@s call $other(env %e, w 0, :t %s, ..., l %l) call $test(env %e, l $test, :t %s, ..., l %l) ret}";
+    const allocator = std.testing.allocator;
+
+    const file = "type :t = { 32 } function $test(env %e, l %l, :t %s, ...) {@s call $other(env %e, w 0, :t %s, ..., l %l) call $test(env %e, l $test, :t %s, ..., l %l) %l =l call $tmp() ret}";
     const expected = [_]types.Symbol{
         .{
             .identifier = .{
@@ -1184,14 +1131,30 @@ test "call" {
                 },
             },
         },
+        .{
+            .identifier = .{
+                .name = "tmp",
+                .scope = .global,
+            },
+            .memory = .{
+                .function = .{
+                    .linkage = .{},
+                    .@"return" = .{
+                        .primitive = .long,
+                    },
+                    .vararg = false,
+                    .parameters = &[_]types.SymbolMemoryParameterType{},
+                },
+            },
+        },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    try testMemory(test_allocator, file, &symbol_table);
+    try source.testSource(allocator, file, &symbol_table);
+    try testMemory(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1199,6 +1162,8 @@ test "call" {
 
 test "assignment" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { 32 } data $d = { w 0 } function $test() {@s %f =l add $d, 1 %s =:t add $d, %f ret}";
     const expected = [_]types.Symbol{
         .{
@@ -1276,12 +1241,12 @@ test "assignment" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    try testMemory(test_allocator, file, &symbol_table);
+    try source.testSource(allocator, file, &symbol_table);
+    try testMemory(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1289,6 +1254,8 @@ test "assignment" {
 
 test "return" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { 32 } data $d = { w 0 } function w $ret1(w %p) {@s ret %p} function :t $ret2() {@s ret $d} function l $ret3() {@s ret 0}";
     const expected = [_]types.Symbol{
         .{
@@ -1406,12 +1373,12 @@ test "return" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    try testMemory(test_allocator, file, &symbol_table);
+    try source.testSource(allocator, file, &symbol_table);
+    try testMemory(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1421,61 +1388,18 @@ test "return" {
 // Error Tests
 //
 
-test "error.TypeError binary_operation" {
-    // Arrange
-    const file = "function $test(w %a, s %b) {@s %c =w add %a, %b ret}";
-
-    var symbol_table = table.SymbolTable.init(test_allocator);
-    defer symbol_table.deinit();
-
-    // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    const res = testMemory(test_allocator, file, &symbol_table);
-
-    // Assert
-    try std.testing.expectError(error.TypeError, res);
-}
-
-test "error.TypeError return void" {
-    // Arrange
-    const file = "function w $test(w %a) {@s ret}";
-
-    var symbol_table = table.SymbolTable.init(test_allocator);
-    defer symbol_table.deinit();
-
-    // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    const res = testMemory(test_allocator, file, &symbol_table);
-
-    // Assert
-    try std.testing.expectError(error.TypeError, res);
-}
-
-test "error.TypeError return non-void" {
-    // Arrange
-    const file = "function $test(w %a) {@s ret %a}";
-
-    var symbol_table = table.SymbolTable.init(test_allocator);
-    defer symbol_table.deinit();
-
-    // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    const res = testMemory(test_allocator, file, &symbol_table);
-
-    // Assert
-    try std.testing.expectError(error.TypeError, res);
-}
-
 test "error.InvalidSize literal" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = { z s_1 }";
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    const res = testMemory(test_allocator, file, &symbol_table);
+    try source.testSource(allocator, file, &symbol_table);
+    const res = testMemory(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.InvalidSize, res);
@@ -1483,14 +1407,16 @@ test "error.InvalidSize literal" {
 
 test "error.InvalidSize global" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = { z $d }";
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(test_allocator, file, &symbol_table);
-    const res = testMemory(test_allocator, file, &symbol_table);
+    try source.testSource(allocator, file, &symbol_table);
+    const res = testMemory(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.InvalidSize, res);

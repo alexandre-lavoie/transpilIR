@@ -17,46 +17,69 @@ pub fn main() !void {
         try files.append(file_arg);
     }
 
-    for (files.items) |file_arg| {
-        var buffer: [4096]u8 = undefined;
-        const file_path = try std.fs.cwd().realpath(file_arg, &buffer);
+    const logging = true;
 
+    if (logging) {
+        for (files.items) |file_arg| {
+            try run(allocator, file_arg, true);
+        }
+    } else {
+        var threads = try std.ArrayList(std.Thread).initCapacity(allocator, files.items.len);
+        defer threads.deinit();
+
+        for (files.items) |file_arg| {
+            try threads.append(try std.Thread.spawn(.{}, run, .{ allocator, file_arg, false }));
+        }
+
+        for (threads.items) |thread| {
+            thread.join();
+        }
+    }
+}
+
+pub fn run(allocator: std.mem.Allocator, path: []const u8, logging: bool) !void {
+    var buffer: [4096]u8 = undefined;
+    const file_path = try std.fs.cwd().realpath(path, &buffer);
+
+    if (logging) {
         std.log.info("=== File ===", .{});
         std.log.info("{s}", .{file_path});
+    }
 
-        const file = try std.fs.openFileAbsolute(file_path, .{});
-        defer file.close();
+    const file = try std.fs.openFileAbsolute(file_path, .{});
+    defer file.close();
 
-        var file_stream = std.io.StreamSource{ .file = file };
+    var file_stream = std.io.StreamSource{ .file = file };
 
-        try file.seekTo(0);
-        var line_reader = file.reader();
+    try file.seekTo(0);
+    var line_reader = file.reader();
 
-        const newline_offsets = try lib.common.fileNewLines(allocator, &line_reader);
-        defer allocator.free(newline_offsets);
+    const newline_offsets = try lib.common.fileNewLines(allocator, &line_reader);
+    defer allocator.free(newline_offsets);
 
-        try file.seekTo(0);
-        var file_reader = file.reader();
+    try file.seekTo(0);
+    var file_reader = file.reader();
 
-        std.log.info("=== Lexer ===", .{});
+    if (logging) std.log.info("=== Lexer ===", .{});
 
-        var tokens = std.ArrayList(lib.ssa.Token).init(allocator);
-        defer tokens.deinit();
+    var tokens = std.ArrayList(lib.ssa.Token).init(allocator);
+    defer tokens.deinit();
 
-        var lexer = lib.ssa.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
-        lexer.lex() catch |err| {
-            const position = try file_stream.getPos();
+    var lexer = lib.ssa.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
+    lexer.lex() catch |err| {
+        const position = try file_stream.getPos();
 
-            lib.common.logError(
-                err,
-                file_arg,
-                newline_offsets,
-                &.{ .start = position, .end = position + 1 },
-            );
+        lib.common.logError(
+            err,
+            path,
+            newline_offsets,
+            &.{ .start = position, .end = position + 1 },
+        );
 
-            continue;
-        };
+        return;
+    };
 
+    if (logging) {
         for (tokens.items) |token| {
             var type_column: [32]u8 = undefined;
             @memset(&type_column, ' ');
@@ -71,52 +94,54 @@ pub fn main() !void {
 
             std.log.info("{s}{s}:{}:{}, {s}:{}:{}", .{
                 type_column,
-                file_arg,
+                path,
                 start.line,
                 start.column,
-                file_arg,
+                path,
                 end.line,
                 end.column,
             });
         }
+    }
 
-        const token_slice = try tokens.toOwnedSlice();
-        defer tokens.allocator.free(token_slice);
+    const token_slice = try tokens.toOwnedSlice();
+    defer tokens.allocator.free(token_slice);
 
-        var token_reader = lib.ssa.TokenReader(@TypeOf(token_slice)).init(token_slice);
+    var token_reader = lib.ssa.TokenReader(@TypeOf(token_slice)).init(token_slice);
 
-        std.log.info("=== Parser ===", .{});
+    if (logging) std.log.info("=== Parser ===", .{});
 
-        var ast = lib.ast.AST.init(allocator);
-        defer ast.deinit();
+    var ast = lib.ast.AST.init(allocator);
+    defer ast.deinit();
 
-        var parser = lib.ssa.Parser(@TypeOf(token_reader)).init(&token_reader, &ast);
-        _ = parser.parse() catch |err| {
-            const span: lib.common.SourceSpan = scope: {
-                if (parser.previous == undefined) {
-                    break :scope .{ .start = 0, .end = 0 };
-                } else if (parser.previous == undefined) {
-                    break :scope parser.previous.span;
-                } else {
-                    break :scope parser.previous_previous.span;
-                }
-            };
-
-            lib.common.logError(
-                err,
-                file_arg,
-                newline_offsets,
-                &span,
-            );
-
-            continue;
+    var parser = lib.ssa.Parser(@TypeOf(token_reader)).init(&token_reader, &ast);
+    _ = parser.parse() catch |err| {
+        const span: lib.common.SourceSpan = scope: {
+            if (parser.previous == undefined) {
+                break :scope .{ .start = 0, .end = 0 };
+            } else if (parser.previous == undefined) {
+                break :scope parser.previous.span;
+            } else {
+                break :scope parser.previous_previous.span;
+            }
         };
 
-        const entrypoint = ast.entrypoint() orelse unreachable;
+        lib.common.logError(
+            err,
+            path,
+            newline_offsets,
+            &span,
+        );
 
-        var walk = lib.ast.ASTWalk.init(allocator, &ast);
-        defer walk.deinit();
+        return;
+    };
 
+    const entrypoint = ast.entrypoint() orelse unreachable;
+
+    var walk = lib.ast.ASTWalk.init(allocator, &ast);
+    defer walk.deinit();
+
+    if (logging) {
         var depth: usize = 0;
 
         try walk.start(entrypoint);
@@ -141,10 +166,10 @@ pub fn main() !void {
                     std.log.info("{s}{s}{s}:{}:{}, {s}:{}:{}", .{
                         depth_column,
                         type_column,
-                        file_arg,
+                        path,
                         start.line,
                         start.column,
-                        file_arg,
+                        path,
                         end.line,
                         end.column,
                     });
@@ -156,37 +181,62 @@ pub fn main() !void {
                 },
             }
         }
+    }
 
-        std.log.info("=== Symbols ===", .{});
+    if (logging) std.log.info("=== Symbols ===", .{});
 
-        var symbol_table = lib.symbol.SymbolTable.init(allocator);
-        defer symbol_table.deinit();
+    var symbol_table = lib.symbol.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
 
-        try file.seekTo(0);
+    try file.seekTo(0);
 
-        var source_callback = lib.symbol.SymbolSourceWalkCallback.init(&symbol_table, &file_stream);
+    var source_callback = lib.symbol.SymbolSourceWalkCallback.init(&symbol_table, &file_stream);
 
-        var error_exit = false;
+    var error_exit = false;
 
-        try walk.start(entrypoint);
-        while (try walk.next()) |out| {
-            _ = switch (out.enter) {
-                true => source_callback.enter(out.value),
-                false => source_callback.exit(out.value),
-            } catch |err| {
-                error_exit = true;
+    try walk.start(entrypoint);
+    while (try walk.next()) |out| {
+        _ = switch (out.enter) {
+            true => source_callback.enter(out.value),
+            false => source_callback.exit(out.value),
+        } catch |err| {
+            error_exit = true;
 
-                lib.common.logError(
-                    err,
-                    file_arg,
-                    newline_offsets,
-                    &out.value.span,
-                );
-            };
-        }
+            lib.common.logError(
+                err,
+                path,
+                newline_offsets,
+                &out.value.span,
+            );
+        };
+    }
 
-        if (error_exit) continue;
+    if (error_exit) return;
 
+    var memory_callback = lib.symbol.SymbolMemoryWalkCallback.init(&symbol_table);
+
+    error_exit = false;
+
+    try walk.start(entrypoint);
+    while (try walk.next()) |out| {
+        _ = switch (out.enter) {
+            true => memory_callback.enter(out.value),
+            false => memory_callback.exit(out.value),
+        } catch |err| {
+            error_exit = true;
+
+            lib.common.logError(
+                err,
+                path,
+                newline_offsets,
+                &out.value.span,
+            );
+        };
+    }
+
+    if (error_exit) return;
+
+    if (logging) {
         for (0..symbol_table.symbols.items.len) |i| {
             const symbol = &symbol_table.symbols.items[i];
 
@@ -195,10 +245,20 @@ pub fn main() !void {
             _ = try std.fmt.bufPrint(&index_column, "{}", .{i});
 
             if (symbol.identifier.function) |index| {
-                std.log.info("{s}{s} {} {s}", .{ index_column, @tagName(symbol.identifier.scope), index, symbol.identifier.name });
+                std.log.info("{s}{s} {s} {s}:{}", .{ index_column, @tagName(symbol.identifier.scope), memoryLabel(&symbol.memory), symbol.identifier.name, index });
             } else {
-                std.log.info("{s}{s} {s}", .{ index_column, @tagName(symbol.identifier.scope), symbol.identifier.name });
+                std.log.info("{s}{s} {s} {s}", .{ index_column, @tagName(symbol.identifier.scope), memoryLabel(&symbol.memory), symbol.identifier.name });
             }
         }
     }
+}
+
+fn memoryLabel(memory: *const lib.symbol.SymbolMemory) []const u8 {
+    const value = memory.*;
+
+    return switch (value) {
+        .primitive => |p| @tagName(p),
+        .empty => "_",
+        else => @tagName(value),
+    };
 }

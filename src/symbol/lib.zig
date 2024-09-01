@@ -2,6 +2,8 @@ const table = @import("table.zig");
 pub const SymbolTable = table.SymbolTable;
 
 const types = @import("types.zig");
+pub const Symbol = types.Symbol;
+pub const SymbolMemory = types.SymbolMemory;
 
 const source = @import("walk/source.zig");
 pub const SymbolSourceWalkCallback = source.SymbolSourceWalkCallback;

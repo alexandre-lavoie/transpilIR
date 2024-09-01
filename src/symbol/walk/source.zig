@@ -62,20 +62,20 @@ pub const SymbolSourceWalkCallback = struct {
                         .default, .function, .call => {},
                     }
                 } else if (identifier.scope != .type or self.state != .default) {
-                    const index = try self.symbol_table.addSymbol(&symbol_identifier);
-
-                    if (self.state == .function) {
-                        self.function = index;
-                    }
+                    _ = try self.symbol_table.addSymbol(&symbol_identifier);
                 }
-
-                self.state = .default;
 
                 const instance: types.Instance = .{
                     .span = statement.span,
                 };
 
                 _ = try self.symbol_table.addSymbolInstance(&symbol_identifier, &instance);
+
+                if (self.state == .function) {
+                    self.function = self.symbol_table.getSymbolIndexByInstance(&instance);
+                }
+
+                self.state = .default;
             },
             .literal => |literal| {
                 _ = try self.stream.seekTo(statement.span.start);
