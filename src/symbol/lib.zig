@@ -10,3 +10,6 @@ pub const SymbolSourceWalkCallback = source.SymbolSourceWalkCallback;
 
 const memory = @import("walk/memory.zig");
 pub const SymbolMemoryWalkCallback = memory.SymbolMemoryWalkCallback;
+
+const validate = @import("walk/validate.zig");
+pub const SymbolValidateWalkCallback = validate.SymbolValidateWalkCallback;

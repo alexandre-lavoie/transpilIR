@@ -229,6 +229,32 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
             std.log.info("{s}{s} {s} {s}", .{ index_column, @tagName(symbol.identifier.scope), memoryLabel(&symbol.memory), symbol.identifier.name });
         }
     }
+
+    std.log.info("=== Validate ===", .{});
+
+    var validate_callback = lib.symbol.SymbolValidateWalkCallback.init(allocator, &symbol_table);
+    defer validate_callback.deinit();
+
+    error_exit = false;
+
+    try walk.start(entrypoint);
+    while (try walk.next()) |out| {
+        _ = switch (out.enter) {
+            true => validate_callback.enter(out.value),
+            false => validate_callback.exit(out.value),
+        } catch |err| {
+            error_exit = true;
+
+            lib.common.logError(
+                err,
+                path,
+                newline_offsets,
+                &out.value.span,
+            );
+        };
+    }
+
+    if (error_exit) return;
 }
 
 fn memoryLabel(memory: *const lib.symbol.SymbolMemory) []const u8 {
