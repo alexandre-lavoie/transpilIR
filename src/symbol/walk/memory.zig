@@ -1015,6 +1015,9 @@ test "function" {
                 .scope = .label,
                 .function = 1,
             },
+            .memory = .{
+                .label = undefined,
+            },
         },
     };
 
@@ -1107,6 +1110,9 @@ test "call" {
                 .name = "s",
                 .scope = .label,
                 .function = 1,
+            },
+            .memory = .{
+                .label = undefined,
             },
         },
         .{
@@ -1222,6 +1228,9 @@ test "assignment" {
                 .scope = .label,
                 .function = 2,
             },
+            .memory = .{
+                .label = undefined,
+            },
         },
         .{
             .identifier = .{
@@ -1328,6 +1337,9 @@ test "return" {
                 .scope = .label,
                 .function = 2,
             },
+            .memory = .{
+                .label = undefined,
+            },
         },
         .{
             .identifier = .{
@@ -1351,6 +1363,9 @@ test "return" {
                 .scope = .label,
                 .function = 5,
             },
+            .memory = .{
+                .label = undefined,
+            },
         },
         .{
             .identifier = .{
@@ -1373,6 +1388,9 @@ test "return" {
                 .name = "s",
                 .scope = .label,
                 .function = 7,
+            },
+            .memory = .{
+                .label = undefined,
             },
         },
     };
