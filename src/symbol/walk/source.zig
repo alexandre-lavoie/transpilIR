@@ -119,7 +119,6 @@ pub const SymbolSourceWalkCallback = struct {
 // Test Utils
 //
 
-const test_allocator = std.testing.allocator;
 const test_lib = @import("../../test.zig");
 
 pub fn testSource(allocator: std.mem.Allocator, file: []const u8, symbol_table: *table.SymbolTable) !void {
@@ -153,6 +152,8 @@ pub fn testSource(allocator: std.mem.Allocator, file: []const u8, symbol_table: 
 
 test "type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { w } type :t2 = { :t } ";
     const expected = [_]types.Symbol{
         .{
@@ -169,11 +170,11 @@ test "type" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(test_allocator, file, &symbol_table);
+    try testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -181,6 +182,8 @@ test "type" {
 
 test "function" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $test() {@s ret}";
     const expected = [_]types.Symbol{
         .{
@@ -198,11 +201,11 @@ test "function" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(test_allocator, file, &symbol_table);
+    try testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -210,6 +213,8 @@ test "function" {
 
 test "function type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { w } function :t $test() {@s ret}";
     const expected = [_]types.Symbol{
         .{
@@ -233,11 +238,11 @@ test "function type" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(test_allocator, file, &symbol_table);
+    try testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -245,6 +250,8 @@ test "function type" {
 
 test "reused local" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $test() {@s ret} function $test2() {@s ret}";
     const expected = [_]types.Symbol{
         .{
@@ -275,11 +282,11 @@ test "reused local" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(test_allocator, file, &symbol_table);
+    try testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -287,6 +294,8 @@ test "reused local" {
 
 test "reassigned local" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %p =w add 0, 0 %p =w add 0, 0 ret}";
     const expected = [_]types.Symbol{
         .{
@@ -311,11 +320,11 @@ test "reassigned local" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(test_allocator, file, &symbol_table);
+    try testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -323,6 +332,8 @@ test "reassigned local" {
 
 test "call" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { w } function $fun() {@s %v =:t call $other(w 0) %v =l call $fun() ret}";
     const expected = [_]types.Symbol{
         .{
@@ -359,11 +370,11 @@ test "call" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(test_allocator, file, &symbol_table);
+    try testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -371,6 +382,8 @@ test "call" {
 
 test "data" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = { b \"A \\\"B\\\" \\x43 \\n\", w -1, s s_1, d d_-1.0 }";
     const expected_symbols = [_]types.Symbol{
         .{
@@ -403,11 +416,11 @@ test "data" {
         },
     };
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(test_allocator, file, &symbol_table);
+    try testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected_symbols, symbol_table.symbols.items);
@@ -420,13 +433,15 @@ test "data" {
 
 test "error.SymbolNotFound type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { :dne }";
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    const res = testSource(test_allocator, file, &symbol_table);
+    const res = testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -434,13 +449,15 @@ test "error.SymbolNotFound type" {
 
 test "error.SymbolNotFound local type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(:dne %a) {@s ret}";
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    const res = testSource(test_allocator, file, &symbol_table);
+    const res = testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -448,13 +465,15 @@ test "error.SymbolNotFound local type" {
 
 test "error.SymbolReuse type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { w } type :t = { b }";
 
-    var symbol_table = table.SymbolTable.init(test_allocator);
+    var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    const res = testSource(test_allocator, file, &symbol_table);
+    const res = testSource(allocator, file, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolReuse, res);
