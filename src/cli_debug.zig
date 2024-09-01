@@ -169,7 +169,7 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
 
     try file.seekTo(0);
 
-    var source_callback = lib.symbol.SymbolSourceWalkCallback.init(&symbol_table, &file_stream);
+    var source_callback = lib.symbol.SymbolSourceWalkCallback.init(allocator, &symbol_table, &file_stream);
 
     var error_exit = false;
 
@@ -192,7 +192,8 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
 
     if (error_exit) return;
 
-    var memory_callback = lib.symbol.SymbolMemoryWalkCallback.init(&symbol_table);
+    var memory_callback = lib.symbol.SymbolMemoryWalkCallback.init(allocator, &symbol_table);
+    defer memory_callback.deinit();
 
     error_exit = false;
 

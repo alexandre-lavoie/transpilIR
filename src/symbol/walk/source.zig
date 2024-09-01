@@ -13,6 +13,7 @@ const SymbolSourceWalkState = enum {
 };
 
 pub const SymbolSourceWalkCallback = struct {
+    allocator: std.mem.Allocator,
     symbol_table: *table.SymbolTable,
     stream: *std.io.StreamSource,
 
@@ -21,15 +22,16 @@ pub const SymbolSourceWalkCallback = struct {
 
     const Self = @This();
 
-    pub fn init(symbol_table: *table.SymbolTable, stream: *std.io.StreamSource) Self {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *table.SymbolTable, stream: *std.io.StreamSource) Self {
         return .{
+            .allocator = allocator,
             .symbol_table = symbol_table,
             .stream = stream,
         };
     }
 
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
-        const allocator = self.symbol_table.symbols.allocator;
+        const allocator = self.allocator;
 
         switch (statement.data) {
             .data_definition,
@@ -130,6 +132,7 @@ pub fn testSource(allocator: std.mem.Allocator, file: []const u8, symbol_table: 
     defer tree.deinit();
 
     var callback = SymbolSourceWalkCallback.init(
+        allocator,
         symbol_table,
         &file_stream,
     );

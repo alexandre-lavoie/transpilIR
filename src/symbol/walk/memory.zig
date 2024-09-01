@@ -41,6 +41,7 @@ const SymbolMemoryEntry = union(enum) {
 };
 
 pub const SymbolMemoryWalkCallback = struct {
+    allocator: std.mem.Allocator,
     symbol_table: *table.SymbolTable,
 
     entries: EntryList,
@@ -50,10 +51,11 @@ pub const SymbolMemoryWalkCallback = struct {
     const Self = @This();
     const EntryList = std.ArrayList(SymbolMemoryEntry);
 
-    pub fn init(symbol_table: *table.SymbolTable) Self {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *table.SymbolTable) Self {
         return .{
+            .allocator = allocator,
             .symbol_table = symbol_table,
-            .entries = EntryList.init(symbol_table.symbols.allocator),
+            .entries = EntryList.init(allocator),
         };
     }
 
@@ -142,7 +144,7 @@ pub const SymbolMemoryWalkCallback = struct {
     }
 
     pub fn exit(self: *Self, statement: *ast.Statement) !void {
-        const allocator = self.symbol_table.symbols.allocator;
+        const allocator = self.allocator;
 
         switch (statement.data) {
             .allocate,
@@ -684,11 +686,12 @@ pub const SymbolMemoryWalkCallback = struct {
 
 const test_lib = @import("../../test.zig");
 
-fn testMemory(allocator: std.mem.Allocator, file: []const u8, symbol_table: *table.SymbolTable) !void {
+pub fn testMemory(allocator: std.mem.Allocator, file: []const u8, symbol_table: *table.SymbolTable) !void {
     var tree = try test_lib.testAST(allocator, file);
     defer tree.deinit();
 
     var callback = SymbolMemoryWalkCallback.init(
+        allocator,
         symbol_table,
     );
     defer callback.deinit();
