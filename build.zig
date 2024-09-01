@@ -4,14 +4,14 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const cli = b.addExecutable(.{
-        .name = "qbe-llvm",
-        .root_source_file = b.path("src/cli.zig"),
+    const debug_cli = b.addExecutable(.{
+        .name = "qbe-llvm-debug",
+        .root_source_file = b.path("src/cli_debug.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    b.installArtifact(cli);
+    b.installArtifact(debug_cli);
 
     const lib = b.addStaticLibrary(.{
         .name = "qbe-llvm",
