@@ -247,14 +247,12 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
 // Test Utils
 //
 
-const test_allocator = std.testing.allocator;
-
-fn testLex(buffer: anytype) ![]token.Token {
+fn testLex(allocator: std.mem.Allocator, buffer: anytype) ![]token.Token {
     var stream = std.io.fixedBufferStream(buffer);
 
     var reader = stream.reader();
 
-    var tokens = std.ArrayList(token.Token).init(test_allocator);
+    var tokens = std.ArrayList(token.Token).init(allocator);
     defer tokens.deinit();
 
     var lexer = Lexer(@TypeOf(reader), @TypeOf(tokens)).init(&reader, &tokens);
@@ -263,9 +261,9 @@ fn testLex(buffer: anytype) ![]token.Token {
     return try tokens.toOwnedSlice();
 }
 
-fn assertLex(buffer: anytype, expected: []const token.Token) !void {
-    const tokens = try testLex(buffer);
-    defer test_allocator.free(tokens);
+fn assertLex(allocator: std.mem.Allocator, buffer: anytype, expected: []const token.Token) !void {
+    const tokens = try testLex(allocator, buffer);
+    defer allocator.free(tokens);
 
     try std.testing.expectEqualSlices(token.Token, expected, tokens);
 }
@@ -276,6 +274,8 @@ fn assertLex(buffer: anytype, expected: []const token.Token) !void {
 
 test "comment" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "\n# Comment\n # Comment!\r\n\t#Comment";
     const expected = [_]token.Token{
         .{
@@ -289,11 +289,13 @@ test "comment" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "globalIdentifier" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "$global# Comment";
     const expected = [_]token.Token{
         .{
@@ -311,11 +313,13 @@ test "globalIdentifier" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "localIdentifier" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "%local# Comment";
     const expected = [_]token.Token{
         .{
@@ -333,11 +337,13 @@ test "localIdentifier" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "label_identifier" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "@label# Comment";
     const expected = [_]token.Token{
         .{
@@ -355,11 +361,13 @@ test "label_identifier" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "reserved" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "alloc4 data function s";
     const expected = [_]token.Token{
         .{
@@ -393,11 +401,13 @@ test "reserved" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "stringLiteral" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "\"string\" \"escape\\\"\" \"escape\\\"again\"";
     const expected = [_]token.Token{
         .{
@@ -423,11 +433,13 @@ test "stringLiteral" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "singleLiteral" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "s_123 s_-1.2";
     const expected = [_]token.Token{
         .{
@@ -449,11 +461,13 @@ test "singleLiteral" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "doubleLiteral" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "d_-2.4";
     const expected = [_]token.Token{
         .{
@@ -471,11 +485,13 @@ test "doubleLiteral" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "integerLiteral" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "-1 0 123";
     const expected = [_]token.Token{
         .{
@@ -501,11 +517,13 @@ test "integerLiteral" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "assign" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "=w =s =";
     const expected = [_]token.Token{
         .{
@@ -539,11 +557,13 @@ test "assign" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 test "variableArguments" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "...";
     const expected = [_]token.Token{
         .{
@@ -561,7 +581,7 @@ test "variableArguments" {
     };
 
     // Act + Assert
-    try assertLex(file, &expected);
+    try assertLex(allocator, file, &expected);
 }
 
 //
@@ -570,10 +590,12 @@ test "variableArguments" {
 
 test "error.StringNotClosed" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "\"not closed";
 
     // Act
-    const res = testLex(file);
+    const res = testLex(allocator, file);
 
     // Assert
     try std.testing.expectError(error.StringNotClosed, res);
@@ -581,10 +603,12 @@ test "error.StringNotClosed" {
 
 test "error.InvalidNegativeDigit" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "s_- ";
 
     // Act
-    const res = testLex(file);
+    const res = testLex(allocator, file);
 
     // Assert
     try std.testing.expectError(error.InvalidNegativeDigit, res);
@@ -592,10 +616,12 @@ test "error.InvalidNegativeDigit" {
 
 test "error.InvalidDecimal" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "d_0. ";
 
     // Act
-    const res = testLex(file);
+    const res = testLex(allocator, file);
 
     // Assert
     try std.testing.expectError(error.InvalidDecimal, res);
@@ -603,10 +629,12 @@ test "error.InvalidDecimal" {
 
 test "error.InvalidDigit" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "s_ ";
 
     // Act
-    const res = testLex(file);
+    const res = testLex(allocator, file);
 
     // Assert
     try std.testing.expectError(error.InvalidDigit, res);
@@ -614,10 +642,12 @@ test "error.InvalidDigit" {
 
 test "error.InvalidArgumentSpread" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = ".. ";
 
     // Act
-    const res = testLex(file);
+    const res = testLex(allocator, file);
 
     // Assert
     try std.testing.expectError(error.InvalidArgumentSpread, res);

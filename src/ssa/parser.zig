@@ -1699,28 +1699,27 @@ pub fn Parser(comptime Reader: type) type {
 // Test Utils
 //
 
-const test_allocator = std.testing.allocator;
 const test_lib = @import("../test.zig");
 
-fn testParser(buffer: anytype) ![]ast.Statement {
-    var tree = try test_lib.testAST(test_allocator, buffer);
+fn testParser(allocator: std.mem.Allocator, buffer: anytype) ![]ast.Statement {
+    var tree = try test_lib.testAST(allocator, buffer);
     defer tree.deinit();
 
-    return try tree.toSlice(test_allocator);
+    return try tree.toSlice(allocator);
 }
 
-fn assertParser(buffer: anytype, expected: []const ast.Statement) !void {
-    const statements = try testParser(buffer);
-    defer test_allocator.free(statements);
+fn assertParser(allocator: std.mem.Allocator, buffer: anytype, expected: []const ast.Statement) !void {
+    const statements = try testParser(allocator, buffer);
+    defer allocator.free(statements);
 
     try std.testing.expectEqualDeep(expected, statements);
 }
 
-fn assertParserType(buffer: anytype, expected: []const ast.StatementType) !void {
-    const statements = try testParser(buffer);
-    defer test_allocator.free(statements);
+fn assertParserType(allocator: std.mem.Allocator, buffer: anytype, expected: []const ast.StatementType) !void {
+    const statements = try testParser(allocator, buffer);
+    defer allocator.free(statements);
 
-    try test_lib.assertStatementTypes(test_allocator, expected, statements);
+    try test_lib.assertStatementTypes(allocator, expected, statements);
 }
 
 //
@@ -1729,6 +1728,8 @@ fn assertParserType(buffer: anytype, expected: []const ast.StatementType) !void 
 
 test "module" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "";
     const expected = [_]ast.Statement{
         .{
@@ -1744,11 +1745,13 @@ test "module" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParser(allocator, file, &expected);
 }
 
 test "type struct" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { w } ";
     const expected = [_]ast.Statement{
         .{
@@ -1816,11 +1819,13 @@ test "type struct" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParser(allocator, file, &expected);
 }
 
 test "type struct alignment" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = align 32 {w}";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1834,11 +1839,13 @@ test "type struct alignment" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "type struct trailing comma" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = {w, }";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1851,11 +1858,13 @@ test "type struct trailing comma" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "type struct array" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = {w 1}";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1870,11 +1879,13 @@ test "type struct array" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "type struct custom type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = {:o}";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1887,11 +1898,13 @@ test "type struct custom type" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "type struct many members" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = {w, :o, s 1}";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1910,11 +1923,13 @@ test "type struct many members" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "type union" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { {w} {s} }";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1933,11 +1948,13 @@ test "type union" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "type union alignment" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = align 32 { {w} }";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1953,11 +1970,13 @@ test "type union alignment" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "type opaque" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = { 32 }";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1969,11 +1988,13 @@ test "type opaque" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "type opaque alignment" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t = align 16 { 32 }";
     const expected = [_]ast.StatementType{
         .identifier,
@@ -1986,11 +2007,13 @@ test "type opaque alignment" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "data" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = { w 1 } ";
     const expected = [_]ast.Statement{
         .{
@@ -2078,11 +2101,13 @@ test "data" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParser(allocator, file, &expected);
 }
 
 test "data with trailing comma" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = {w 1, }";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2097,11 +2122,13 @@ test "data with trailing comma" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "data with alignment" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = align 1 {w 1}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2117,11 +2144,13 @@ test "data with alignment" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "data with global" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = {l $o}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2136,11 +2165,13 @@ test "data with global" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "data with global offset" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = {l $o + 32 0}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2161,11 +2192,13 @@ test "data with global offset" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "data with linkage" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "export thread section \"data\" \"flags\" data $d = {w 1}";
     const expected = [_]ast.StatementType{
         .literal,
@@ -2182,11 +2215,13 @@ test "data with linkage" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "data with reused type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = {w 1 2 3}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2209,11 +2244,13 @@ test "data with reused type" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "data with many types" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = {w 1, h 0, b \"test\"}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2236,11 +2273,13 @@ test "data with many types" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "data with zeros" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = {z 1000}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2255,11 +2294,13 @@ test "data with zeros" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s ret}";
     const expected = [_]ast.Statement{
         .{
@@ -2367,11 +2408,13 @@ test "function" {
     };
 
     // Act + Assert
-    try assertParser(file, &expected);
+    try assertParser(allocator, file, &expected);
 }
 
 test "function with linkage" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "export thread section \"function\" \"flag\" function $fun() {@s ret}";
     const expected = [_]ast.StatementType{
         .literal,
@@ -2390,11 +2433,13 @@ test "function with linkage" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function with primitive return type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function w $fun() {@s ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2411,11 +2456,13 @@ test "function with primitive return type" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function with custom return type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function :type $fun() {@s ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2432,11 +2479,13 @@ test "function with custom return type" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function with custom type parameter" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(:type %p) {@s ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2457,11 +2506,13 @@ test "function with custom type parameter" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function with one parameter" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w %p) {@s ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2482,11 +2533,13 @@ test "function with one parameter" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function with trailing comma" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w %p, ) {@s ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2507,11 +2560,13 @@ test "function with trailing comma" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function with many parameters" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w %p0, b %p1, h %p2) {@s ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2540,11 +2595,13 @@ test "function with many parameters" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function with env parameter" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(env %e) {@s ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2565,11 +2622,13 @@ test "function with env parameter" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function with variable parameter" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w %fmt, ...) {@s ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2592,11 +2651,13 @@ test "function with variable parameter" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function many flow" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@a jmp @b @b jnz %p, @c, @d @c hlt @d ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2629,11 +2690,13 @@ test "function many flow" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "function fall-through block" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s @n ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2655,11 +2718,13 @@ test "function fall-through block" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "allocate" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %x =w alloc4 32 %y =:type alloc16 64 ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2692,11 +2757,13 @@ test "allocate" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "copy" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %x =w copy 0 %y =w extsw %l %z =s ultof $g ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2738,11 +2805,13 @@ test "copy" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "vastart" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s vastart %ap ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2763,11 +2832,13 @@ test "vastart" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "vaarg" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %l =w vaarg %ap ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2791,11 +2862,13 @@ test "vaarg" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "negate" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %l =w neg %v ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2819,11 +2892,13 @@ test "negate" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "blit" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s blit %a, $g, 16 ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2846,11 +2921,13 @@ test "blit" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "binaryOperation" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %t =w add %l, 0 %u =s div 0, $g ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2883,11 +2960,13 @@ test "binaryOperation" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "comparison" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %t =w ceqw $g, 1 %u =s ceqs 0, %f ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2922,11 +3001,13 @@ test "comparison" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "store" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s storew %l, 1 storeh 0, $g ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -2955,11 +3036,13 @@ test "store" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "load" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %l1 =w loadw %x %l2 =w loadsb $g %l3 =d loadd 0 ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -3000,11 +3083,13 @@ test "load" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "phi" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %x =w phi @a 1, @b %l, @c $g ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -3038,11 +3123,13 @@ test "phi" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "call" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s call $f() ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -3064,11 +3151,13 @@ test "call" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "call assign" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s %x =w call $f() ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -3092,11 +3181,13 @@ test "call assign" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "call parameters" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s call $f(w %a, :type %b) ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -3126,11 +3217,13 @@ test "call parameters" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 test "call varargs" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {@s call $f(w %a, ..., w %b) ret}";
     const expected = [_]ast.StatementType{
         .linkage,
@@ -3162,7 +3255,7 @@ test "call varargs" {
     };
 
     // Act + Assert
-    try assertParserType(file, &expected);
+    try assertParserType(allocator, file, &expected);
 }
 
 //
@@ -3171,11 +3264,13 @@ test "call varargs" {
 
 test "data error.InvalidIdentifier" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data";
     const expected = error.InvalidIdentifier;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3183,11 +3278,13 @@ test "data error.InvalidIdentifier" {
 
 test "data error.InvalidIdentifier 2" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data @d";
     const expected = error.InvalidIdentifier;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3195,11 +3292,13 @@ test "data error.InvalidIdentifier 2" {
 
 test "data error.MissingEqual" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d 1";
     const expected = error.MissingEqual;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3207,11 +3306,13 @@ test "data error.MissingEqual" {
 
 test "data error.InvalidPrimitiveType" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = {1}";
     const expected = error.InvalidPrimitiveType;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3219,11 +3320,13 @@ test "data error.InvalidPrimitiveType" {
 
 test "function error.InvalidPrimitiveType" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function";
     const expected = error.InvalidPrimitiveType;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3231,11 +3334,13 @@ test "function error.InvalidPrimitiveType" {
 
 test "function error.InvalidPrimitiveType 2" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function @fun() {@s ret}";
     const expected = error.InvalidPrimitiveType;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3243,11 +3348,13 @@ test "function error.InvalidPrimitiveType 2" {
 
 test "function error.InvalidVarArgs" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(...) {@s ret}";
     const expected = error.InvalidVarArgs;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3255,11 +3362,13 @@ test "function error.InvalidVarArgs" {
 
 test "function error.InvalidIdentifier" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w) {@s ret}";
     const expected = error.InvalidIdentifier;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3267,11 +3376,13 @@ test "function error.InvalidIdentifier" {
 
 test "function error.InvalidIdentifier 2" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w @a) {@s ret}";
     const expected = error.InvalidIdentifier;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3279,11 +3390,13 @@ test "function error.InvalidIdentifier 2" {
 
 test "function error.EmptyFunctionBody" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun() {}";
     const expected = error.EmptyFunctionBody;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3291,11 +3404,13 @@ test "function error.EmptyFunctionBody" {
 
 test "function error.MissingCloseParenthesis" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w %a, ..., w %b) {}";
     const expected = error.MissingCloseParenthesis;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);
@@ -3303,11 +3418,13 @@ test "function error.MissingCloseParenthesis" {
 
 test "function error.MissingCloseParenthesis 2" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w %a, ..., ) {}";
     const expected = error.MissingCloseParenthesis;
 
     // Act
-    const res = testParser(file);
+    const res = testParser(allocator, file);
 
     // Assert
     try std.testing.expectError(expected, res);

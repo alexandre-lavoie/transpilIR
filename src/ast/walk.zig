@@ -233,18 +233,16 @@ pub const ASTWalk = struct {
 // Test Utils
 //
 
-const test_allocator = std.testing.allocator;
-
 const test_lib = @import("../test.zig");
 
-fn testEnter(buffer: anytype) ![]statement.Statement {
-    var tree = try test_lib.testAST(test_allocator, buffer);
+fn testEnter(allocator: std.mem.Allocator, buffer: anytype) ![]statement.Statement {
+    var tree = try test_lib.testAST(allocator, buffer);
     defer tree.deinit();
 
-    var statements = std.ArrayList(statement.Statement).init(test_allocator);
+    var statements = std.ArrayList(statement.Statement).init(allocator);
     defer statements.deinit();
 
-    var walk = ASTWalk.init(test_allocator, &tree);
+    var walk = ASTWalk.init(allocator, &tree);
     defer walk.deinit();
 
     try walk.start(tree.entrypoint() orelse return error.NotFound);
@@ -258,11 +256,11 @@ fn testEnter(buffer: anytype) ![]statement.Statement {
     return try statements.toOwnedSlice();
 }
 
-fn assertEnter(buffer: anytype, expected: []const statement.StatementType) !void {
-    const statements = try testEnter(buffer);
-    defer test_allocator.free(statements);
+fn assertEnter(allocator: std.mem.Allocator, buffer: anytype, expected: []const statement.StatementType) !void {
+    const statements = try testEnter(allocator, buffer);
+    defer allocator.free(statements);
 
-    try test_lib.assertStatementTypes(test_allocator, expected, statements);
+    try test_lib.assertStatementTypes(allocator, expected, statements);
 }
 
 //
@@ -271,6 +269,8 @@ fn assertEnter(buffer: anytype, expected: []const statement.StatementType) !void
 
 test "type" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "type :t1 = { w, s 100 } type :t2 = { {w} {s} }";
     const expected = [_]statement.StatementType{
         .module,
@@ -299,11 +299,13 @@ test "type" {
     };
 
     // Act + Assert
-    try assertEnter(file, &expected);
+    try assertEnter(allocator, file, &expected);
 }
 
 test "data" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "data $d = { w 1 2, b 3 } data $d2 = { z 100 }";
     const expected = [_]statement.StatementType{
         .module,
@@ -334,11 +336,13 @@ test "data" {
     };
 
     // Act + Assert
-    try assertEnter(file, &expected);
+    try assertEnter(allocator, file, &expected);
 }
 
 test "function" {
     // Arrange
+    const allocator = std.testing.allocator;
+
     const file = "function $fun(w %a, :tag %b) {@s %t =w add 1, %a %t2 =w ceqs 1, 1 @e ret}";
     const expected = [_]statement.StatementType{
         .module,
@@ -385,5 +389,5 @@ test "function" {
     };
 
     // Act + Assert
-    try assertEnter(file, &expected);
+    try assertEnter(allocator, file, &expected);
 }

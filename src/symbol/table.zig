@@ -185,18 +185,14 @@ pub const SymbolTable = struct {
 };
 
 //
-// Test Utils
-//
-
-const test_allocator = std.testing.allocator;
-
-//
 // Valid Tests
 //
 
 test "symbol" {
     // Arrange
-    var symbol_table = SymbolTable.init(test_allocator);
+    const allocator = std.testing.allocator;
+
+    var symbol_table = SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     const identifier: types.SymbolIdentifier = .{
@@ -218,7 +214,9 @@ test "symbol" {
 
 test "symbol with same name but different scope" {
     // Arrange
-    var symbol_table = SymbolTable.init(test_allocator);
+    const allocator = std.testing.allocator;
+
+    var symbol_table = SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     const local_identifier: types.SymbolIdentifier = .{
@@ -242,7 +240,9 @@ test "symbol with same name but different scope" {
 
 test "literal" {
     // Arrange
-    var symbol_table = SymbolTable.init(test_allocator);
+    const allocator = std.testing.allocator;
+
+    var symbol_table = SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     const value: types.LiteralValue = .{
@@ -267,7 +267,9 @@ test "literal" {
 
 test "error.SymbolNotFound" {
     // Arrange
-    var symbol_table = SymbolTable.init(test_allocator);
+    const allocator = std.testing.allocator;
+
+    var symbol_table = SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     const identifier: types.SymbolIdentifier = .{
