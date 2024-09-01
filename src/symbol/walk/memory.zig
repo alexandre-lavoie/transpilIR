@@ -44,7 +44,6 @@ pub const SymbolMemoryWalkCallback = struct {
     symbol_table: *table.SymbolTable,
 
     entries: EntryList,
-    function: ?usize = null,
     assignment: bool = false,
 
     const Self = @This();
@@ -145,6 +144,7 @@ pub const SymbolMemoryWalkCallback = struct {
             .comparison,
             .copy,
             .env_type,
+            .function,
             .halt,
             .identifier,
             .jump,
@@ -528,15 +528,11 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 self.entries.clearAndFree();
             },
-            .function => {
-                self.function = null;
-            },
             .function_signature => {
                 const symbol_index: usize = switch (self.entries.items[0]) {
                     .global => |g| g,
                     else => unreachable,
                 };
-                self.function = symbol_index;
 
                 const symbol: *types.Symbol = &self.symbol_table.symbols.items[symbol_index];
 
