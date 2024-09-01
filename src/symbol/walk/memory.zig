@@ -45,6 +45,7 @@ pub const SymbolMemoryWalkCallback = struct {
 
     entries: EntryList,
     assignment: bool = false,
+    block: bool = false,
 
     const Self = @This();
     const EntryList = std.ArrayList(SymbolMemoryEntry);
@@ -111,7 +112,15 @@ pub const SymbolMemoryWalkCallback = struct {
                             .type = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
                         });
                     },
-                    else => {},
+                    .label => {
+                        if (!self.block) return;
+                        self.block = false;
+
+                        const symbol = self.symbol_table.getSymbolByInstance(&instance) orelse unreachable;
+                        symbol.memory = .{
+                            .label = undefined,
+                        };
+                    },
                 }
             },
             .literal => {
@@ -126,9 +135,8 @@ pub const SymbolMemoryWalkCallback = struct {
                     .primitive = primitive,
                 });
             },
-            .assignment => {
-                self.assignment = true;
-            },
+            .assignment => self.assignment = true,
+            .block => self.block = true,
             else => {},
         }
     }

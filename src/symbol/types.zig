@@ -135,13 +135,14 @@ pub const SymbolMemoryFunction = struct {
 };
 
 pub const SymbolMemory = union(enum) {
-    empty: void,
-    primitive: ast.PrimitiveType,
-    type: usize,
-    env: void,
     @"opaque": SymbolMemoryOpaque,
     @"struct": SymbolMemoryStruct,
     @"union": SymbolMemoryUnion,
     data: SymbolMemoryData,
+    empty: void,
+    env: void,
     function: SymbolMemoryFunction,
+    label: void,
+    primitive: ast.PrimitiveType,
+    type: usize,
 };

@@ -259,6 +259,7 @@ fn memoryLabel(memory: *const lib.symbol.SymbolMemory) []const u8 {
     return switch (value) {
         .primitive => |p| @tagName(p),
         .empty => "_",
+        .label => "@",
         else => @tagName(value),
     };
 }

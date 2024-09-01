@@ -55,10 +55,10 @@ pub const StatementType = enum {
     block,
     line,
     call,
+    call_parameter,
     function,
     function_signature,
     function_parameter,
-    call_parameter,
     variadic_parameter,
     vaarg,
     vastart,
@@ -193,6 +193,11 @@ pub const StatementData = union(StatementType) {
         parameters: ?StatementIndex,
     },
 
+    call_parameter: struct {
+        type: StatementIndex,
+        value: StatementIndex,
+    },
+
     function: struct {
         signature: StatementIndex,
         body: StatementIndex,
@@ -206,11 +211,6 @@ pub const StatementData = union(StatementType) {
     },
 
     function_parameter: struct {
-        type: StatementIndex,
-        value: StatementIndex,
-    },
-
-    call_parameter: struct {
         type: StatementIndex,
         value: StatementIndex,
     },
