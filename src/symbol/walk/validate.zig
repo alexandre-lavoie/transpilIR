@@ -33,17 +33,17 @@ pub const SymbolValidateWalkCallback = struct {
 
         if (left == .void) {
             switch (right) {
-                .single, .double => {},
+                .single, .double => return error.MismatchTypeError,
                 else => return right,
             }
         } else if (right == .void) {
             switch (left) {
-                .single, .double => {},
+                .single, .double => return error.MismatchTypeError,
                 else => return left,
             }
         }
 
-        return error.TypeError;
+        return error.MismatchTypeError;
     }
 
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
@@ -73,6 +73,7 @@ pub const SymbolValidateWalkCallback = struct {
                     .double => .double,
                 });
             },
+            .primitive_type => |primitive| try self.types.append(primitive),
             else => {},
         }
     }
@@ -88,10 +89,26 @@ pub const SymbolValidateWalkCallback = struct {
             .binary_operation => {
                 const right = self.types.pop();
                 const left = self.types.pop();
+                const data_type = self.types.pop();
 
-                const @"type" = try Self.matchType(left, right);
+                if (try Self.matchType(left, right) != data_type) return error.DataTypeError;
 
-                try self.types.append(@"type");
+                try self.types.append(data_type);
+            },
+            .comparison => {
+                const right = self.types.pop();
+                const left = self.types.pop();
+                const comparision_type = self.types.pop();
+                const data_type = self.types.pop();
+
+                switch (data_type) {
+                    .single, .double => return error.ComparisonTypeError,
+                    else => {},
+                }
+
+                if (try Self.matchType(left, right) != comparision_type) return error.DataTypeError;
+
+                try self.types.append(data_type);
             },
             else => {},
         }
@@ -166,7 +183,25 @@ test "error.SymbolNotFound local" {
     try std.testing.expectError(error.SymbolNotFound, res);
 }
 
-test "error.TypeError binary_operator identifier" {
+test "error.MismatchTypeError literal" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %r =w add 1, s_1 ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.MismatchTypeError, res);
+}
+
+test "error.MismatchTypeError identifier" {
     // Arrange
     const allocator = std.testing.allocator;
 
@@ -181,10 +216,28 @@ test "error.TypeError binary_operator identifier" {
     const res = testValidate(allocator, file, &symbol_table);
 
     // Assert
-    try std.testing.expectError(error.TypeError, res);
+    try std.testing.expectError(error.MismatchTypeError, res);
 }
 
-test "error.TypeError binary_operator literal" {
+test "error.DataTypeError binary_operator" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %r =s add 1, 2 ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataTypeError, res);
+}
+
+test "error.MismatchTypeError binary_operator" {
     // Arrange
     const allocator = std.testing.allocator;
 
@@ -199,5 +252,59 @@ test "error.TypeError binary_operator literal" {
     const res = testValidate(allocator, file, &symbol_table);
 
     // Assert
-    try std.testing.expectError(error.TypeError, res);
+    try std.testing.expectError(error.MismatchTypeError, res);
+}
+
+test "error.ComparisonTypeError" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %r =s ceqw 0, 0 ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.ComparisonTypeError, res);
+}
+
+test "error.DataTypeError integer comparison" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %r =w ceqw s_0, s_0 ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataTypeError, res);
+}
+
+test "error.DataTypeError float comparison" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %r =w cos 0, 0 ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataTypeError, res);
 }
