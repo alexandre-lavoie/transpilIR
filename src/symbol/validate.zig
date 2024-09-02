@@ -12,6 +12,7 @@ pub const SymbolValidateWalkCallback = struct {
     allocator: std.mem.Allocator,
     symbol_table: *const table.SymbolTable,
     types: TypeList,
+    return_type: ?ast.PrimitiveType = null,
 
     const Self = @This();
     const TypeList = std.ArrayList(ast.PrimitiveType);
@@ -114,6 +115,12 @@ pub const SymbolValidateWalkCallback = struct {
                     },
                     .primitive => |primitive| try self.types.append(Self.castType(primitive)),
                     .type => try self.types.append(.long),
+                    .function => |function| if (self.return_type == null) {
+                        self.return_type = switch (function.@"return") {
+                            .type => .long,
+                            .primitive => |primitive| primitive,
+                        };
+                    },
                     else => {},
                 }
             },
@@ -139,6 +146,7 @@ pub const SymbolValidateWalkCallback = struct {
             .line,
             .type_definition,
             => self.types.clearAndFree(),
+            .function => self.return_type = null,
             .binary_operation => {
                 const right = self.types.pop();
                 const left = self.types.pop();
@@ -164,6 +172,14 @@ pub const SymbolValidateWalkCallback = struct {
                 const data_type = self.types.pop();
 
                 if (!Self.validateType(data_type, value)) return error.DataType;
+            },
+            .@"return" => {
+                const @"type": ast.PrimitiveType = switch (self.types.items.len) {
+                    0 => .void,
+                    else => self.types.pop(),
+                };
+
+                if (!Self.validateType(self.return_type orelse .void, @"type")) return error.DataType;
             },
             else => {},
         }
@@ -349,6 +365,24 @@ test "error.DataType negate" {
     const allocator = std.testing.allocator;
 
     const file = "function $f() {@s %v =w copy 0 %r =s neg %v ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType return" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function s $f() {@s %v =w copy 0 ret %v}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
