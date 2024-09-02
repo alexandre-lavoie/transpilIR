@@ -69,6 +69,8 @@ pub const StatementType = enum {
     assignment,
     blit,
     copy,
+    cast,
+    convert,
     load,
     store,
 
@@ -246,6 +248,16 @@ pub const StatementData = union(StatementType) {
     },
 
     copy: struct {
+        data_type: StatementIndex,
+        value: StatementIndex,
+    },
+
+    cast: struct {
+        data_type: StatementIndex,
+        value: StatementIndex,
+    },
+
+    convert: struct {
         data_type: StatementIndex,
         to_type: StatementIndex,
         from_type: StatementIndex,

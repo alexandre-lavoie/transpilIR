@@ -153,6 +153,8 @@ pub const SymbolMemoryWalkCallback = struct {
             .branch,
             .comparison,
             .copy,
+            .cast,
+            .convert,
             .env_type,
             .function,
             .halt,

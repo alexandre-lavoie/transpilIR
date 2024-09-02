@@ -213,7 +213,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!Self.validateType(.long, to)) return error.DataType;
                 if (!Self.validateType(.long, from)) return error.DataType;
             },
-            .copy => {
+            .convert => {
                 const value = self.types.pop();
                 const from_type = self.types.pop();
                 const to_type = self.types.pop();
@@ -221,6 +221,25 @@ pub const SymbolValidateWalkCallback = struct {
 
                 if (!Self.validateType(from_type, value)) return error.DataType;
                 if (!Self.validateType(data_type, to_type)) return error.DataType;
+            },
+            .copy => {
+                const value = self.types.pop();
+                const data_type = self.types.pop();
+
+                if (!Self.validateType(data_type, value)) return error.DataType;
+            },
+            .cast => {
+                const value = self.types.pop();
+                const data_type = self.types.pop();
+
+                const from_type: ast.PrimitiveType = switch (data_type) {
+                    .long => .double,
+                    .single => .word,
+                    .double => .long,
+                    else => .single,
+                };
+
+                if (!Self.validateType(from_type, value)) return error.DataType;
             },
             else => {},
         }
@@ -251,25 +270,6 @@ pub fn testValidate(allocator: std.mem.Allocator, file: []const u8, symbol_table
             false => callback.exit(out.value),
         };
     }
-}
-
-//
-// Valid Tests
-//
-
-test "cast" {
-    // Arrange
-    const allocator = std.testing.allocator;
-
-    const file = "function $f() {@s %s =s copy s_0 %l =l cast %s ret}";
-
-    var symbol_table = table.SymbolTable.init(allocator);
-    defer symbol_table.deinit();
-
-    // Act + Assert
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    try testValidate(allocator, file, &symbol_table);
 }
 
 //
@@ -532,7 +532,7 @@ test "error.DataType blit target" {
     // Arrange
     const allocator = std.testing.allocator;
 
-    const file = "function $f() {@s %to =w copy 0 %from =l copy 0 blit %to, %from, 32 ret}";
+    const file = "function $f() {@s %to =b copy 0 %from =l copy 0 blit %to, %from, 32 ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
@@ -550,7 +550,7 @@ test "error.DataType blit source" {
     // Arrange
     const allocator = std.testing.allocator;
 
-    const file = "function $f() {@s %to =l copy 0 %from =w copy 0 blit %to, %from, 32 ret}";
+    const file = "function $f() {@s %to =l copy 0 %from =b copy 0 blit %to, %from, 32 ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
@@ -592,6 +592,42 @@ test "error.DataType copy" {
     defer symbol_table.deinit();
 
     // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType cast" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %s =s copy 0 %rt =d cast %s ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act + Assert
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType conversion" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %s =s copy 0 %rt =d swtof %s ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act + Assert
     try source.testSource(allocator, file, &symbol_table);
     try memory.testMemory(allocator, file, &symbol_table);
     const res = testValidate(allocator, file, &symbol_table);

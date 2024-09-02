@@ -163,10 +163,18 @@ pub const ASTWalk = struct {
                 try self.stack.append(.{ .index = d.target });
                 try self.stack.append(.{ .index = d.size });
             },
-            .copy => |*d| {
+            .convert => |*d| {
                 try self.stack.append(.{ .index = d.data_type });
                 try self.stack.append(.{ .index = d.to_type });
                 try self.stack.append(.{ .index = d.from_type });
+                try self.stack.append(.{ .index = d.value });
+            },
+            .copy => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.value });
+            },
+            .cast => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
                 try self.stack.append(.{ .index = d.value });
             },
             .load => |*d| {

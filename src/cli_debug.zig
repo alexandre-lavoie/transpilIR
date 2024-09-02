@@ -255,6 +255,7 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
     }
 
     if (error_exit) return;
+    std.log.info("OK", .{});
 }
 
 fn memoryLabel(memory: *const lib.symbol.SymbolMemory) []const u8 {
