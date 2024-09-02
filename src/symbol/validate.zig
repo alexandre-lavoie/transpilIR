@@ -13,6 +13,7 @@ pub const SymbolValidateWalkCallback = struct {
     symbol_table: *const table.SymbolTable,
     types: TypeList,
     return_type: ?ast.PrimitiveType = null,
+    phi_type: ?ast.PrimitiveType = null,
 
     const Self = @This();
     const TypeList = std.ArrayList(ast.PrimitiveType);
@@ -134,6 +135,7 @@ pub const SymbolValidateWalkCallback = struct {
                 });
             },
             .primitive_type => |primitive| try self.types.append(Self.castType(primitive)),
+            .phi => self.phi_type = self.types.pop(),
             else => {},
         }
     }
@@ -191,6 +193,11 @@ pub const SymbolValidateWalkCallback = struct {
                 _ = self.types.pop();
 
                 if (!Self.validateType(.long, value)) return error.DataType;
+            },
+            .phi_parameter => {
+                const @"type" = self.types.pop();
+
+                if (!Self.validateType(self.phi_type orelse .void, @"type")) return error.DataType;
             },
             else => {},
         }
@@ -430,6 +437,24 @@ test "error.DataType vaarg" {
     const allocator = std.testing.allocator;
 
     const file = "function $f() {@s %v =s copy 0 %a =w vaarg %v ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType phi" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@a %a =w copy 0 @b %b =s copy s_0 @c %c =w phi @a %a, @b %b ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
