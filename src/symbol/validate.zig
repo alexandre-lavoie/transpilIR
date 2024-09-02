@@ -204,6 +204,15 @@ pub const SymbolValidateWalkCallback = struct {
 
                 if (!Self.validateType(.byte, condition)) return error.DataType;
             },
+            .blit => {
+                const size = self.types.pop();
+                const to = self.types.pop();
+                const from = self.types.pop();
+
+                if (size != .void) return error.DataType;
+                if (Self.validateType(.long, to)) return error.DataType;
+                if (Self.validateType(.long, from)) return error.DataType;
+            },
             else => {},
         }
     }
@@ -478,6 +487,60 @@ test "error.DataType branch" {
     const allocator = std.testing.allocator;
 
     const file = "function $f() {@a %a =s copy s_0 jnz %a, @t, @f @t @f ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType blit target" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %to =w copy 0 %from =l copy 0 blit %to, %from, 32 ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType blit source" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %to =l copy 0 %from =w copy 0 blit %to, %from, 32 ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType blit size" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %to =l copy 0 %from =l copy 0 blit %to, %from, %to ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
