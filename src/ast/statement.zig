@@ -248,7 +248,7 @@ pub const StatementData = union(StatementType) {
     copy: struct {
         data_type: StatementIndex,
         to_type: StatementIndex,
-        from_type: ?StatementIndex,
+        from_type: StatementIndex,
         value: StatementIndex,
     },
 

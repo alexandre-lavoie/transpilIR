@@ -1202,11 +1202,19 @@ pub fn Parser(comptime Reader: type) type {
         fn copy(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
+            const data_type_statement = self.ast.get(data_type) orelse unreachable;
+
             // TODO: Double check these types.
             const to_type: ast.StatementIndex = scope: {
                 const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
-                    .cast => break :scope data_type,
-                    .copy => break :scope data_type,
+                    .cast => break :scope try self.new(
+                        data_type_statement.span,
+                        data_type_statement.data,
+                    ),
+                    .copy => break :scope try self.new(
+                        data_type_statement.span,
+                        data_type_statement.data,
+                    ),
                     .byte_to_word => .word,
                     .byte_to_word_unsigned => .word,
                     .double_to_single => .single,
@@ -1233,10 +1241,16 @@ pub fn Parser(comptime Reader: type) type {
             };
 
             // TODO: Double check these types.
-            const from_type: ?ast.StatementIndex = scope: {
+            const from_type: ast.StatementIndex = scope: {
                 const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
-                    .cast => break :scope null,
-                    .copy => break :scope data_type,
+                    .cast => break :scope try self.new(
+                        data_type_statement.span,
+                        .{ .primitive_type = .void },
+                    ),
+                    .copy => break :scope try self.new(
+                        data_type_statement.span,
+                        data_type_statement.data,
+                    ),
                     .byte_to_word => .byte,
                     .byte_to_word_unsigned => .byte_unsigned,
                     .double_to_single => .double,
@@ -2772,6 +2786,8 @@ test "copy" {
         .function_signature,
         .identifier,
         .identifier,
+        .primitive_type,
+        .primitive_type,
         .primitive_type,
         .literal,
         .copy,

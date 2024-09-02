@@ -166,7 +166,7 @@ pub const ASTWalk = struct {
             .copy => |*d| {
                 try self.stack.append(.{ .index = d.data_type });
                 try self.stack.append(.{ .index = d.to_type });
-                if (d.from_type) |from_type| try self.stack.append(.{ .index = from_type });
+                try self.stack.append(.{ .index = d.from_type });
                 try self.stack.append(.{ .index = d.value });
             },
             .load => |*d| {
