@@ -54,6 +54,10 @@ pub const TokenWalkCallback = struct {
         try self.append(v1);
     }
 
+    fn newline(self: *Self) !void {
+        try self.push(.newline, null);
+    }
+
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
         switch (statement.data) {
             .node,
@@ -123,7 +127,7 @@ pub const TokenWalkCallback = struct {
                 if (self.block_enter and token_type == .label_identifier) {
                     self.block_enter = false;
 
-                    try self.push(.newline, null);
+                    try self.newline();
                 }
             },
             .primitive_type => |primitive| {
@@ -237,7 +241,7 @@ pub const TokenWalkCallback = struct {
             .module => try self.push(.module_end, null),
             .block,
             .line,
-            => try self.push(.newline, null),
+            => try self.newline(),
             .opaque_type,
             .union_type,
             => try self.push(.close_curly_brace, null),
@@ -304,7 +308,7 @@ pub const TokenWalkCallback = struct {
             },
             .function => {
                 try self.push(.close_curly_brace, null);
-                try self.push(.newline, null);
+                try self.newline();
             },
             .function_parameter => {
                 try self.rot2();
@@ -314,12 +318,12 @@ pub const TokenWalkCallback = struct {
                 _ = try self.pop();
 
                 try self.push(.close_curly_brace, null);
-                try self.push(.newline, null);
+                try self.newline();
             },
             .type_definition => {
                 self.type_scope = false;
 
-                try self.push(.newline, null);
+                try self.newline();
             },
             .function_signature => {
                 if (self.function_enter) {
@@ -333,7 +337,7 @@ pub const TokenWalkCallback = struct {
 
                 try self.push(.close_parenthesis, null);
                 try self.push(.open_curly_brace, null);
-                try self.push(.newline, null);
+                try self.newline();
             },
             .linkage => |linkage| {
                 const flags: ?token.Token = switch (linkage.flags != null) {
@@ -368,6 +372,7 @@ pub fn Emit(comptime Reader: type, comptime Writer: type) type {
         symbol_table: *const symbol.SymbolTable,
 
         done: bool = false,
+        space: bool = false,
 
         const Self = @This();
 
@@ -421,6 +426,18 @@ pub fn Emit(comptime Reader: type, comptime Writer: type) type {
                 else => {},
             }
 
+            if (self.space) {
+                switch (tok.token_type) {
+                    .newline,
+                    .comma,
+                    .open_parenthesis,
+                    .close_parenthesis,
+                    => {},
+                    else => try self.writer_writeByte(' '),
+                }
+                self.space = false;
+            }
+
             const color = token.tokenColor(tok.token_type);
 
             const word: []const u8 = token.tokenString(tok.token_type);
@@ -462,10 +479,13 @@ pub fn Emit(comptime Reader: type, comptime Writer: type) type {
                 }
             }
 
-            switch (tok.token_type) {
-                .newline, .tab => {},
-                else => try self.writer_writeByte(' '),
-            }
+            self.space = switch (tok.token_type) {
+                .newline,
+                .tab,
+                .open_parenthesis,
+                => false,
+                else => true,
+            };
 
             return true;
         }

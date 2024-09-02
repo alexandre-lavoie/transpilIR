@@ -311,7 +311,7 @@ pub fn tokenString(token_type: TokenType) []const u8 {
         .bitwise_xor => "xor",
         .zero => "z",
         .newline => "\n",
-        .tab => "\t",
+        .tab => "    ",
         .module_start,
         .module_end,
         .global_identifier,
