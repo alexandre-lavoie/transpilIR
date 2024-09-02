@@ -610,9 +610,9 @@ pub const SymbolMemoryWalkCallback = struct {
                     false => 0,
                 };
 
-                const symbol: *types.Symbol = switch (self.entries.items[i]) {
+                const symbol: ?*types.Symbol = switch (self.entries.items[i]) {
                     .global => |g| &self.symbol_table.symbols.items[g],
-                    .local => |l| &self.symbol_table.symbols.items[l],
+                    .local => null,
                     else => unreachable,
                 };
                 i += 1;
@@ -656,16 +656,20 @@ pub const SymbolMemoryWalkCallback = struct {
                     },
                 };
 
-                switch (symbol.memory) {
-                    .empty => {
-                        symbol.memory = memory;
-                    },
-                    .function,
-                    .primitive,
-                    => {
-                        allocator.free(parameters);
-                    },
-                    else => unreachable,
+                if (symbol) |function_symbol| {
+                    switch (function_symbol.memory) {
+                        .empty => {
+                            function_symbol.memory = memory;
+                        },
+                        .function,
+                        .primitive,
+                        => {
+                            allocator.free(parameters);
+                        },
+                        else => unreachable,
+                    }
+                } else {
+                    allocator.free(parameters);
                 }
 
                 if (self.assignment) {
@@ -1158,6 +1162,75 @@ test "call" {
                     .vararg = false,
                     .parameters = &[_]types.SymbolMemoryParameterType{},
                 },
+            },
+        },
+    };
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try testMemory(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "call function pointer" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f(l %l) {@s %t =w call %l() ret}";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "f",
+                .scope = .global,
+            },
+            .memory = .{
+                .function = .{
+                    .linkage = .{},
+                    .@"return" = .{
+                        .primitive = .void,
+                    },
+                    .vararg = false,
+                    .parameters = &[_]types.SymbolMemoryParameterType{
+                        .{
+                            .primitive = .long,
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "l",
+                .scope = .local,
+                .function = 0,
+            },
+            .memory = .{
+                .primitive = .long,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 0,
+            },
+            .memory = .{
+                .label = undefined,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "t",
+                .scope = .local,
+                .function = 0,
+            },
+            .memory = .{
+                .primitive = .word,
             },
         },
     };
