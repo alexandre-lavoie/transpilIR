@@ -16,7 +16,7 @@ pub fn testAST(allocator: std.mem.Allocator, buffer: anytype) !lib.ast.AST {
     const token_slice = try tokens.toOwnedSlice();
     defer tokens.allocator.free(token_slice);
 
-    var token_reader = lib.qbe.TokenReader(@TypeOf(token_slice)).init(token_slice);
+    var token_reader = lib.qbe.TokenReader.init(token_slice);
 
     var tree = lib.ast.AST.init(allocator);
     errdefer tree.deinit();

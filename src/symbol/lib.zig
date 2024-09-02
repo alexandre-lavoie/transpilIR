@@ -4,6 +4,7 @@ pub const SymbolTable = table.SymbolTable;
 const types = @import("types.zig");
 pub const Symbol = types.Symbol;
 pub const SymbolMemory = types.SymbolMemory;
+pub const Instance = types.Instance;
 
 const source = @import("source.zig");
 pub const SymbolSourceWalkCallback = source.SymbolSourceWalkCallback;

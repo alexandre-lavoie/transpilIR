@@ -13,27 +13,26 @@ pub const Token = struct {
     }
 };
 
-pub fn TokenReader(comptime Collection: type) type {
-    return struct {
-        collection: Collection,
-        offset: usize = 0,
+pub const TokenReader = struct {
+    collection: Collection,
+    offset: usize = 0,
 
-        const Self = @This();
+    const Self = @This();
+    const Collection = []const Token;
 
-        pub fn init(collection: Collection) Self {
-            return Self{ .collection = collection };
-        }
+    pub fn init(collection: Collection) Self {
+        return Self{ .collection = collection };
+    }
 
-        pub fn readToken(self: *Self) *const Token {
-            if (self.offset >= self.collection.len) return &self.collection[self.collection.len - 1];
+    pub fn readToken(self: *Self) *const Token {
+        if (self.offset >= self.collection.len) return &self.collection[self.collection.len - 1];
 
-            const index = self.offset;
-            self.offset += 1;
+        const index = self.offset;
+        self.offset += 1;
 
-            return &self.collection[index];
-        }
-    };
-}
+        return &self.collection[index];
+    }
+};
 
 pub const TokenType = enum(u8) {
     // Module

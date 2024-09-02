@@ -17,17 +17,19 @@ pub fn main() !void {
         try files.append(file_arg);
     }
 
+    var output = std.io.getStdOut().writer().any();
     for (files.items) |file_arg| {
-        try run(allocator, file_arg);
+        try run(allocator, file_arg, &output);
     }
 }
 
-pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
-    var buffer: [4096]u8 = undefined;
-    const file_path = try std.fs.cwd().realpath(path, &buffer);
+pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWriter) !void {
+    _ = try output.write("=== File ===\n");
 
-    std.log.info("=== File ===", .{});
-    std.log.info("{s}", .{file_path});
+    const file_path = try std.fs.cwd().realpathAlloc(allocator, path);
+    defer allocator.free(file_path);
+
+    _ = try output.print("{s}\n", .{file_path});
 
     const file = try std.fs.openFileAbsolute(file_path, .{});
     defer file.close();
@@ -43,7 +45,7 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
     try file.seekTo(0);
     var file_reader = file.reader();
 
-    std.log.info("=== Lexer ===", .{});
+    _ = try output.write("=== Lexer ===\n");
 
     var tokens = std.ArrayList(lib.qbe.Token).init(allocator);
     defer tokens.deinit();
@@ -52,12 +54,16 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
     lexer.lex() catch |err| {
         const position = try file_stream.getPos();
 
-        lib.common.logError(
+        const error_string = try lib.common.errorString(
+            allocator,
             err,
             path,
             newline_offsets,
             &.{ .start = position, .end = position + 1 },
         );
+        defer allocator.free(error_string);
+
+        _ = try output.write(error_string);
 
         return;
     };
@@ -74,7 +80,7 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
             else => token.span.end - 1,
         });
 
-        std.log.info("{s}{s}:{}:{}, {s}:{}:{}", .{
+        _ = try output.print("{s}{s}:{}:{}, {s}:{}:{}\n", .{
             type_column,
             path,
             start.line,
@@ -88,9 +94,9 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
     const token_slice = try tokens.toOwnedSlice();
     defer tokens.allocator.free(token_slice);
 
-    var token_reader = lib.qbe.TokenReader(@TypeOf(token_slice)).init(token_slice);
+    var token_reader = lib.qbe.TokenReader.init(token_slice);
 
-    std.log.info("=== Parser ===", .{});
+    _ = try output.write("=== Parser ===\n");
 
     var ast = lib.ast.AST.init(allocator);
     defer ast.deinit();
@@ -107,12 +113,16 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
             }
         };
 
-        lib.common.logError(
+        const error_string = try lib.common.errorString(
+            allocator,
             err,
             path,
             newline_offsets,
             &span,
         );
+        defer allocator.free(error_string);
+
+        _ = try output.write(error_string);
 
         return;
     };
@@ -143,7 +153,7 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
                     else => out.value.span.end - 1,
                 });
 
-                std.log.info("{s}{s}{s}:{}:{}, {s}:{}:{}", .{
+                _ = try output.print("{s}{s}{s}:{}:{}, {s}:{}:{}\n", .{
                     depth_column,
                     type_column,
                     path,
@@ -162,7 +172,7 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
         }
     }
 
-    std.log.info("=== Symbols ===", .{});
+    _ = try output.write("=== Symbols ===\n");
 
     var symbol_table = lib.symbol.SymbolTable.init(allocator);
     defer symbol_table.deinit();
@@ -181,12 +191,16 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
         } catch |err| {
             error_exit = true;
 
-            lib.common.logError(
+            const error_string = try lib.common.errorString(
+                allocator,
                 err,
                 path,
                 newline_offsets,
                 &out.value.span,
             );
+            defer allocator.free(error_string);
+
+            _ = try output.write(error_string);
         };
     }
 
@@ -205,12 +219,16 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
         } catch |err| {
             error_exit = true;
 
-            lib.common.logError(
+            const error_string = try lib.common.errorString(
+                allocator,
                 err,
                 path,
                 newline_offsets,
                 &out.value.span,
             );
+            defer allocator.free(error_string);
+
+            _ = try output.write(error_string);
         };
     }
 
@@ -223,14 +241,23 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
         @memset(&index_column, ' ');
         _ = try std.fmt.bufPrint(&index_column, "{}", .{i});
 
+        _ = try output.print("{s}{s} {s} {s}", .{
+            index_column,
+            @tagName(symbol.identifier.scope),
+            memoryLabel(&symbol.memory),
+            symbol.identifier.name,
+        });
+
         if (symbol.identifier.function) |index| {
-            std.log.info("{s}{s} {s} {s}:{}", .{ index_column, @tagName(symbol.identifier.scope), memoryLabel(&symbol.memory), symbol.identifier.name, index });
+            _ = try output.print(":{}\n", .{
+                index,
+            });
         } else {
-            std.log.info("{s}{s} {s} {s}", .{ index_column, @tagName(symbol.identifier.scope), memoryLabel(&symbol.memory), symbol.identifier.name });
+            try output.writeByte('\n');
         }
     }
 
-    std.log.info("=== Validate ===", .{});
+    _ = try output.write("=== Validate ===\n");
 
     var validate_callback = lib.symbol.SymbolValidateWalkCallback.init(allocator, &symbol_table);
     defer validate_callback.deinit();
@@ -245,17 +272,33 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
         } catch |err| {
             error_exit = true;
 
-            lib.common.logError(
+            const error_string = try lib.common.errorString(
+                allocator,
                 err,
                 path,
                 newline_offsets,
                 &out.value.span,
             );
+            defer allocator.free(error_string);
+
+            _ = try output.write(error_string);
         };
     }
 
     if (error_exit) return;
-    std.log.info("OK", .{});
+    _ = try output.write("OK\n=== Emit ===\n");
+
+    var emit_writer = std.io.getStdOut().writer();
+    var emit_callback = lib.qbe.EmitWalkCallback(@TypeOf(emit_writer)).init(allocator, &emit_writer, &symbol_table);
+    defer emit_callback.deinit();
+
+    try walk.start(entrypoint);
+    while (try walk.next()) |out| {
+        try switch (out.enter) {
+            true => emit_callback.enter(out.value),
+            false => emit_callback.exit(out.value),
+        };
+    }
 }
 
 fn memoryLabel(memory: *const lib.symbol.SymbolMemory) []const u8 {

@@ -97,14 +97,22 @@ pub fn indexToFile(newline_offsets: []const usize, index: usize) struct { line: 
     };
 }
 
-pub fn logError(err: anytype, file: []const u8, offsets: []const usize, span: *const SourceSpan) void {
+pub fn errorString(allocator: std.mem.Allocator, err: anytype, file: []const u8, offsets: []const usize, span: *const SourceSpan) ![]const u8 {
     const start = indexToFile(offsets, span.start);
     const end = indexToFile(offsets, switch (span.end) {
         0 => 0,
         else => span.end - 1,
     });
 
-    std.log.err("({any}) {s}:{}:{} - {s}:{}:{}", .{ err, file, start.line, start.column, file, end.line, end.column });
+    return std.fmt.allocPrint(allocator, "({any}) {s}:{}:{} - {s}:{}:{}", .{
+        err,
+        file,
+        start.line,
+        start.column,
+        file,
+        end.line,
+        end.column,
+    });
 }
 
 test "indexToFile" {

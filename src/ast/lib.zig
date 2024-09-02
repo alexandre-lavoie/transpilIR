@@ -1,7 +1,7 @@
 const ast = @import("ast.zig");
 pub const AST = ast.AST;
 
-pub const statement = @import("statement.zig");
+const statement = @import("statement.zig");
 pub const Statement = statement.Statement;
 pub const StatementIndex = statement.StatementIndex;
 pub const StatementType = statement.StatementType;
