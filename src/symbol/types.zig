@@ -42,7 +42,7 @@ pub const SymbolIdentifier = struct {
 
 pub const Symbol = struct {
     identifier: SymbolIdentifier,
-    memory: SymbolMemory = .{ .empty = undefined },
+    memory: SymbolMemory = .empty,
 };
 
 pub const LiteralValueType = enum {
@@ -124,7 +124,7 @@ pub const SymbolMemoryData = struct {
 pub const SymbolMemoryParameterType = union(enum) {
     primitive: ast.PrimitiveType,
     type: usize,
-    env: void,
+    env,
 };
 
 pub const SymbolMemoryFunction = struct {
@@ -139,10 +139,10 @@ pub const SymbolMemory = union(enum) {
     @"struct": SymbolMemoryStruct,
     @"union": SymbolMemoryUnion,
     data: SymbolMemoryData,
-    empty: void,
-    env: void,
+    empty,
+    env,
     function: SymbolMemoryFunction,
-    label: void,
+    label,
     primitive: ast.PrimitiveType,
     type: usize,
 };

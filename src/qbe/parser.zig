@@ -223,7 +223,7 @@ pub fn Parser(comptime Reader: type) type {
 
             return try self.new(
                 span,
-                .{ .zero_type = undefined },
+                .zero_type,
             );
         }
 
@@ -242,7 +242,7 @@ pub fn Parser(comptime Reader: type) type {
 
             return try self.new(
                 span,
-                .{ .env_type = undefined },
+                .env_type,
             );
         }
 
@@ -552,9 +552,7 @@ pub fn Parser(comptime Reader: type) type {
             while (self.previous.token_type != .close_curly_brace) {
                 const value_span = self.previous.span;
                 const value_data: ast.StatementData = switch (self.previous.token_type) {
-                    .zero => .{
-                        .zero_type = undefined,
-                    },
+                    .zero => .zero_type,
                     else => .{
                         .primitive_type = try self.primitiveTypeInner(),
                     },
@@ -790,7 +788,7 @@ pub fn Parser(comptime Reader: type) type {
 
             return try self.new(
                 .{ .start = start, .end = end },
-                .{ .variadic_parameter = undefined },
+                .variadic_parameter,
             );
         }
 
@@ -1676,7 +1674,7 @@ pub fn Parser(comptime Reader: type) type {
 
             return try self.new(
                 span,
-                .{ .halt = undefined },
+                .halt,
             );
         }
 

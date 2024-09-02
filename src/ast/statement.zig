@@ -152,7 +152,7 @@ pub const StatementData = union(StatementType) {
         count: StatementIndex,
     },
 
-    env_type: void,
+    env_type,
 
     opaque_type: struct {
         alignment: ?StatementIndex,
@@ -176,7 +176,7 @@ pub const StatementData = union(StatementType) {
         types: StatementIndex,
     },
 
-    zero_type: void,
+    zero_type,
 
     // Function
 
@@ -217,7 +217,7 @@ pub const StatementData = union(StatementType) {
         value: StatementIndex,
     },
 
-    variadic_parameter: void,
+    variadic_parameter,
 
     vaarg: struct {
         data_type: StatementIndex,
@@ -284,7 +284,7 @@ pub const StatementData = union(StatementType) {
         false: StatementIndex,
     },
 
-    halt: void,
+    halt,
 
     jump: struct {
         identifier: StatementIndex,

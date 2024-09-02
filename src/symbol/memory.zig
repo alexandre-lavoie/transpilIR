@@ -13,12 +13,12 @@ const SymbolMemoryEntry = union(enum) {
     literal: *types.Literal,
     primitive: ast.PrimitiveType,
     type: usize,
-    env: void,
-    @"struct": void,
-    @"union": void,
-    @"opaque": void,
-    zero: void,
-    variadic: void,
+    env,
+    @"struct",
+    @"union",
+    @"opaque",
+    zero,
+    variadic,
     linkage: types.SymbolMemoryLinkage,
     data_offset: types.SymbolMemoryDataOffset,
     data_entry: union(enum) {
@@ -101,34 +101,22 @@ pub const SymbolMemoryWalkCallback = struct {
             .negate,
             => {},
             .struct_type => {
-                try self.entries.append(.{
-                    .@"struct" = undefined,
-                });
+                try self.entries.append(.@"struct");
             },
             .union_type => {
-                try self.entries.append(.{
-                    .@"union" = undefined,
-                });
+                try self.entries.append(.@"union");
             },
             .opaque_type => {
-                try self.entries.append(.{
-                    .@"opaque" = undefined,
-                });
+                try self.entries.append(.@"opaque");
             },
             .env_type => {
-                try self.entries.append(.{
-                    .env = undefined,
-                });
+                try self.entries.append(.env);
             },
             .zero_type => {
-                try self.entries.append(.{
-                    .zero = undefined,
-                });
+                try self.entries.append(.zero);
             },
             .variadic_parameter => {
-                try self.entries.append(.{
-                    .variadic = undefined,
-                });
+                try self.entries.append(.variadic);
             },
             .identifier => |*identifier| {
                 switch (identifier.scope) {
@@ -152,9 +140,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         self.block = false;
 
                         const symbol = self.symbol_table.getSymbolByInstance(&instance) orelse unreachable;
-                        symbol.memory = .{
-                            .label = undefined,
-                        };
+                        symbol.memory = .label;
                     },
                 }
             },
@@ -258,9 +244,7 @@ pub const SymbolMemoryWalkCallback = struct {
                             .type => |t| .{
                                 .type = t,
                             },
-                            .env => .{
-                                .env = undefined,
-                            },
+                            .env => .env,
                             else => unreachable,
                         };
                     },
@@ -608,7 +592,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     parameters[i] = switch (self.entries.items[i + offset]) {
                         .primitive => |p| .{ .primitive = p },
                         .type => |t| .{ .type = t },
-                        .env => .{ .env = undefined },
+                        .env => .env,
                         else => unreachable,
                     };
                 }
@@ -666,7 +650,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     parameters[j] = switch (self.entries.items[j + i]) {
                         .primitive => |p| .{ .primitive = p },
                         .type => |t| .{ .type = t },
-                        .env => .{ .env = undefined },
+                        .env => .env,
                         .variadic => {
                             vararg = true;
                             break;
@@ -1005,9 +989,7 @@ test "function" {
                     },
                     .vararg = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{
-                        .{
-                            .env = undefined,
-                        },
+                        .env,
                         .{
                             .primitive = .word,
                         },
@@ -1024,9 +1006,7 @@ test "function" {
                 .scope = .local,
                 .function = 1,
             },
-            .memory = .{
-                .env = undefined,
-            },
+            .memory = .env,
         },
         .{
             .identifier = .{
@@ -1054,9 +1034,7 @@ test "function" {
                 .scope = .label,
                 .function = 1,
             },
-            .memory = .{
-                .label = undefined,
-            },
+            .memory = .label,
         },
     };
 
@@ -1101,9 +1079,7 @@ test "call" {
                     },
                     .vararg = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{
-                        .{
-                            .env = undefined,
-                        },
+                        .env,
                         .{
                             .primitive = .long,
                         },
@@ -1120,9 +1096,7 @@ test "call" {
                 .scope = .local,
                 .function = 1,
             },
-            .memory = .{
-                .env = undefined,
-            },
+            .memory = .env,
         },
         .{
             .identifier = .{
@@ -1150,9 +1124,7 @@ test "call" {
                 .scope = .label,
                 .function = 1,
             },
-            .memory = .{
-                .label = undefined,
-            },
+            .memory = .label,
         },
         .{
             .identifier = .{
@@ -1167,9 +1139,7 @@ test "call" {
                     },
                     .vararg = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{
-                        .{
-                            .env = undefined,
-                        },
+                        .env,
                         .{
                             .primitive = .word,
                         },
@@ -1251,9 +1221,7 @@ test "call function pointer" {
                 .scope = .label,
                 .function = 0,
             },
-            .memory = .{
-                .label = undefined,
-            },
+            .memory = .label,
         },
         .{
             .identifier = .{
@@ -1336,9 +1304,7 @@ test "assignment" {
                 .scope = .label,
                 .function = 2,
             },
-            .memory = .{
-                .label = undefined,
-            },
+            .memory = .label,
         },
         .{
             .identifier = .{
@@ -1445,9 +1411,7 @@ test "return" {
                 .scope = .label,
                 .function = 2,
             },
-            .memory = .{
-                .label = undefined,
-            },
+            .memory = .label,
         },
         .{
             .identifier = .{
@@ -1471,9 +1435,7 @@ test "return" {
                 .scope = .label,
                 .function = 5,
             },
-            .memory = .{
-                .label = undefined,
-            },
+            .memory = .label,
         },
         .{
             .identifier = .{
@@ -1497,9 +1459,7 @@ test "return" {
                 .scope = .label,
                 .function = 7,
             },
-            .memory = .{
-                .label = undefined,
-            },
+            .memory = .label,
         },
     };
 
