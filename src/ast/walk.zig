@@ -9,6 +9,7 @@ const ASTWalkEntry = struct {
 };
 
 pub const ASTWalkOutput = struct {
+    index: statement.StatementIndex,
     value: *statement.Statement,
     enter: bool = true,
 };
@@ -45,6 +46,7 @@ pub const ASTWalk = struct {
 
         if (!entry.enter) {
             return .{
+                .index = entry.index,
                 .value = stat,
                 .enter = false,
             };
@@ -223,6 +225,7 @@ pub const ASTWalk = struct {
         }
 
         return .{
+            .index = entry.index,
             .value = stat,
             .enter = true,
         };
