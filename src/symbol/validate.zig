@@ -181,6 +181,17 @@ pub const SymbolValidateWalkCallback = struct {
 
                 if (!Self.validateType(self.return_type orelse .void, @"type")) return error.DataType;
             },
+            .vastart => {
+                const value = self.types.pop();
+
+                if (!Self.validateType(.long, value)) return error.DataType;
+            },
+            .vaarg => {
+                const value = self.types.pop();
+                _ = self.types.pop();
+
+                if (!Self.validateType(.long, value)) return error.DataType;
+            },
             else => {},
         }
     }
@@ -383,6 +394,42 @@ test "error.DataType return" {
     const allocator = std.testing.allocator;
 
     const file = "function s $f() {@s %v =w copy 0 ret %v}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType vastart" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %v =s copy 0 vastart %v ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType vaarg" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %v =s copy 0 %a =w vaarg %v ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
