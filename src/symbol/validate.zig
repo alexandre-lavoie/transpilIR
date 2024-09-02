@@ -199,6 +199,11 @@ pub const SymbolValidateWalkCallback = struct {
 
                 if (!Self.validateType(self.phi_type orelse .void, @"type")) return error.DataType;
             },
+            .branch => {
+                const condition = self.types.pop();
+
+                if (!Self.validateType(.byte, condition)) return error.DataType;
+            },
             else => {},
         }
     }
@@ -455,6 +460,24 @@ test "error.DataType phi" {
     const allocator = std.testing.allocator;
 
     const file = "function $f() {@a %a =w copy 0 @b %b =s copy s_0 @c %c =w phi @a %a, @b %b ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType branch" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@a %a =s copy s_0 jnz %a, @t, @f @t @f ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
