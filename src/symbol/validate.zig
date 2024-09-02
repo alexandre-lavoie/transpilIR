@@ -111,16 +111,21 @@ pub const SymbolValidateWalkCallback = struct {
                     .empty => {
                         switch (identifier.scope) {
                             .label, .local, .type => return error.SymbolNotFound,
-                            .global => return {},
+                            .global => try self.types.append(.long),
                         }
                     },
                     .primitive => |primitive| try self.types.append(Self.castType(primitive)),
                     .type => try self.types.append(.long),
-                    .function => |function| if (self.return_type == null) {
-                        self.return_type = switch (function.@"return") {
-                            .type => .long,
-                            .primitive => |primitive| primitive,
-                        };
+                    .data => try self.types.append(.long),
+                    .function => |function| {
+                        if (self.return_type == null) {
+                            self.return_type = switch (function.@"return") {
+                                .type => .long,
+                                .primitive => |primitive| primitive,
+                            };
+                        }
+
+                        try self.types.append(.long);
                     },
                     else => {},
                 }
@@ -247,7 +252,7 @@ pub const SymbolValidateWalkCallback = struct {
                 const data_type = self.types.pop();
 
                 if (!Self.validateType(.long, src)) return error.DataType;
-                if (!Self.validateType(data_type, memory_type)) return error.DataType;
+                if (!Self.validateType(memory_type, data_type)) return error.DataType;
             },
             else => {},
         }
@@ -278,6 +283,24 @@ pub fn testValidate(allocator: std.mem.Allocator, file: []const u8, symbol_table
             false => callback.exit(out.value),
         };
     }
+}
+
+//
+// Valid Tests
+
+test "load global" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %w =w loadw $ptr ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act + Assert
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    try testValidate(allocator, file, &symbol_table);
 }
 
 //
@@ -617,7 +640,7 @@ test "error.DataType cast" {
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
-    // Act + Assert
+    // Act
     try source.testSource(allocator, file, &symbol_table);
     try memory.testMemory(allocator, file, &symbol_table);
     const res = testValidate(allocator, file, &symbol_table);
@@ -635,7 +658,7 @@ test "error.DataType conversion" {
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
-    // Act + Assert
+    // Act
     try source.testSource(allocator, file, &symbol_table);
     try memory.testMemory(allocator, file, &symbol_table);
     const res = testValidate(allocator, file, &symbol_table);
@@ -653,7 +676,7 @@ test "error.DataType load pointer" {
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
-    // Act + Assert
+    // Act
     try source.testSource(allocator, file, &symbol_table);
     try memory.testMemory(allocator, file, &symbol_table);
     const res = testValidate(allocator, file, &symbol_table);
@@ -671,7 +694,7 @@ test "error.DataType load type" {
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
-    // Act + Assert
+    // Act
     try source.testSource(allocator, file, &symbol_table);
     try memory.testMemory(allocator, file, &symbol_table);
     const res = testValidate(allocator, file, &symbol_table);
