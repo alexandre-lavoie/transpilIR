@@ -1024,6 +1024,7 @@ pub fn Parser(comptime Reader: type) type {
                 .word_to_float_unsigned,
                 .word_to_float,
                 => self.convert(data_type),
+                .any_load,
                 .byte_load_unsigned,
                 .byte_load,
                 .double_load,
@@ -1359,6 +1360,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const load_span = self.previous.span;
             const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
+                .any_load => .void,
                 .byte_load_unsigned => .byte_unsigned,
                 .byte_load => .byte,
                 .double_load => .double,

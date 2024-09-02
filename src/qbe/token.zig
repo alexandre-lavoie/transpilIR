@@ -85,6 +85,7 @@ pub const TokenType = enum(u8) {
     addition,
     @"align",
     allocate,
+    any_load,
     arthimetic_shift_right,
     bitwise_and,
     bitwise_or,
@@ -259,7 +260,7 @@ pub const reserved_words = std.StaticStringMap(TokenType).initComptime(.{
     .{ "loadub", .byte_load_unsigned },
     .{ "loaduh", .half_word_load_unsigned },
     .{ "loaduw", .word_load_unsigned },
-    .{ "load", .word_load }, // TODO: Is this accurate?
+    .{ "load", .any_load },
     .{ "loadw", .word_load },
     .{ "mul", .multiply },
     .{ "neg", .negate },
