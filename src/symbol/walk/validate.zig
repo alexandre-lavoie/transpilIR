@@ -37,7 +37,7 @@ pub const SymbolValidateWalkCallback = struct {
             return left;
         }
 
-        return error.MismatchTypeError;
+        return error.MismatchType;
     }
 
     fn castType(primitive: ast.PrimitiveType) ast.PrimitiveType {
@@ -144,7 +144,7 @@ pub const SymbolValidateWalkCallback = struct {
                 const left = self.types.pop();
                 const data_type = self.types.pop();
 
-                if (!Self.validateType(data_type, try Self.matchType(left, right))) return error.DataTypeError;
+                if (!Self.validateType(data_type, try Self.matchType(left, right))) return error.DataType;
             },
             .comparison => {
                 const right = self.types.pop();
@@ -153,11 +153,17 @@ pub const SymbolValidateWalkCallback = struct {
                 const data_type = self.types.pop();
 
                 switch (data_type) {
-                    .single, .double => return error.ComparisonTypeError,
+                    .single, .double => return error.ComparisonType,
                     else => {},
                 }
 
-                if (!Self.validateType(comparision_type, try Self.matchType(left, right))) return error.DataTypeError;
+                if (!Self.validateType(comparision_type, try Self.matchType(left, right))) return error.DataType;
+            },
+            .negate => {
+                const value = self.types.pop();
+                const data_type = self.types.pop();
+
+                if (!Self.validateType(data_type, value)) return error.DataType;
             },
             else => {},
         }
@@ -232,7 +238,7 @@ test "error.SymbolNotFound local" {
     try std.testing.expectError(error.SymbolNotFound, res);
 }
 
-test "error.MismatchTypeError" {
+test "error.MismatchType" {
     // Arrange
     const allocator = std.testing.allocator;
 
@@ -247,10 +253,10 @@ test "error.MismatchTypeError" {
     const res = testValidate(allocator, file, &symbol_table);
 
     // Assert
-    try std.testing.expectError(error.MismatchTypeError, res);
+    try std.testing.expectError(error.MismatchType, res);
 }
 
-test "error.DataTypeError binary_operator" {
+test "error.DataType binary_operator" {
     // Arrange
     const allocator = std.testing.allocator;
 
@@ -265,10 +271,10 @@ test "error.DataTypeError binary_operator" {
     const res = testValidate(allocator, file, &symbol_table);
 
     // Assert
-    try std.testing.expectError(error.DataTypeError, res);
+    try std.testing.expectError(error.DataType, res);
 }
 
-test "error.MismatchTypeError binary_operator" {
+test "error.MismatchType binary_operator" {
     // Arrange
     const allocator = std.testing.allocator;
 
@@ -283,10 +289,10 @@ test "error.MismatchTypeError binary_operator" {
     const res = testValidate(allocator, file, &symbol_table);
 
     // Assert
-    try std.testing.expectError(error.MismatchTypeError, res);
+    try std.testing.expectError(error.MismatchType, res);
 }
 
-test "error.ComparisonTypeError" {
+test "error.ComparisonType" {
     // Arrange
     const allocator = std.testing.allocator;
 
@@ -301,10 +307,10 @@ test "error.ComparisonTypeError" {
     const res = testValidate(allocator, file, &symbol_table);
 
     // Assert
-    try std.testing.expectError(error.ComparisonTypeError, res);
+    try std.testing.expectError(error.ComparisonType, res);
 }
 
-test "error.DataTypeError integer comparison" {
+test "error.DataType integer comparison" {
     // Arrange
     const allocator = std.testing.allocator;
 
@@ -319,10 +325,10 @@ test "error.DataTypeError integer comparison" {
     const res = testValidate(allocator, file, &symbol_table);
 
     // Assert
-    try std.testing.expectError(error.DataTypeError, res);
+    try std.testing.expectError(error.DataType, res);
 }
 
-test "error.DataTypeError float comparison" {
+test "error.DataType float comparison" {
     // Arrange
     const allocator = std.testing.allocator;
 
@@ -337,5 +343,23 @@ test "error.DataTypeError float comparison" {
     const res = testValidate(allocator, file, &symbol_table);
 
     // Assert
-    try std.testing.expectError(error.DataTypeError, res);
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType negate" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %v =w copy 0 %r =s neg %v ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
 }
