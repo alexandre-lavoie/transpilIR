@@ -5,11 +5,11 @@ const types = @import("types.zig");
 pub const Symbol = types.Symbol;
 pub const SymbolMemory = types.SymbolMemory;
 
-const source = @import("walk/source.zig");
+const source = @import("source.zig");
 pub const SymbolSourceWalkCallback = source.SymbolSourceWalkCallback;
 
-const memory = @import("walk/memory.zig");
+const memory = @import("memory.zig");
 pub const SymbolMemoryWalkCallback = memory.SymbolMemoryWalkCallback;
 
-const validate = @import("walk/validate.zig");
+const validate = @import("validate.zig");
 pub const SymbolValidateWalkCallback = validate.SymbolValidateWalkCallback;

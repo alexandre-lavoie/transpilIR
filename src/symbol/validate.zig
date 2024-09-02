@@ -1,10 +1,10 @@
 const std = @import("std");
 
-const ast = @import("../../ast/lib.zig");
-const common = @import("../../common.zig");
-const table = @import("../table.zig");
-const types = @import("../types.zig");
-
+const ast = @import("../ast/lib.zig");
+const common = @import("../common.zig");
+const test_lib = @import("../test.zig");
+const table = @import("table.zig");
+const types = @import("types.zig");
 const source = @import("source.zig");
 const memory = @import("memory.zig");
 
@@ -173,8 +173,6 @@ pub const SymbolValidateWalkCallback = struct {
 //
 // Test Utils
 //
-
-const test_lib = @import("../../test.zig");
 
 pub fn testValidate(allocator: std.mem.Allocator, file: []const u8, symbol_table: *const table.SymbolTable) !void {
     var tree = try test_lib.testAST(allocator, file);

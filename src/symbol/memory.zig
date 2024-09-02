@@ -1,10 +1,10 @@
 const std = @import("std");
 
-const ast = @import("../../ast/lib.zig");
-const common = @import("../../common.zig");
-const table = @import("../table.zig");
-const types = @import("../types.zig");
-
+const ast = @import("../ast/lib.zig");
+const common = @import("../common.zig");
+const test_lib = @import("../test.zig");
+const table = @import("table.zig");
+const types = @import("types.zig");
 const source = @import("source.zig");
 
 const SymbolMemoryEntry = union(enum) {
@@ -683,8 +683,6 @@ pub const SymbolMemoryWalkCallback = struct {
 //
 // Test Utils
 //
-
-const test_lib = @import("../../test.zig");
 
 pub fn testMemory(allocator: std.mem.Allocator, file: []const u8, symbol_table: *table.SymbolTable) !void {
     var tree = try test_lib.testAST(allocator, file);
