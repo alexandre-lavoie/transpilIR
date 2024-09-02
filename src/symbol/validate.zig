@@ -84,6 +84,45 @@ pub const SymbolValidateWalkCallback = struct {
         const instance: types.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
+            .linkage,
+            .node,
+            .module,
+            .data_definition,
+            .typed_data,
+            .offset,
+            .array_type,
+            .opaque_type,
+            .struct_type,
+            .type_definition,
+            .union_type,
+            .zero_type,
+            .block,
+            .line,
+            .call,
+            .call_parameter,
+            .function,
+            .function_signature,
+            .function_parameter,
+            .variadic_parameter,
+            .vaarg,
+            .vastart,
+            .allocate,
+            .assignment,
+            .blit,
+            .copy,
+            .cast,
+            .convert,
+            .load,
+            .store,
+            .branch,
+            .halt,
+            .jump,
+            .phi_parameter,
+            .@"return",
+            .binary_operation,
+            .comparison,
+            .negate,
+            => {},
             .identifier => |identifier| {
                 const symbol = self.symbol_table.getSymbolByInstance(&instance) orelse unreachable;
 
@@ -127,12 +166,31 @@ pub const SymbolValidateWalkCallback = struct {
             .primitive_type => |primitive| try self.types.append(primitive),
             .env_type => try self.types.append(.long),
             .phi => self.phi_type = self.types.pop(),
-            else => {},
         }
     }
 
     pub fn exit(self: *Self, statement: *ast.Statement) !void {
         switch (statement.data) {
+            .identifier,
+            .literal,
+            .linkage,
+            .node,
+            .module,
+            .typed_data,
+            .offset,
+            .array_type,
+            .env_type,
+            .opaque_type,
+            .primitive_type,
+            .struct_type,
+            .union_type,
+            .zero_type,
+            .function_parameter,
+            .variadic_parameter,
+            .allocate,
+            .halt,
+            .jump,
+            => {},
             .block,
             .data_definition,
             .function_signature,
@@ -309,7 +367,6 @@ pub const SymbolValidateWalkCallback = struct {
 
                 if (!Self.validateType(@"type", value)) return error.DataType;
             },
-            else => {},
         }
     }
 };

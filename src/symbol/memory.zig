@@ -67,6 +67,39 @@ pub const SymbolMemoryWalkCallback = struct {
         const instance: types.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
+            .linkage,
+            .node,
+            .module,
+            .data_definition,
+            .typed_data,
+            .offset,
+            .array_type,
+            .type_definition,
+            .line,
+            .call,
+            .call_parameter,
+            .function,
+            .function_signature,
+            .function_parameter,
+            .vaarg,
+            .vastart,
+            .allocate,
+            .blit,
+            .copy,
+            .cast,
+            .convert,
+            .load,
+            .store,
+            .branch,
+            .halt,
+            .jump,
+            .phi,
+            .phi_parameter,
+            .@"return",
+            .binary_operation,
+            .comparison,
+            .negate,
+            => {},
             .struct_type => {
                 try self.entries.append(.{
                     .@"struct" = undefined,
@@ -139,7 +172,6 @@ pub const SymbolMemoryWalkCallback = struct {
             },
             .assignment => self.assignment = true,
             .block => self.block = true,
-            else => {},
         }
     }
 
