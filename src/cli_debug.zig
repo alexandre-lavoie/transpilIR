@@ -291,24 +291,33 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
     _ = try output.write("OK\n");
     try tty_config.setColor(output, .reset);
 
-    _ = try output.write("=== Emit ===\n");
+    _ = try output.write("=== QBE ===\n");
 
-    var emit_writer = std.io.getStdOut().writer();
-    var emit_callback = lib.qbe.EmitWalkCallback(@TypeOf(emit_writer)).init(
+    var token_callback = lib.qbe.TokenWalkCallback.init(
         allocator,
-        &emit_writer,
-        &symbol_table,
-        tty_config,
     );
-    defer emit_callback.deinit();
+    defer token_callback.deinit();
 
     try walk.start(entrypoint);
     while (try walk.next()) |out| {
         try switch (out.enter) {
-            true => emit_callback.enter(out.value),
-            false => emit_callback.exit(out.value),
+            true => token_callback.enter(out.value),
+            false => token_callback.exit(out.value),
         };
     }
+
+    const emit_tokens = try token_callback.tokens.toOwnedSlice();
+    defer allocator.free(emit_tokens);
+    var emit_token_reader = lib.qbe.TokenReader.init(emit_tokens);
+
+    var emit = lib.qbe.Emit(@TypeOf(emit_token_reader), std.io.AnyWriter).init(
+        &emit_token_reader,
+        output,
+        tty_config,
+        &symbol_table,
+    );
+
+    while (try emit.next()) {}
 }
 
 fn memoryLabel(memory: *const lib.symbol.SymbolMemory) []const u8 {

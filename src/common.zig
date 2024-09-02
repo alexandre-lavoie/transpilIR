@@ -10,6 +10,8 @@ pub const TYPE_COLOR: std.io.tty.Color = .green;
 pub const GLOBAL_COLOR: std.io.tty.Color = .blue;
 pub const LOCAL_COLOR: std.io.tty.Color = .white;
 pub const LABEL_COLOR: std.io.tty.Color = .bright_red;
+pub const PUNCTUATION_COLOR: std.io.tty.Color = .white;
+pub const LITERAL_COLOR: std.io.tty.Color = .yellow;
 
 // Span inside source file.
 // start is inclusive and end is exclusive -> [start, end)
