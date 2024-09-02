@@ -180,12 +180,12 @@ pub const ASTWalk = struct {
             .load => |*d| {
                 try self.stack.append(.{ .index = d.data_type });
                 try self.stack.append(.{ .index = d.memory_type });
-                try self.stack.append(.{ .index = d.source });
+                try self.stack.append(.{ .index = d.address });
             },
             .store => |*d| {
                 try self.stack.append(.{ .index = d.memory_type });
-                try self.stack.append(.{ .index = d.source });
-                try self.stack.append(.{ .index = d.target });
+                try self.stack.append(.{ .index = d.value });
+                try self.stack.append(.{ .index = d.address });
             },
             .branch => |*d| {
                 try self.stack.append(.{ .index = d.condition });

@@ -247,7 +247,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!Self.validateType(from_type, value)) return error.DataType;
             },
             .load => {
-                const src = self.types.pop();
+                const address = self.types.pop();
                 const memory_type = self.types.pop();
                 const data_type = self.types.pop();
 
@@ -263,8 +263,16 @@ pub const SymbolValidateWalkCallback = struct {
                     else => memory_type,
                 };
 
-                if (!Self.validateType(.long, src)) return error.DataType;
+                if (!Self.validateType(.long, address)) return error.DataType;
                 if (!Self.validateType(data_type, source_type)) return error.DataType;
+            },
+            .store => {
+                const address = self.types.pop();
+                const value = self.types.pop();
+                const memory_type = self.types.pop();
+
+                if (!Self.validateType(.long, address)) return error.DataType;
+                if (!Self.validateType(memory_type, value)) return error.DataType;
             },
             else => {},
         }
@@ -702,6 +710,42 @@ test "error.DataType load type" {
     const allocator = std.testing.allocator;
 
     const file = "function $f() {@s %ptr =l copy 0 %s =s loadl %ptr ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType store pointer" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %ptr =s copy 0 storew 1, %ptr ret}";
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try source.testSource(allocator, file, &symbol_table);
+    try memory.testMemory(allocator, file, &symbol_table);
+    const res = testValidate(allocator, file, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.DataType, res);
+}
+
+test "error.DataType store type" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %val =s copy 0 storew %val, 0 ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();

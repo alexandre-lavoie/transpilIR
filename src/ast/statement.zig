@@ -267,13 +267,13 @@ pub const StatementData = union(StatementType) {
     load: struct {
         data_type: StatementIndex,
         memory_type: StatementIndex,
-        source: StatementIndex,
+        address: StatementIndex,
     },
 
     store: struct {
         memory_type: StatementIndex,
-        source: StatementIndex,
-        target: StatementIndex,
+        value: StatementIndex,
+        address: StatementIndex,
     },
 
     // Flow

@@ -1337,12 +1337,12 @@ pub fn Parser(comptime Reader: type) type {
 
             _ = self.next();
 
-            const source = try self.blockValue();
+            const value = try self.blockValue();
 
             if (self.previous.token_type != .comma) return error.MissingComma;
             _ = self.next();
 
-            const target = try self.blockValue();
+            const address = try self.blockValue();
 
             const end = self.previous_previous.span.end;
 
@@ -1350,8 +1350,8 @@ pub fn Parser(comptime Reader: type) type {
                 .{ .start = start, .end = end },
                 .{ .store = .{
                     .memory_type = memory_type,
-                    .source = source,
-                    .target = target,
+                    .address = address,
+                    .value = value,
                 } },
             );
         }
@@ -1381,7 +1381,7 @@ pub fn Parser(comptime Reader: type) type {
 
             _ = self.next();
 
-            const source = try self.blockValue();
+            const address = try self.blockValue();
 
             const end = self.previous_previous.span.end;
 
@@ -1390,7 +1390,7 @@ pub fn Parser(comptime Reader: type) type {
                 .{ .load = .{
                     .memory_type = memory_type,
                     .data_type = data_type,
-                    .source = source,
+                    .address = address,
                 } },
             );
         }
