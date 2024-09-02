@@ -251,8 +251,20 @@ pub const SymbolValidateWalkCallback = struct {
                 const memory_type = self.types.pop();
                 const data_type = self.types.pop();
 
+                const source_type = switch (data_type) {
+                    .word => switch (memory_type) {
+                        .byte, .half_word => .word,
+                        else => memory_type,
+                    },
+                    .long => switch (memory_type) {
+                        .byte, .half_word, .word => .long,
+                        else => memory_type,
+                    },
+                    else => memory_type,
+                };
+
                 if (!Self.validateType(.long, src)) return error.DataType;
-                if (!Self.validateType(memory_type, data_type)) return error.DataType;
+                if (!Self.validateType(data_type, source_type)) return error.DataType;
             },
             else => {},
         }
