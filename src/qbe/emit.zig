@@ -58,6 +58,18 @@ pub const TokenWalkCallback = struct {
         try self.push(.newline, null);
     }
 
+    fn functionOpen(self: *Self) !void {
+        self.function_enter = false;
+
+        const return_type = try self.pop();
+        const label = try self.pop();
+
+        if (return_type.token_type != .zero) try self.append(return_type);
+        try self.append(label);
+
+        try self.push(.open_parenthesis, null);
+    }
+
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
         switch (statement.data) {
             .node,
@@ -131,8 +143,8 @@ pub const TokenWalkCallback = struct {
                 }
             },
             .primitive_type => |primitive| {
-                const optional: ?token.TokenType = switch (primitive) {
-                    .void => null,
+                try self.push(switch (primitive) {
+                    .void => .zero,
                     .byte_unsigned => .byte_unsigned,
                     .byte => .byte,
                     .double => .double,
@@ -142,11 +154,7 @@ pub const TokenWalkCallback = struct {
                     .single => .single,
                     .word_unsigned => .word_unsigned,
                     .word => .word,
-                };
-
-                if (optional) |token_type| {
-                    try self.push(token_type, null);
-                }
+                }, null);
             },
             .literal => |literal| {
                 try self.push(
@@ -160,12 +168,7 @@ pub const TokenWalkCallback = struct {
                 );
             },
             .function_parameter => {
-                if (self.function_enter) {
-                    self.function_enter = false;
-
-                    try self.rot2();
-                    try self.push(.open_parenthesis, null);
-                }
+                if (self.function_enter) try self.functionOpen();
             },
             .typed_data => {
                 if (self.data_enter) {
@@ -327,10 +330,7 @@ pub const TokenWalkCallback = struct {
             },
             .function_signature => {
                 if (self.function_enter) {
-                    self.function_enter = false;
-
-                    try self.rot2();
-                    try self.push(.open_parenthesis, null);
+                    try self.functionOpen();
                 } else {
                     _ = try self.pop();
                 }

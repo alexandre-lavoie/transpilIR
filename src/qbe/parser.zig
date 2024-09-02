@@ -944,7 +944,7 @@ pub fn Parser(comptime Reader: type) type {
 
             const end = self.previous_previous.span.end;
 
-            if (!is_phi.* and !is_flow.*) {
+            if (!is_flow.*) {
                 out = try self.new(
                     .{ .start = start, .end = end },
                     .{
@@ -3202,6 +3202,7 @@ test "phi" {
         .node,
         .phi,
         .assignment,
+        .line,
         .node,
         .@"return",
         .block,
