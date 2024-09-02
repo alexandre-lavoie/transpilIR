@@ -18,18 +18,22 @@ pub fn main() !void {
     }
 
     var output = std.io.getStdOut().writer().any();
+    const tty_config: std.io.tty.Config = .escape_codes;
+
     for (files.items) |file_arg| {
-        try run(allocator, file_arg, &output);
+        try run(allocator, file_arg, &output, &tty_config);
     }
 }
 
-pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWriter) !void {
+pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWriter, tty_config: *const std.io.tty.Config) !void {
     _ = try output.write("=== File ===\n");
 
     const file_path = try std.fs.cwd().realpathAlloc(allocator, path);
     defer allocator.free(file_path);
 
+    try tty_config.setColor(output, lib.common.PATH_COLOR);
     _ = try output.print("{s}\n", .{file_path});
+    try tty_config.setColor(output, .reset);
 
     const file = try std.fs.openFileAbsolute(file_path, .{});
     defer file.close();
@@ -54,16 +58,14 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
     lexer.lex() catch |err| {
         const position = try file_stream.getPos();
 
-        const error_string = try lib.common.errorString(
-            allocator,
+        try lib.common.printError(
+            output,
+            tty_config,
             err,
             path,
             newline_offsets,
             &.{ .start = position, .end = position + 1 },
         );
-        defer allocator.free(error_string);
-
-        _ = try output.write(error_string);
 
         return;
     };
@@ -74,21 +76,18 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
         const tag_name = @tagName(token.token_type);
         @memcpy(type_column[0..tag_name.len], tag_name);
 
-        const start = lib.common.indexToFile(newline_offsets, token.span.start);
-        const end = lib.common.indexToFile(newline_offsets, switch (token.span.end) {
-            0 => 0,
-            else => token.span.end - 1,
-        });
+        try tty_config.setColor(output, lib.common.TYPE_COLOR);
+        _ = try output.write(&type_column);
+        try tty_config.setColor(output, .reset);
 
-        _ = try output.print("{s}{s}:{}:{}, {s}:{}:{}\n", .{
-            type_column,
+        try lib.common.printSpan(
+            output,
+            tty_config,
             path,
-            start.line,
-            start.column,
-            path,
-            end.line,
-            end.column,
-        });
+            newline_offsets,
+            &token.span,
+        );
+        _ = try output.writeByte('\n');
     }
 
     const token_slice = try tokens.toOwnedSlice();
@@ -113,16 +112,14 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
             }
         };
 
-        const error_string = try lib.common.errorString(
-            allocator,
+        try lib.common.printError(
+            output,
+            tty_config,
             err,
             path,
             newline_offsets,
             &span,
         );
-        defer allocator.free(error_string);
-
-        _ = try output.write(error_string);
 
         return;
     };
@@ -147,22 +144,23 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
                 @memset(&depth_column, ' ');
                 _ = try std.fmt.bufPrint(&depth_column, "{}", .{depth});
 
-                const start = lib.common.indexToFile(newline_offsets, out.value.span.start);
-                const end = lib.common.indexToFile(newline_offsets, switch (out.value.span.end) {
-                    0 => 0,
-                    else => out.value.span.end - 1,
-                });
+                try tty_config.setColor(output, lib.common.LOCATION_COLOR);
+                _ = try output.write(&depth_column);
 
-                _ = try output.print("{s}{s}{s}:{}:{}, {s}:{}:{}\n", .{
-                    depth_column,
-                    type_column,
+                try tty_config.setColor(output, lib.common.TYPE_COLOR);
+                _ = try output.write(&type_column);
+
+                try tty_config.setColor(output, .reset);
+
+                try lib.common.printSpan(
+                    output,
+                    tty_config,
                     path,
-                    start.line,
-                    start.column,
-                    path,
-                    end.line,
-                    end.column,
-                });
+                    newline_offsets,
+                    &out.value.span,
+                );
+
+                _ = try output.writeByte('\n');
 
                 depth += 1;
             },
@@ -191,16 +189,14 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
         } catch |err| {
             error_exit = true;
 
-            const error_string = try lib.common.errorString(
-                allocator,
+            try lib.common.printError(
+                output,
+                tty_config,
                 err,
                 path,
                 newline_offsets,
                 &out.value.span,
             );
-            defer allocator.free(error_string);
-
-            _ = try output.write(error_string);
         };
     }
 
@@ -219,16 +215,14 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
         } catch |err| {
             error_exit = true;
 
-            const error_string = try lib.common.errorString(
-                allocator,
+            try lib.common.printError(
+                output,
+                tty_config,
                 err,
                 path,
                 newline_offsets,
                 &out.value.span,
             );
-            defer allocator.free(error_string);
-
-            _ = try output.write(error_string);
         };
     }
 
@@ -241,13 +235,19 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
         @memset(&index_column, ' ');
         _ = try std.fmt.bufPrint(&index_column, "{}", .{i});
 
-        _ = try output.print("{s}{s} {s} {s}", .{
-            index_column,
-            @tagName(symbol.identifier.scope),
-            memoryLabel(&symbol.memory),
-            symbol.identifier.name,
-        });
+        try tty_config.setColor(output, lib.common.LOCATION_COLOR);
+        _ = try output.write(&index_column);
 
+        try tty_config.setColor(output, lib.common.RESERVED_COLOR);
+        _ = try output.print("{s} ", .{@tagName(symbol.identifier.scope)});
+
+        try tty_config.setColor(output, lib.common.TYPE_COLOR);
+        _ = try output.print("{s} ", .{memoryLabel(&symbol.memory)});
+
+        try tty_config.setColor(output, lib.common.IDENTIFIER_COLOR);
+        _ = try output.print("{s}", .{symbol.identifier.name});
+
+        try tty_config.setColor(output, lib.common.LOCATION_COLOR);
         if (symbol.identifier.function) |index| {
             _ = try output.print(":{}\n", .{
                 index,
@@ -255,6 +255,8 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
         } else {
             try output.writeByte('\n');
         }
+
+        try tty_config.setColor(output, .reset);
     }
 
     _ = try output.write("=== Validate ===\n");
@@ -272,24 +274,32 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
         } catch |err| {
             error_exit = true;
 
-            const error_string = try lib.common.errorString(
-                allocator,
+            try lib.common.printError(
+                output,
+                tty_config,
                 err,
                 path,
                 newline_offsets,
                 &out.value.span,
             );
-            defer allocator.free(error_string);
-
-            _ = try output.write(error_string);
         };
     }
 
     if (error_exit) return;
-    _ = try output.write("OK\n=== Emit ===\n");
+
+    try tty_config.setColor(output, lib.common.OK_COLOR);
+    _ = try output.write("OK\n");
+    try tty_config.setColor(output, .reset);
+
+    _ = try output.write("=== Emit ===\n");
 
     var emit_writer = std.io.getStdOut().writer();
-    var emit_callback = lib.qbe.EmitWalkCallback(@TypeOf(emit_writer)).init(allocator, &emit_writer, &symbol_table);
+    var emit_callback = lib.qbe.EmitWalkCallback(@TypeOf(emit_writer)).init(
+        allocator,
+        &emit_writer,
+        &symbol_table,
+        tty_config,
+    );
     defer emit_callback.deinit();
 
     try walk.start(entrypoint);

@@ -1,5 +1,16 @@
 const std = @import("std");
 
+pub const PATH_COLOR: std.io.tty.Color = .bright_blue;
+pub const ERROR_COLOR: std.io.tty.Color = .red;
+pub const OK_COLOR: std.io.tty.Color = .green;
+pub const IDENTIFIER_COLOR: std.io.tty.Color = .white;
+pub const LOCATION_COLOR: std.io.tty.Color = .yellow;
+pub const RESERVED_COLOR: std.io.tty.Color = .magenta;
+pub const TYPE_COLOR: std.io.tty.Color = .green;
+pub const GLOBAL_COLOR: std.io.tty.Color = .blue;
+pub const LOCAL_COLOR: std.io.tty.Color = .white;
+pub const LABEL_COLOR: std.io.tty.Color = .bright_red;
+
 // Span inside source file.
 // start is inclusive and end is exclusive -> [start, end)
 pub const SourceSpan = struct {
@@ -97,22 +108,39 @@ pub fn indexToFile(newline_offsets: []const usize, index: usize) struct { line: 
     };
 }
 
-pub fn errorString(allocator: std.mem.Allocator, err: anytype, file: []const u8, offsets: []const usize, span: *const SourceSpan) ![]const u8 {
+pub fn printFileLocation(writer: anytype, tty_config: *const std.io.tty.Config, file: []const u8, line: usize, column: usize) !void {
+    try tty_config.setColor(writer, PATH_COLOR);
+    _ = try writer.print("{s}:{}:{}", .{
+        file,
+        line,
+        column,
+    });
+    try tty_config.setColor(writer, .reset);
+}
+
+pub fn printSpan(writer: anytype, tty_config: *const std.io.tty.Config, file: []const u8, offsets: []const usize, span: *const SourceSpan) !void {
     const start = indexToFile(offsets, span.start);
     const end = indexToFile(offsets, switch (span.end) {
         0 => 0,
         else => span.end - 1,
     });
 
-    return std.fmt.allocPrint(allocator, "({any}) {s}:{}:{} - {s}:{}:{}", .{
-        err,
-        file,
-        start.line,
-        start.column,
-        file,
-        end.line,
-        end.column,
-    });
+    try printFileLocation(writer, tty_config, file, start.line, start.column);
+    _ = try writer.write(", ");
+    try printFileLocation(writer, tty_config, file, end.line, end.column);
+}
+
+pub fn printError(writer: anytype, tty_config: *const std.io.tty.Config, err: anytype, file: []const u8, offsets: []const usize, span: *const SourceSpan) !void {
+    try tty_config.setColor(writer, ERROR_COLOR);
+    _ = try writer.write("error: ");
+
+    try tty_config.setColor(writer, IDENTIFIER_COLOR);
+    _ = try writer.print("{any} ", .{err});
+
+    try tty_config.setColor(writer, .reset);
+
+    try printSpan(writer, tty_config, file, offsets, span);
+    try writer.writeByte('\n');
 }
 
 test "indexToFile" {

@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
+const common = @import("../common.zig");
 const symbol = @import("../symbol/lib.zig");
 
 pub fn EmitWalkCallback(Writer: type) type {
@@ -8,6 +9,7 @@ pub fn EmitWalkCallback(Writer: type) type {
         allocator: std.mem.Allocator,
         writer: *Writer,
         symbol_table: *symbol.SymbolTable,
+        tty_config: *const std.io.tty.Config,
 
         const Self = @This();
 
@@ -19,10 +21,15 @@ pub fn EmitWalkCallback(Writer: type) type {
             _ = try self.writer.writeByte(byte);
         }
 
-        pub fn init(allocator: std.mem.Allocator, writer: *Writer, symbol_table: *symbol.SymbolTable) Self {
+        fn writer_print(self: *Self, comptime format: []const u8, args: anytype) !void {
+            _ = try self.writer.print(format, args);
+        }
+
+        pub fn init(allocator: std.mem.Allocator, writer: *Writer, symbol_table: *symbol.SymbolTable, tty_config: *const std.io.tty.Config) Self {
             return Self{
                 .allocator = allocator,
                 .writer = writer,
+                .tty_config = tty_config,
                 .symbol_table = symbol_table,
             };
         }
@@ -82,15 +89,21 @@ pub fn EmitWalkCallback(Writer: type) type {
                     const symbol_index = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable;
                     const sym = &self.symbol_table.symbols.items[symbol_index];
 
-                    const identifier = try switch (sym.identifier.scope) {
-                        .local => std.fmt.allocPrint(self.allocator, "%l_{}", .{symbol_index}),
-                        .type => std.fmt.allocPrint(self.allocator, ":t_{}", .{symbol_index}),
-                        .global => std.fmt.allocPrint(self.allocator, "${s}", .{sym.identifier.name}),
-                        .label => std.fmt.allocPrint(self.allocator, "@p_{}", .{symbol_index}),
-                    };
-                    defer self.allocator.free(identifier);
+                    try self.tty_config.setColor(self.writer, switch (sym.identifier.scope) {
+                        .global => common.GLOBAL_COLOR,
+                        .local => common.LOCAL_COLOR,
+                        .type => common.TYPE_COLOR,
+                        .label => common.LABEL_COLOR,
+                    });
 
-                    try self.writer_write(identifier);
+                    try switch (sym.identifier.scope) {
+                        .local => self.writer_print("%l_{}", .{symbol_index}),
+                        .type => self.writer_print(":t_{}", .{symbol_index}),
+                        .global => self.writer_print("${s}", .{sym.identifier.name}),
+                        .label => self.writer_print("@p_{}", .{symbol_index}),
+                    };
+
+                    try self.tty_config.setColor(self.writer, .reset);
                 },
             }
         }
