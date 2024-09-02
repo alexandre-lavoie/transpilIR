@@ -32,18 +32,70 @@ pub const SymbolValidateWalkCallback = struct {
         if (left == right) return left;
 
         if (left == .void) {
-            switch (right) {
-                .single, .double => return error.MismatchTypeError,
-                else => return right,
-            }
+            return right;
         } else if (right == .void) {
-            switch (left) {
-                .single, .double => return error.MismatchTypeError,
-                else => return left,
-            }
+            return left;
         }
 
         return error.MismatchTypeError;
+    }
+
+    fn castType(primitive: ast.PrimitiveType) ast.PrimitiveType {
+        return switch (primitive) {
+            .void => .void,
+            .byte_unsigned,
+            .byte,
+            => .byte,
+            .double => .double,
+            .half_word_unsigned,
+            .half_word,
+            => .half_word,
+            .long_unsigned,
+            .long,
+            => .long,
+            .single => .single,
+            .word_unsigned,
+            .word,
+            => .word,
+        };
+    }
+
+    fn validateType(target: ast.PrimitiveType, from: ast.PrimitiveType) bool {
+        return switch (target) {
+            .void => true,
+            .byte_unsigned,
+            .byte,
+            => switch (from) {
+                .single, .double => false,
+                else => true,
+            },
+            .double => switch (from) {
+                .void, .double => true,
+                else => false,
+            },
+            .half_word_unsigned,
+            .half_word,
+            => switch (from) {
+                .single, .double, .byte, .byte_unsigned => false,
+                else => true,
+            },
+            .long_unsigned,
+            .long,
+            => switch (from) {
+                .void, .long, .long_unsigned => true,
+                else => false,
+            },
+            .single => switch (from) {
+                .void, .single => true,
+                else => false,
+            },
+            .word_unsigned,
+            .word,
+            => switch (from) {
+                .void, .word, .word_unsigned, .long, .long_unsigned => true,
+                else => false,
+            },
+        };
     }
 
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
@@ -60,7 +112,7 @@ pub const SymbolValidateWalkCallback = struct {
                             .global => return {},
                         }
                     },
-                    .primitive => |primitive| try self.types.append(primitive),
+                    .primitive => |primitive| try self.types.append(Self.castType(primitive)),
                     .type => try self.types.append(.long),
                     else => {},
                 }
@@ -68,12 +120,13 @@ pub const SymbolValidateWalkCallback = struct {
             .literal => |literal| {
                 try self.types.append(switch (literal.type) {
                     .string => .long,
-                    .integer => .void,
-                    .single => .single,
-                    .double => .double,
+                    .integer,
+                    .single,
+                    .double,
+                    => .void,
                 });
             },
-            .primitive_type => |primitive| try self.types.append(primitive),
+            .primitive_type => |primitive| try self.types.append(Self.castType(primitive)),
             else => {},
         }
     }
@@ -91,9 +144,7 @@ pub const SymbolValidateWalkCallback = struct {
                 const left = self.types.pop();
                 const data_type = self.types.pop();
 
-                if (try Self.matchType(left, right) != data_type) return error.DataTypeError;
-
-                try self.types.append(data_type);
+                if (!Self.validateType(data_type, try Self.matchType(left, right))) return error.DataTypeError;
             },
             .comparison => {
                 const right = self.types.pop();
@@ -106,9 +157,7 @@ pub const SymbolValidateWalkCallback = struct {
                     else => {},
                 }
 
-                if (try Self.matchType(left, right) != comparision_type) return error.DataTypeError;
-
-                try self.types.append(data_type);
+                if (!Self.validateType(comparision_type, try Self.matchType(left, right))) return error.DataTypeError;
             },
             else => {},
         }
@@ -183,29 +232,11 @@ test "error.SymbolNotFound local" {
     try std.testing.expectError(error.SymbolNotFound, res);
 }
 
-test "error.MismatchTypeError literal" {
+test "error.MismatchTypeError" {
     // Arrange
     const allocator = std.testing.allocator;
 
-    const file = "function $f() {@s %r =w add 1, s_1 ret}";
-
-    var symbol_table = table.SymbolTable.init(allocator);
-    defer symbol_table.deinit();
-
-    // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
-
-    // Assert
-    try std.testing.expectError(error.MismatchTypeError, res);
-}
-
-test "error.MismatchTypeError identifier" {
-    // Arrange
-    const allocator = std.testing.allocator;
-
-    const file = "function $f() {@s %i =w copy 0 %f =s copy s_0 %r =w add %i, %f ret}";
+    const file = "function $f() {@s %l =w copy 0 %r =s copy s_0 %r =w add %l, %r ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
@@ -223,7 +254,7 @@ test "error.DataTypeError binary_operator" {
     // Arrange
     const allocator = std.testing.allocator;
 
-    const file = "function $f() {@s %r =s add 1, 2 ret}";
+    const file = "function $f() {@s %l =w copy 0 %r =w copy 0 %r =s add %l, %r ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
@@ -241,7 +272,7 @@ test "error.MismatchTypeError binary_operator" {
     // Arrange
     const allocator = std.testing.allocator;
 
-    const file = "function $f() {@s %r =w add 0, s_0 ret}";
+    const file = "function $f() {@s %l =w copy 0 %r =s copy s_0 %r =w add %l, %r ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
@@ -277,7 +308,7 @@ test "error.DataTypeError integer comparison" {
     // Arrange
     const allocator = std.testing.allocator;
 
-    const file = "function $f() {@s %r =w ceqw s_0, s_0 ret}";
+    const file = "function $f() {@s %l =s copy s_0 %r =s copy s_0 %r =w ceqw %l, %r ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
@@ -295,7 +326,7 @@ test "error.DataTypeError float comparison" {
     // Arrange
     const allocator = std.testing.allocator;
 
-    const file = "function $f() {@s %r =w cos 0, 0 ret}";
+    const file = "function $f() {@s %l =w copy 0 %r =w copy 0 %r =w cos %l, %r ret}";
 
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
