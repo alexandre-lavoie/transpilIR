@@ -45,10 +45,10 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
 
     std.log.info("=== Lexer ===", .{});
 
-    var tokens = std.ArrayList(lib.ssa.Token).init(allocator);
+    var tokens = std.ArrayList(lib.qbe.Token).init(allocator);
     defer tokens.deinit();
 
-    var lexer = lib.ssa.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
+    var lexer = lib.qbe.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
     lexer.lex() catch |err| {
         const position = try file_stream.getPos();
 
@@ -88,14 +88,14 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
     const token_slice = try tokens.toOwnedSlice();
     defer tokens.allocator.free(token_slice);
 
-    var token_reader = lib.ssa.TokenReader(@TypeOf(token_slice)).init(token_slice);
+    var token_reader = lib.qbe.TokenReader(@TypeOf(token_slice)).init(token_slice);
 
     std.log.info("=== Parser ===", .{});
 
     var ast = lib.ast.AST.init(allocator);
     defer ast.deinit();
 
-    var parser = lib.ssa.Parser(@TypeOf(token_reader)).init(&token_reader, &ast);
+    var parser = lib.qbe.Parser(@TypeOf(token_reader)).init(&token_reader, &ast);
     _ = parser.parse() catch |err| {
         const span: lib.common.SourceSpan = scope: {
             if (parser.previous == undefined) {
