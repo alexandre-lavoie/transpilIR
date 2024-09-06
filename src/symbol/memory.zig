@@ -736,7 +736,7 @@ test "type_definition" {
                     .members = &[_]types.SymbolMemoryStructEntry{
                         .{
                             .base = .{
-                                .primitive = .word,
+                                .primitive = .i32,
                             },
                             .count = 100,
                         },
@@ -764,7 +764,7 @@ test "type_definition" {
                             .members = &[_]types.SymbolMemoryStructEntry{
                                 .{
                                     .base = .{
-                                        .primitive = .single,
+                                        .primitive = .f32,
                                     },
                                     .count = 2,
                                 },
@@ -775,7 +775,7 @@ test "type_definition" {
                             .members = &[_]types.SymbolMemoryStructEntry{
                                 .{
                                     .base = .{
-                                        .primitive = .word,
+                                        .primitive = .i32,
                                     },
                                     .count = 1,
                                 },
@@ -822,7 +822,7 @@ test "data_definition" {
                     .entries = &[_]types.SymbolMemoryDataEntry{
                         .{
                             .init = .{
-                                .type = .byte,
+                                .type = .i8,
                                 .value = .{
                                     .integer = -1,
                                 },
@@ -830,7 +830,7 @@ test "data_definition" {
                         },
                         .{
                             .init = .{
-                                .type = .byte,
+                                .type = .i8,
                                 .value = .{
                                     .integer = 1,
                                 },
@@ -838,7 +838,7 @@ test "data_definition" {
                         },
                         .{
                             .init = .{
-                                .type = .word,
+                                .type = .i32,
                                 .value = .{
                                     .integer = -1,
                                 },
@@ -846,7 +846,7 @@ test "data_definition" {
                         },
                         .{
                             .init = .{
-                                .type = .word,
+                                .type = .i32,
                                 .value = .{
                                     .integer = 1,
                                 },
@@ -854,7 +854,7 @@ test "data_definition" {
                         },
                         .{
                             .init = .{
-                                .type = .single,
+                                .type = .f32,
                                 .value = .{
                                     .single = -1,
                                 },
@@ -862,7 +862,7 @@ test "data_definition" {
                         },
                         .{
                             .init = .{
-                                .type = .single,
+                                .type = .f32,
                                 .value = .{
                                     .single = 1,
                                 },
@@ -870,7 +870,7 @@ test "data_definition" {
                         },
                         .{
                             .init = .{
-                                .type = .double,
+                                .type = .f64,
                                 .value = .{
                                     .double = -1,
                                 },
@@ -878,7 +878,7 @@ test "data_definition" {
                         },
                         .{
                             .init = .{
-                                .type = .double,
+                                .type = .f64,
                                 .value = .{
                                     .double = 1,
                                 },
@@ -905,7 +905,7 @@ test "data_definition" {
                     .entries = &[_]types.SymbolMemoryDataEntry{
                         .{
                             .init = .{
-                                .type = .long,
+                                .type = .i64,
                                 .value = .{
                                     .symbol = .{
                                         .index = 0,
@@ -970,7 +970,7 @@ test "function" {
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .env,
                         .{
-                            .primitive = .word,
+                            .primitive = .i32,
                         },
                         .{
                             .type = 0,
@@ -994,7 +994,7 @@ test "function" {
                 .function = 1,
             },
             .memory = .{
-                .primitive = .word,
+                .primitive = .i32,
             },
         },
         .{
@@ -1062,7 +1062,7 @@ test "call" {
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .env,
                         .{
-                            .primitive = .long,
+                            .primitive = .i64,
                         },
                         .{
                             .type = 0,
@@ -1086,7 +1086,7 @@ test "call" {
                 .function = 1,
             },
             .memory = .{
-                .primitive = .long,
+                .primitive = .i64,
             },
         },
         .{
@@ -1122,7 +1122,7 @@ test "call" {
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .env,
                         .{
-                            .primitive = .word,
+                            .primitive = .i32,
                         },
                         .{
                             .type = 0,
@@ -1140,7 +1140,7 @@ test "call" {
                 .function = .{
                     .linkage = .{},
                     .@"return" = .{
-                        .primitive = .long,
+                        .primitive = .i64,
                     },
                     .vararg = false,
                     .parameters = &[_]types.SymbolMemoryParameterType{},
@@ -1182,7 +1182,7 @@ test "call function pointer" {
                     .vararg = false,
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .{
-                            .primitive = .long,
+                            .primitive = .i64,
                         },
                     },
                 },
@@ -1195,7 +1195,7 @@ test "call function pointer" {
                 .function = 0,
             },
             .memory = .{
-                .primitive = .long,
+                .primitive = .i64,
             },
         },
         .{
@@ -1213,7 +1213,7 @@ test "call function pointer" {
                 .function = 0,
             },
             .memory = .{
-                .primitive = .word,
+                .primitive = .i32,
             },
         },
     };
@@ -1258,7 +1258,7 @@ test "assignment" {
                     .linkage = .{},
                     .entries = &[_]types.SymbolMemoryDataEntry{.{
                         .init = .{
-                            .type = .word,
+                            .type = .i32,
                             .value = .{
                                 .integer = 0,
                             },
@@ -1298,7 +1298,7 @@ test "assignment" {
                 .function = 2,
             },
             .memory = .{
-                .primitive = .long,
+                .primitive = .i64,
             },
         },
         .{
@@ -1353,7 +1353,7 @@ test "return" {
                     .linkage = .{},
                     .entries = &[_]types.SymbolMemoryDataEntry{.{
                         .init = .{
-                            .type = .word,
+                            .type = .i32,
                             .value = .{
                                 .integer = 0,
                             },
@@ -1371,12 +1371,12 @@ test "return" {
                 .function = .{
                     .linkage = .{},
                     .@"return" = .{
-                        .primitive = .word,
+                        .primitive = .i32,
                     },
                     .vararg = false,
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .{
-                            .primitive = .word,
+                            .primitive = .i32,
                         },
                     },
                 },
@@ -1389,7 +1389,7 @@ test "return" {
                 .function = 2,
             },
             .memory = .{
-                .primitive = .word,
+                .primitive = .i32,
             },
         },
         .{
@@ -1433,7 +1433,7 @@ test "return" {
                 .function = .{
                     .linkage = .{},
                     .@"return" = .{
-                        .primitive = .long,
+                        .primitive = .i64,
                     },
                     .vararg = false,
                     .parameters = &[_]types.SymbolMemoryParameterType{},

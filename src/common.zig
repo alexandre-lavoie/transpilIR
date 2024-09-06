@@ -26,6 +26,19 @@ pub const SourceSpan = struct {
     }
 };
 
+pub const Target = struct {
+    arch: Architecture,
+};
+
+// CPU architecture.
+// values are addresses in bits.
+pub const Architecture = enum {
+    a8,
+    a16,
+    a32,
+    a64,
+};
+
 pub fn parseString(input: []const u8, output: []u8) ![]const u8 {
     var i: usize = 0;
     var o: usize = 0;

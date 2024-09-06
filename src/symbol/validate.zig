@@ -10,6 +10,7 @@ const test_lib = @import("test.zig");
 pub const SymbolValidateWalkCallback = struct {
     allocator: std.mem.Allocator,
     symbol_table: *const table.SymbolTable,
+    target: *const common.Target,
     types: TypeList,
     return_type: ?ast.PrimitiveType = null,
     phi_type: ?ast.PrimitiveType = null,
@@ -17,10 +18,11 @@ pub const SymbolValidateWalkCallback = struct {
     const Self = @This();
     const TypeList = std.ArrayList(ast.PrimitiveType);
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *const table.SymbolTable) Self {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *const table.SymbolTable, target: *const common.Target) Self {
         return .{
             .allocator = allocator,
             .symbol_table = symbol_table,
+            .target = target,
             .types = TypeList.init(allocator),
         };
     }
@@ -41,41 +43,57 @@ pub const SymbolValidateWalkCallback = struct {
         return error.MismatchType;
     }
 
-    fn validateType(target: ast.PrimitiveType, from: ast.PrimitiveType) bool {
-        return switch (target) {
+    fn valueOrPointer(self: *Self, value: ast.PrimitiveType) ast.PrimitiveType {
+        return switch (value) {
+            .ptr => switch (self.target.arch) {
+                .a8 => .u8,
+                .a16 => .u16,
+                .a32 => .u32,
+                .a64 => .u64,
+            },
+            else => value,
+        };
+    }
+
+    fn validateType(self: *Self, target: ast.PrimitiveType, from: ast.PrimitiveType) bool {
+        const t = self.valueOrPointer(target);
+        const f = self.valueOrPointer(from);
+
+        return switch (t) {
             .void => true,
-            .byte_unsigned,
-            .byte,
-            => switch (from) {
-                .single, .double => false,
+            .u8,
+            .i8,
+            => switch (f) {
+                .f32, .f64 => false,
                 else => true,
             },
-            .double => switch (from) {
-                .void, .double => true,
+            .f64 => switch (f) {
+                .void, .f64 => true,
                 else => false,
             },
-            .half_word_unsigned,
-            .half_word,
-            => switch (from) {
-                .single, .double, .byte, .byte_unsigned => false,
+            .u16,
+            .i16,
+            => switch (f) {
+                .f32, .f64, .i8, .u8 => false,
                 else => true,
             },
-            .long_unsigned,
-            .long,
-            => switch (from) {
-                .void, .long, .long_unsigned => true,
+            .u64,
+            .i64,
+            => switch (f) {
+                .void, .i64, .u64 => true,
                 else => false,
             },
-            .single => switch (from) {
-                .void, .single => true,
+            .f32 => switch (f) {
+                .void, .f32 => true,
                 else => false,
             },
-            .word_unsigned,
-            .word,
-            => switch (from) {
-                .void, .word, .word_unsigned, .long, .long_unsigned => true,
+            .u32,
+            .i32,
+            => switch (f) {
+                .void, .i32, .u32, .i64, .u64 => true,
                 else => false,
             },
+            .ptr => unreachable,
         };
     }
 
@@ -129,7 +147,7 @@ pub const SymbolValidateWalkCallback = struct {
                     .empty => {
                         switch (identifier.scope) {
                             .label, .local, .type => return error.SymbolNotFound,
-                            .global => try self.types.append(.long),
+                            .global => try self.types.append(.ptr),
                         }
                     },
                     .type,
@@ -138,24 +156,24 @@ pub const SymbolValidateWalkCallback = struct {
                     .@"opaque",
                     .@"union",
                     .env,
-                    => try self.types.append(.long),
+                    => try self.types.append(.i64),
                     .primitive => |primitive| try self.types.append(primitive),
                     .function => |function| {
                         if (self.return_type == null) {
                             self.return_type = switch (function.@"return") {
-                                .type => .long,
+                                .type => .i64,
                                 .primitive => |primitive| primitive,
                             };
                         }
 
-                        try self.types.append(.long);
+                        try self.types.append(.i64);
                     },
                     else => {},
                 }
             },
             .literal => |literal| {
                 try self.types.append(switch (literal.type) {
-                    .string => .long,
+                    .string => .ptr,
                     .integer,
                     .single,
                     .double,
@@ -163,7 +181,7 @@ pub const SymbolValidateWalkCallback = struct {
                 });
             },
             .primitive_type => |primitive| try self.types.append(primitive),
-            .env_type => try self.types.append(.long),
+            .env_type => try self.types.append(.i64),
             .phi => self.phi_type = self.types.pop(),
         }
     }
@@ -204,7 +222,7 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(data_type);
 
-                if (!Self.validateType(data_type, try Self.matchType(left, right))) return error.DataType;
+                if (!self.validateType(data_type, try Self.matchType(left, right))) return error.DataType;
             },
             .comparison => {
                 const right = self.types.pop();
@@ -213,13 +231,13 @@ pub const SymbolValidateWalkCallback = struct {
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 switch (data_type) {
-                    .single, .double => return error.ComparisonType,
+                    .f32, .f64 => return error.ComparisonType,
                     else => {},
                 }
 
                 try self.types.append(data_type);
 
-                if (!Self.validateType(comparision_type, try Self.matchType(left, right))) return error.DataType;
+                if (!self.validateType(comparision_type, try Self.matchType(left, right))) return error.DataType;
             },
             .negate => {
                 const value = self.types.pop();
@@ -227,7 +245,7 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(data_type);
 
-                if (!Self.validateType(data_type, value)) return error.DataType;
+                if (!self.validateType(data_type, value)) return error.DataType;
             },
             .@"return" => {
                 const @"type": ast.PrimitiveType = switch (self.types.items.len) {
@@ -235,12 +253,12 @@ pub const SymbolValidateWalkCallback = struct {
                     else => self.types.pop(),
                 };
 
-                if (!Self.validateType(self.return_type orelse .void, @"type")) return error.DataType;
+                if (!self.validateType(self.return_type orelse .void, @"type")) return error.DataType;
             },
             .vastart => {
                 const value = self.types.popOrNull() orelse return error.DataType;
 
-                if (!Self.validateType(.long, value)) return error.DataType;
+                if (!self.validateType(.i64, value)) return error.DataType;
             },
             .vaarg => {
                 const value = self.types.pop();
@@ -248,12 +266,12 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(data_type);
 
-                if (!Self.validateType(.long, value)) return error.DataType;
+                if (!self.validateType(.i64, value)) return error.DataType;
             },
             .phi_parameter => {
                 const @"type" = self.types.popOrNull() orelse return error.DataType;
 
-                if (!Self.validateType(self.phi_type orelse .void, @"type")) return error.DataType;
+                if (!self.validateType(self.phi_type orelse .void, @"type")) return error.DataType;
             },
             .phi => {
                 try self.types.append(self.phi_type orelse unreachable);
@@ -261,7 +279,7 @@ pub const SymbolValidateWalkCallback = struct {
             .branch => {
                 const condition = self.types.pop();
 
-                if (!Self.validateType(.byte, condition)) return error.DataType;
+                if (!self.validateType(.i8, condition)) return error.DataType;
             },
             .blit => {
                 const size = self.types.pop();
@@ -269,8 +287,8 @@ pub const SymbolValidateWalkCallback = struct {
                 const from = self.types.pop();
 
                 if (size != .void) return error.DataType;
-                if (!Self.validateType(.long, to)) return error.DataType;
-                if (!Self.validateType(.long, from)) return error.DataType;
+                if (!self.validateType(.i64, to)) return error.DataType;
+                if (!self.validateType(.i64, from)) return error.DataType;
             },
             .convert => {
                 const value = self.types.pop();
@@ -280,8 +298,8 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(data_type);
 
-                if (!Self.validateType(from_type, value)) return error.DataType;
-                if (!Self.validateType(data_type, to_type)) return error.DataType;
+                if (!self.validateType(from_type, value)) return error.DataType;
+                if (!self.validateType(data_type, to_type)) return error.DataType;
             },
             .copy => {
                 const value = self.types.pop();
@@ -289,22 +307,22 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(data_type);
 
-                if (!Self.validateType(data_type, value)) return error.DataType;
+                if (!self.validateType(data_type, value)) return error.DataType;
             },
             .cast => {
                 const value = self.types.pop();
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 const from_type: ast.PrimitiveType = switch (data_type) {
-                    .long => .double,
-                    .single => .word,
-                    .double => .long,
-                    else => .single,
+                    .i64 => .f64,
+                    .f32 => .i32,
+                    .f64 => .i64,
+                    else => .f32,
                 };
 
                 try self.types.append(data_type);
 
-                if (!Self.validateType(from_type, value)) return error.DataType;
+                if (!self.validateType(from_type, value)) return error.DataType;
             },
             .load => {
                 const address = self.types.pop();
@@ -312,22 +330,22 @@ pub const SymbolValidateWalkCallback = struct {
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 const source_type = switch (data_type) {
-                    .word, .word_unsigned => switch (memory_type) {
-                        .byte,
-                        .byte_unsigned,
-                        .half_word,
-                        .half_word_unsigned,
-                        => .word,
+                    .i32, .u32 => switch (memory_type) {
+                        .i8,
+                        .u8,
+                        .i16,
+                        .u16,
+                        => .i32,
                         else => memory_type,
                     },
-                    .long, .long_unsigned => switch (memory_type) {
-                        .byte,
-                        .byte_unsigned,
-                        .half_word,
-                        .half_word_unsigned,
-                        .word,
-                        .word_unsigned,
-                        => .long,
+                    .i64, .u64 => switch (memory_type) {
+                        .i8,
+                        .u8,
+                        .i16,
+                        .u16,
+                        .i32,
+                        .u32,
+                        => .i64,
                         else => memory_type,
                     },
                     else => memory_type,
@@ -335,22 +353,22 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(data_type);
 
-                if (!Self.validateType(.long, address)) return error.DataType;
-                if (!Self.validateType(data_type, source_type)) return error.DataType;
+                if (!self.validateType(.i64, address)) return error.DataType;
+                if (!self.validateType(data_type, source_type)) return error.DataType;
             },
             .store => {
                 const address = self.types.pop();
                 const value = self.types.pop();
                 const memory_type = self.types.popOrNull() orelse return error.DataType;
 
-                if (!Self.validateType(.long, address)) return error.DataType;
-                if (!Self.validateType(memory_type, value)) return error.DataType;
+                if (!self.validateType(.i64, address)) return error.DataType;
+                if (!self.validateType(memory_type, value)) return error.DataType;
             },
             .call_parameter => {
                 const @"type" = self.types.pop();
                 const value = self.types.pop();
 
-                if (!Self.validateType(@"type", value)) return error.DataType;
+                if (!self.validateType(@"type", value)) return error.DataType;
             },
             .call => {
                 const return_type = self.types.pop();
@@ -358,20 +376,29 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(return_type);
 
-                if (!Self.validateType(.long, address)) return error.DataType;
+                if (!self.validateType(.i64, address)) return error.DataType;
             },
             .assignment => {
                 const value = self.types.pop();
                 const @"type" = self.types.popOrNull() orelse return error.DataType;
 
-                if (!Self.validateType(@"type", value)) return error.DataType;
+                if (!self.validateType(@"type", value)) return error.DataType;
             },
         }
     }
 };
 
 //
+// Test Utils
+//
+
+const test_target: common.Target = .{
+    .arch = .a64,
+};
+
+//
 // Valid Tests
+//
 
 test "load global" {
     // Arrange
@@ -386,7 +413,7 @@ test "load global" {
     defer symbol_table.deinit();
 
     // Act + Assert
-    try test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    try test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 }
 
 test "call no arguments" {
@@ -402,7 +429,7 @@ test "call no arguments" {
     defer symbol_table.deinit();
 
     // Act + Assert
-    try test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    try test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 }
 
 //
@@ -422,7 +449,7 @@ test "error.SymbolNotFound label" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -441,7 +468,7 @@ test "error.SymbolNotFound local" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -460,7 +487,7 @@ test "error.MismatchType" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.MismatchType, res);
@@ -479,7 +506,7 @@ test "error.DataType binary_operator" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -498,7 +525,7 @@ test "error.MismatchType binary_operator" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.MismatchType, res);
@@ -517,7 +544,7 @@ test "error.ComparisonType" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.ComparisonType, res);
@@ -536,7 +563,7 @@ test "error.DataType integer comparison" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -555,7 +582,7 @@ test "error.DataType float comparison" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -574,7 +601,7 @@ test "error.DataType negate" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -593,7 +620,7 @@ test "error.DataType return" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -612,7 +639,7 @@ test "error.DataType vastart" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -631,7 +658,7 @@ test "error.DataType vaarg" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -650,7 +677,7 @@ test "error.DataType phi" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -669,7 +696,7 @@ test "error.DataType branch" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -688,7 +715,7 @@ test "error.DataType blit target" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -707,7 +734,7 @@ test "error.DataType blit source" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -726,7 +753,7 @@ test "error.DataType blit size" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -745,7 +772,7 @@ test "error.DataType copy" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -764,7 +791,7 @@ test "error.DataType cast" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -783,7 +810,7 @@ test "error.DataType conversion" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -802,7 +829,7 @@ test "error.DataType load pointer" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -821,7 +848,7 @@ test "error.DataType load type" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -840,7 +867,7 @@ test "error.DataType store pointer" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -859,7 +886,7 @@ test "error.DataType store type" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -878,7 +905,7 @@ test "error.DataType assignment" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -897,7 +924,7 @@ test "error.DataType call local" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);

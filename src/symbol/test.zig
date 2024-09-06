@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
+const common = @import("../common.zig");
 const symbol = @import("lib.zig");
 
 const test_lib = @import("../test/lib.zig");
@@ -51,11 +52,12 @@ pub fn testMemory(allocator: std.mem.Allocator, file: []const u8, tree: *ast.AST
     }
 }
 
-pub fn testValidate(allocator: std.mem.Allocator, file: []const u8, tree: *ast.AST, symbol_table: *symbol.SymbolTable) !void {
+pub fn testValidate(allocator: std.mem.Allocator, file: []const u8, tree: *ast.AST, symbol_table: *symbol.SymbolTable, target: *const common.Target) !void {
     try testMemory(allocator, file, tree, symbol_table);
 
     var callback = symbol.SymbolValidateWalkCallback.init(
         allocator,
+        target,
         symbol_table,
     );
     defer callback.deinit();

@@ -17,15 +17,25 @@ pub fn main() !void {
         try files.append(file_arg);
     }
 
+    const target: lib.common.Target = .{
+        .arch = .a64,
+    };
+
     var output = std.io.getStdOut().writer().any();
     const tty_config: std.io.tty.Config = .escape_codes;
 
     for (files.items) |file_arg| {
-        try run(allocator, file_arg, &output, &tty_config);
+        try run(allocator, file_arg, &output, &tty_config, &target);
     }
 }
 
-pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWriter, tty_config: *const std.io.tty.Config) !void {
+pub fn run(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    output: *std.io.AnyWriter,
+    tty_config: *const std.io.tty.Config,
+    target: *const lib.common.Target,
+) !void {
     _ = try output.write("=== File ===\n");
 
     const file_path = try std.fs.cwd().realpathAlloc(allocator, path);
@@ -177,7 +187,11 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
 
     try file.seekTo(0);
 
-    var source_callback = lib.symbol.SymbolSourceWalkCallback.init(allocator, &symbol_table, &file_stream);
+    var source_callback = lib.symbol.SymbolSourceWalkCallback.init(
+        allocator,
+        &symbol_table,
+        &file_stream,
+    );
 
     var error_exit = false;
 
@@ -202,7 +216,10 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
 
     if (error_exit) return;
 
-    var memory_callback = lib.symbol.SymbolMemoryWalkCallback.init(allocator, &symbol_table);
+    var memory_callback = lib.symbol.SymbolMemoryWalkCallback.init(
+        allocator,
+        &symbol_table,
+    );
     defer memory_callback.deinit();
 
     error_exit = false;
@@ -261,7 +278,11 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
 
     _ = try output.write("=== Validate ===\n");
 
-    var validate_callback = lib.symbol.SymbolValidateWalkCallback.init(allocator, &symbol_table);
+    var validate_callback = lib.symbol.SymbolValidateWalkCallback.init(
+        allocator,
+        &symbol_table,
+        target,
+    );
     defer validate_callback.deinit();
 
     error_exit = false;
@@ -295,6 +316,7 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
 
     var emit_callback = lib.qbe.EmitWalkCallback.init(
         allocator,
+        target,
     );
     defer emit_callback.deinit();
 

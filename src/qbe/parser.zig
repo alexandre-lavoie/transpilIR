@@ -192,15 +192,16 @@ pub fn Parser(comptime Reader: type) type {
 
         fn primitiveTypeInner(self: *Self) !ast.PrimitiveType {
             return switch (self.previous.token_type) {
-                .byte_unsigned => .byte_unsigned,
-                .byte => .byte,
-                .double => .double,
-                .half_word_unsigned => .half_word_unsigned,
-                .half_word => .half_word,
-                .long => .long,
-                .single => .single,
-                .word_unsigned => .word_unsigned,
-                .word => .word,
+                .byte_unsigned => .u8,
+                .byte => .i8,
+                .double => .f64,
+                .half_word_unsigned => .u16,
+                .half_word => .i16,
+                .long => .i64,
+                .long_unsigned => .u64,
+                .single => .f32,
+                .word_unsigned => .u32,
+                .word => .i32,
                 else => return error.InvalidPrimitiveType,
             };
         }
@@ -1207,22 +1208,22 @@ pub fn Parser(comptime Reader: type) type {
 
             const from_type: ast.StatementIndex = scope: {
                 const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
-                    .byte_to_integer => .byte,
-                    .byte_to_integer_unsigned => .byte_unsigned,
-                    .double_to_single => .double,
-                    .double_to_integer_unsigned => .double,
-                    .double_to_integer => .double,
-                    .half_word_to_integer_unsigned => .half_word_unsigned,
-                    .half_word_to_integer => .half_word,
-                    .long_to_float_unsigned => .long_unsigned,
-                    .long_to_float => .long,
-                    .single_to_double => .single,
-                    .single_to_integer_unsigned => .single,
-                    .single_to_integer => .single,
-                    .word_to_long_unsigned => .word_unsigned,
-                    .word_to_long => .word,
-                    .word_to_float_unsigned => .word_unsigned,
-                    .word_to_float => .word,
+                    .byte_to_integer => .i8,
+                    .byte_to_integer_unsigned => .u8,
+                    .double_to_single => .f64,
+                    .double_to_integer_unsigned => .f64,
+                    .double_to_integer => .f64,
+                    .half_word_to_integer_unsigned => .u16,
+                    .half_word_to_integer => .i16,
+                    .long_to_float_unsigned => .u64,
+                    .long_to_float => .i64,
+                    .single_to_double => .f32,
+                    .single_to_integer_unsigned => .f32,
+                    .single_to_integer => .f32,
+                    .word_to_long_unsigned => .u32,
+                    .word_to_long => .i32,
+                    .word_to_float_unsigned => .u32,
+                    .word_to_float => .i32,
                     else => unreachable,
                 };
 
@@ -1250,10 +1251,10 @@ pub fn Parser(comptime Reader: type) type {
                         data_type_statement.span,
                         data_type_statement.data,
                     ),
-                    .double_to_single => .single,
-                    .single_to_double => .double,
-                    .word_to_long_unsigned => .long,
-                    .word_to_long => .long,
+                    .double_to_single => .f32,
+                    .single_to_double => .f64,
+                    .word_to_long_unsigned => .u64,
+                    .word_to_long => .i64,
                     else => unreachable,
                 };
 
@@ -1334,12 +1335,12 @@ pub fn Parser(comptime Reader: type) type {
 
             const store_span = self.previous.span;
             const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
-                .byte_store => .byte,
-                .double_store => .double,
-                .half_word_store => .half_word,
-                .long_store => .long,
-                .single_store => .single,
-                .word_store => .word,
+                .byte_store => .i8,
+                .double_store => .f64,
+                .half_word_store => .i16,
+                .long_store => .i64,
+                .single_store => .f32,
+                .word_store => .i32,
                 else => return error.MissingStore,
             };
 
@@ -1376,15 +1377,15 @@ pub fn Parser(comptime Reader: type) type {
             const load_span = self.previous.span;
             const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
                 .any_load => .void,
-                .byte_load_unsigned => .byte_unsigned,
-                .byte_load => .byte,
-                .double_load => .double,
-                .half_word_load_unsigned => .half_word_unsigned,
-                .half_word_load => .half_word,
-                .long_load => .long,
-                .single_load => .single,
-                .word_load_unsigned => .word_unsigned,
-                .word_load => .word,
+                .byte_load_unsigned => .u8,
+                .byte_load => .i8,
+                .double_load => .f64,
+                .half_word_load_unsigned => .u16,
+                .half_word_load => .i16,
+                .long_load => .i64,
+                .single_load => .f32,
+                .word_load_unsigned => .u32,
+                .word_load => .i32,
                 else => return error.MissingStore,
             };
 
@@ -1467,12 +1468,12 @@ pub fn Parser(comptime Reader: type) type {
             };
 
             const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
-                .double_equal, .double_not_equal, .double_greater_than_equal, .double_greater_than, .double_less_than_equal, .double_less_than, .double_all_nan, .double_any_nan => .double,
-                .long_equal, .long_not_equal, .long_greater_than_equal, .long_greater_than, .long_less_than_equal, .long_less_than => .long,
-                .long_greater_than_equal_unsigned, .long_greater_than_unsigned, .long_less_than_equal_unsigned, .long_less_than_unsigned => .long_unsigned,
-                .single_equal, .single_not_equal, .single_greater_than_equal, .single_greater_than, .single_less_than_equal, .single_less_than, .single_all_nan, .single_any_nan => .single,
-                .word_equal, .word_not_equal, .word_greater_than_equal, .word_greater_than, .word_less_than_equal, .word_less_than => .word,
-                .word_greater_than_equal_unsigned, .word_greater_than_unsigned, .word_less_than_equal_unsigned, .word_less_than_unsigned => .word_unsigned,
+                .double_equal, .double_not_equal, .double_greater_than_equal, .double_greater_than, .double_less_than_equal, .double_less_than, .double_all_nan, .double_any_nan => .f64,
+                .long_equal, .long_not_equal, .long_greater_than_equal, .long_greater_than, .long_less_than_equal, .long_less_than => .i64,
+                .long_greater_than_equal_unsigned, .long_greater_than_unsigned, .long_less_than_equal_unsigned, .long_less_than_unsigned => .u64,
+                .single_equal, .single_not_equal, .single_greater_than_equal, .single_greater_than, .single_less_than_equal, .single_less_than, .single_all_nan, .single_any_nan => .f32,
+                .word_equal, .word_not_equal, .word_greater_than_equal, .word_greater_than, .word_less_than_equal, .word_less_than => .i32,
+                .word_greater_than_equal_unsigned, .word_greater_than_unsigned, .word_less_than_equal_unsigned, .word_less_than_unsigned => .u32,
                 else => return error.InvalidComparison,
             };
 
@@ -1814,7 +1815,7 @@ test "type struct" {
         .{
             .span = .{ .start = 12, .end = 13 },
             .data = .{
-                .primitive_type = .word,
+                .primitive_type = .i32,
             },
         },
         .{
@@ -2087,7 +2088,7 @@ test "data" {
         .{
             .span = .{ .start = 12, .end = 13 },
             .data = .{
-                .primitive_type = .word,
+                .primitive_type = .i32,
             },
         },
         .{

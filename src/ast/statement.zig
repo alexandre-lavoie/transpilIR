@@ -337,16 +337,17 @@ pub const Scope = enum {
 
 pub const PrimitiveType = enum(u4) {
     void,
-    byte_unsigned,
-    byte,
-    double,
-    half_word_unsigned,
-    half_word,
-    long_unsigned,
-    long,
-    single,
-    word_unsigned,
-    word,
+    ptr,
+    u8,
+    i8,
+    u16,
+    i16,
+    u64,
+    i64,
+    u32,
+    i32,
+    f32,
+    f64,
 };
 
 pub const LiteralType = enum(u2) {

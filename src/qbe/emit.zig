@@ -7,12 +7,13 @@ const token = @import("token.zig");
 
 const symbol_test = @import("../symbol/test.zig");
 
-pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST) ![]token.Token {
+pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST, target: *const common.Target) ![]token.Token {
     var walk = ast.ASTWalk.init(allocator, tree);
     defer walk.deinit();
 
     var emit_callback = EmitWalkCallback.init(
         allocator,
+        target,
     );
     defer emit_callback.deinit();
 
@@ -43,6 +44,7 @@ const EmitWalkState = enum {
 
 pub const EmitWalkCallback = struct {
     allocator: std.mem.Allocator,
+    target: *const common.Target,
     tokens: TokenList,
 
     state: EmitWalkState = .default,
@@ -50,9 +52,10 @@ pub const EmitWalkCallback = struct {
     const Self = @This();
     const TokenList = std.ArrayList(token.Token);
 
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator, target: *const common.Target) Self {
         return .{
             .allocator = allocator,
+            .target = target,
             .tokens = TokenList.init(allocator),
         };
     }
@@ -118,6 +121,23 @@ pub const EmitWalkCallback = struct {
         try self.append(label);
 
         try self.push(.open_parenthesis, null);
+    }
+
+    fn pointerType(self: *const Self, signed: bool) token.TokenType {
+        return switch (signed) {
+            true => switch (self.target.arch) {
+                .a8 => .byte,
+                .a16 => .half_word,
+                .a32 => .word,
+                .a64 => .long,
+            },
+            false => switch (self.target.arch) {
+                .a8 => .byte_unsigned,
+                .a16 => .half_word_unsigned,
+                .a32 => .word_unsigned,
+                .a64 => .long_unsigned,
+            },
+        };
     }
 
     pub fn enter(self: *Self, statement: *ast.Statement) !void {
@@ -206,16 +226,17 @@ pub const EmitWalkCallback = struct {
             .primitive_type => |primitive| {
                 try self.push(switch (primitive) {
                     .void => .zero,
-                    .byte_unsigned => .byte_unsigned,
-                    .byte => .byte,
-                    .double => .double,
-                    .half_word_unsigned => .half_word_unsigned,
-                    .half_word => .half_word,
-                    .long => .long,
-                    .long_unsigned => .long_unsigned,
-                    .single => .single,
-                    .word_unsigned => .word_unsigned,
-                    .word => .word,
+                    .u8 => .byte_unsigned,
+                    .i8 => .byte,
+                    .f64 => .double,
+                    .u16 => .half_word_unsigned,
+                    .i16 => .half_word,
+                    .i64 => .long,
+                    .u64 => .long_unsigned,
+                    .f32 => .single,
+                    .u32 => .word_unsigned,
+                    .i32 => .word,
+                    .ptr => self.pointerType(false),
                 }, null);
             },
             .literal => |literal| {
@@ -601,7 +622,7 @@ pub const EmitWalkCallback = struct {
 
                 const to: token.TokenType = switch (convert.signed) {
                     true => switch (to_type.token_type) {
-                        .type_identifier => .long,
+                        .type_identifier => self.pointerType(convert.signed),
                         else => to_type.token_type,
                     },
                     false => switch (to_type.token_type) {
@@ -609,7 +630,7 @@ pub const EmitWalkCallback = struct {
                         .half_word => .half_word_unsigned,
                         .word => .word_unsigned,
                         .long => .long_unsigned,
-                        .type_identifier => .long_unsigned,
+                        .type_identifier => self.pointerType(convert.signed),
                         else => to_type.token_type,
                     },
                 };
@@ -829,6 +850,10 @@ test "Emit" {
 
     const file = @embedFile("../test/qbe.ssa");
 
+    const target: common.Target = .{
+        .arch = .a64,
+    };
+
     var tree = try symbol_test.testAST(allocator, file);
     defer tree.deinit();
 
@@ -841,9 +866,9 @@ test "Emit" {
     var output_writer = output_array.writer();
 
     // Act
-    try symbol_test.testValidate(allocator, file, &tree, &symbol_table);
+    try symbol_test.testValidate(allocator, file, &tree, &symbol_table, &target);
 
-    const tokens = try emit(allocator, &tree);
+    const tokens = try emit(allocator, &tree, &target);
     defer allocator.free(tokens);
     var token_reader = token.TokenReader.init(tokens);
 
