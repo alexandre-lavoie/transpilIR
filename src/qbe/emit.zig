@@ -5,7 +5,29 @@ const common = @import("../common.zig");
 const symbol = @import("../symbol/lib.zig");
 const token = @import("token.zig");
 
-const TokenWalkState = enum {
+const symbol_test = @import("../symbol/test.zig");
+
+pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST) ![]token.Token {
+    var walk = ast.ASTWalk.init(allocator, tree);
+    defer walk.deinit();
+
+    var emit_callback = EmitWalkCallback.init(
+        allocator,
+    );
+    defer emit_callback.deinit();
+
+    try walk.start(tree.entrypoint() orelse return error.NotFound);
+    while (try walk.next()) |out| {
+        try switch (out.enter) {
+            true => emit_callback.enter(out.value),
+            false => emit_callback.exit(out.value),
+        };
+    }
+
+    return try emit_callback.tokens.toOwnedSlice();
+}
+
+const EmitWalkState = enum {
     default,
     assignment_enter,
     function_enter,
@@ -13,16 +35,17 @@ const TokenWalkState = enum {
     block_enter,
     type_enter,
     type_scope,
+    type_exit,
     op_enter,
     call_enter,
     phi_enter,
 };
 
-pub const TokenWalkCallback = struct {
+pub const EmitWalkCallback = struct {
     allocator: std.mem.Allocator,
     tokens: TokenList,
 
-    state: TokenWalkState = .default,
+    state: EmitWalkState = .default,
 
     const Self = @This();
     const TokenList = std.ArrayList(token.Token);
@@ -100,8 +123,6 @@ pub const TokenWalkCallback = struct {
             .function_signature,
             .allocate,
             .blit,
-            .copy,
-            .cast,
             .convert,
             .load,
             .store,
@@ -115,6 +136,8 @@ pub const TokenWalkCallback = struct {
             .zero_type => try self.push(.zero, null),
             .vastart => try self.push(.vastart, null),
             .vaarg => try self.push(.vaarg, null),
+            .copy => try self.push(.copy, null),
+            .cast => try self.push(.cast, null),
             .opaque_type,
             .struct_type,
             .union_type,
@@ -130,6 +153,11 @@ pub const TokenWalkCallback = struct {
                 self.state = .type_enter;
             },
             .data_definition => {
+                switch (self.state) {
+                    .type_exit => try self.newline(),
+                    else => {},
+                }
+
                 try self.push(.data, null);
 
                 self.state = .data_enter;
@@ -177,7 +205,8 @@ pub const TokenWalkCallback = struct {
                     .double => .double,
                     .half_word_unsigned => .half_word_unsigned,
                     .half_word => .half_word,
-                    .long, .long_unsigned => .long,
+                    .long => .long,
+                    .long_unsigned => .long_unsigned,
                     .single => .single,
                     .word_unsigned => .word_unsigned,
                     .word => .word,
@@ -239,8 +268,10 @@ pub const TokenWalkCallback = struct {
                 try self.push(switch (op.operation_type) {
                     .addition => .addition,
                     .divide => .divide,
+                    .divide_unsigned => .divide_unsigned,
                     .multiply => .multiply,
                     .remainder => .remainder,
+                    .remainder_unsigned => .remainder_unsigned,
                     .subtract => .subtract,
                     .arthimetic_shift_right => .arthimetic_shift_right,
                     .@"and" => .bitwise_and,
@@ -262,19 +293,14 @@ pub const TokenWalkCallback = struct {
             .env_type,
             .zero_type,
             .variadic_parameter,
-            .vaarg,
             .vastart,
             .assignment,
             .blit,
-            .copy,
-            .cast,
             .convert,
             .load,
             .halt,
             .jump,
             .@"return",
-            .comparison,
-            .negate,
             => {},
             .module => try self.push(.module_end, null),
             .block,
@@ -284,8 +310,7 @@ pub const TokenWalkCallback = struct {
             .opaque_type,
             .union_type,
             => try self.push(.close_curly_brace, null),
-            .typed_data,
-            => try self.push(.comma, null),
+            .typed_data => try self.push(.comma, null),
             .array_type => try self.rot2(),
             .struct_type => {
                 _ = try self.pop();
@@ -300,6 +325,12 @@ pub const TokenWalkCallback = struct {
                     .type_scope => try self.push(.comma, null),
                     else => {},
                 }
+            },
+            .negate => {
+                const value = try self.pop();
+
+                try self.rot2();
+                try self.append(value);
             },
             .allocate => {
                 const size = try self.pop();
@@ -367,6 +398,15 @@ pub const TokenWalkCallback = struct {
                 try self.push(.comma, null);
             },
             .phi_parameter => try self.push(.comma, null),
+            .vaarg,
+            .copy,
+            .cast,
+            => {
+                const value = try self.pop();
+
+                try self.rot2();
+                try self.append(value);
+            },
             .data_definition => {
                 _ = try self.pop();
 
@@ -374,7 +414,7 @@ pub const TokenWalkCallback = struct {
                 try self.newline();
             },
             .type_definition => {
-                self.state = .default;
+                self.state = .type_exit;
 
                 try self.newline();
             },
@@ -403,7 +443,8 @@ pub const TokenWalkCallback = struct {
                 const @"type" = try self.pop();
                 const store: token.TokenType = switch (@"type".token_type) {
                     .byte => .byte_store,
-                    .half_word_store, .word => .word_store,
+                    .half_word => .word_store,
+                    .word => .word_store,
                     .long => .long_store,
                     .single => .single_store,
                     .double => .double_store,
@@ -436,19 +477,103 @@ pub const TokenWalkCallback = struct {
                 try self.append(global_reserve);
                 try self.append(global_name);
             },
+            .comparison => |comparison| {
+                const right = try self.pop();
+                const left = try self.pop();
+                const @"type" = try self.pop();
+
+                const comparison_op: token.TokenType = switch (@"type".token_type) {
+                    .word => switch (comparison.operation_type) {
+                        .equal => .word_equal,
+                        .greater_than_equal => .word_greater_than_equal,
+                        .greater_than => .word_greater_than,
+                        .less_than_equal => .word_less_than_equal,
+                        .less_than => .word_less_than,
+                        .not_equal => .word_not_equal,
+                        .all_nan,
+                        .any_nan,
+                        => unreachable,
+                    },
+                    .word_unsigned => switch (comparison.operation_type) {
+                        .greater_than_equal => .word_greater_than_equal_unsigned,
+                        .greater_than => .word_greater_than_unsigned,
+                        .less_than_equal => .word_less_than_equal_unsigned,
+                        .less_than => .word_less_than_unsigned,
+                        .equal,
+                        .not_equal,
+                        .all_nan,
+                        .any_nan,
+                        => unreachable,
+                    },
+                    .long => switch (comparison.operation_type) {
+                        .equal => .long_equal,
+                        .greater_than_equal => .long_greater_than_equal,
+                        .greater_than => .long_greater_than,
+                        .less_than_equal => .long_less_than_equal,
+                        .less_than => .long_less_than,
+                        .not_equal => .long_not_equal,
+                        .all_nan,
+                        .any_nan,
+                        => unreachable,
+                    },
+                    .long_unsigned => switch (comparison.operation_type) {
+                        .greater_than_equal => .long_greater_than_equal_unsigned,
+                        .greater_than => .long_greater_than_unsigned,
+                        .less_than_equal => .long_less_than_equal_unsigned,
+                        .less_than => .long_less_than_unsigned,
+                        .equal,
+                        .not_equal,
+                        .all_nan,
+                        .any_nan,
+                        => unreachable,
+                    },
+                    .single => switch (comparison.operation_type) {
+                        .equal => .single_equal,
+                        .greater_than_equal => .single_greater_than_equal,
+                        .greater_than => .single_greater_than,
+                        .less_than_equal => .single_less_than_equal,
+                        .less_than => .single_less_than,
+                        .not_equal => .single_not_equal,
+                        .all_nan => .single_all_nan,
+                        .any_nan => .single_any_nan,
+                    },
+                    .double => switch (comparison.operation_type) {
+                        .equal => .double_equal,
+                        .greater_than_equal => .double_greater_than_equal,
+                        .greater_than => .double_greater_than,
+                        .less_than_equal => .double_less_than_equal,
+                        .less_than => .double_less_than,
+                        .not_equal => .double_not_equal,
+                        .all_nan => .double_all_nan,
+                        .any_nan => .double_any_nan,
+                    },
+                    else => unreachable,
+                };
+
+                try self.push(comparison_op, null);
+                try self.append(left);
+                try self.push(.comma, null);
+                try self.append(right);
+            },
         }
     }
 };
 
-pub fn Emit(comptime Reader: type, comptime Writer: type) type {
+const EmitWriterState = enum {
+    default,
+    space,
+    assign,
+    done,
+};
+
+pub fn EmitWriter(comptime Reader: type, comptime Writer: type) type {
     return struct {
         reader: *Reader,
         writer: *Writer,
         tty_config: *const std.io.tty.Config,
         symbol_table: *const symbol.SymbolTable,
 
-        done: bool = false,
-        space: bool = false,
+        state: EmitWriterState = .default,
 
         const Self = @This();
 
@@ -490,28 +615,39 @@ pub fn Emit(comptime Reader: type, comptime Writer: type) type {
         }
 
         pub fn next(self: *Self) !bool {
-            if (self.done) return false;
+            if (self.state == .done) return false;
 
             const tok = self.reader_readToken();
             switch (tok.token_type) {
                 .module_start => return true,
                 .module_end => {
-                    self.done = true;
+                    self.state = .done;
                     return false;
                 },
                 else => {},
             }
 
-            if (self.space) {
-                switch (tok.token_type) {
+            switch (self.state) {
+                .space => switch (tok.token_type) {
                     .newline,
                     .comma,
                     .open_parenthesis,
                     .close_parenthesis,
                     => {},
                     else => try self.writer_writeByte(' '),
-                }
-                self.space = false;
+                },
+                .assign => switch (tok.token_type) {
+                    .byte,
+                    .half_word,
+                    .word,
+                    .long,
+                    .single,
+                    .double,
+                    .type_identifier,
+                    => {},
+                    else => try self.writer_writeByte(' '),
+                },
+                else => {},
             }
 
             const color = token.tokenColor(tok.token_type);
@@ -555,16 +691,61 @@ pub fn Emit(comptime Reader: type, comptime Writer: type) type {
                 }
             }
 
-            self.space = switch (tok.token_type) {
+            self.state = switch (tok.token_type) {
                 .newline,
                 .tab,
                 .open_parenthesis,
                 .allocate,
-                => false,
-                else => true,
+                => .default,
+                .assign => .assign,
+                else => .space,
             };
 
             return true;
         }
     };
+}
+
+test "Emit" {
+    // Arrange
+    const allocator = std.testing.allocator;
+    const tty_config: std.io.tty.Config = .no_color;
+
+    const file = @embedFile("../test/all.ssa");
+
+    var tree = try symbol_test.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = symbol.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    var output_array = std.ArrayList(u8).init(allocator);
+    defer output_array.deinit();
+
+    var output_writer = output_array.writer();
+
+    // Act
+    try symbol_test.testValidate(allocator, file, &tree, &symbol_table);
+
+    const tokens = try emit(allocator, &tree);
+    defer allocator.free(tokens);
+    var token_reader = token.TokenReader.init(tokens);
+
+    var emit_writer = EmitWriter(
+        @TypeOf(token_reader),
+        @TypeOf(output_writer),
+    ).init(
+        &token_reader,
+        &output_writer,
+        &tty_config,
+        &symbol_table,
+    );
+
+    while (try emit_writer.next()) {}
+
+    const actual = try output_array.toOwnedSlice();
+    defer allocator.free(actual);
+
+    // Assert
+    try std.testing.expectEqualStrings(file, actual);
 }

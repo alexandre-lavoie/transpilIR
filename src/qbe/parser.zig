@@ -5,6 +5,8 @@ const common = @import("../common.zig");
 const lexer = @import("lexer.zig");
 const token = @import("token.zig");
 
+const test_lib = @import("../test/lib.zig");
+
 const ParseRecord = struct {
     index: usize,
     statement: *ast.Statement,
@@ -1401,10 +1403,10 @@ pub fn Parser(comptime Reader: type) type {
             const operation_type: ast.BinaryOperationtype = switch (self.previous.token_type) {
                 .addition => .addition,
                 .divide => .divide,
-                .divide_unsigned => .divide, // TODO: Support unsigned divide
+                .divide_unsigned => .divide_unsigned,
                 .multiply => .multiply,
                 .remainder => .remainder,
-                .remainder_unsigned => .remainder, // TODO: Support unsigned remainder
+                .remainder_unsigned => .remainder_unsigned,
                 .subtract => .subtract,
                 .arthimetic_shift_right => .arthimetic_shift_right,
                 .bitwise_and => .@"and",
@@ -1734,8 +1736,6 @@ pub fn Parser(comptime Reader: type) type {
 //
 // Test Utils
 //
-
-const test_lib = @import("../test.zig");
 
 fn testParser(allocator: std.mem.Allocator, buffer: anytype) ![]ast.Statement {
     var tree = try test_lib.testAST(allocator, buffer);

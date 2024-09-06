@@ -293,24 +293,24 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8, output: *std.io.AnyWr
 
     _ = try output.write("=== QBE ===\n");
 
-    var token_callback = lib.qbe.TokenWalkCallback.init(
+    var emit_callback = lib.qbe.EmitWalkCallback.init(
         allocator,
     );
-    defer token_callback.deinit();
+    defer emit_callback.deinit();
 
     try walk.start(entrypoint);
     while (try walk.next()) |out| {
         try switch (out.enter) {
-            true => token_callback.enter(out.value),
-            false => token_callback.exit(out.value),
+            true => emit_callback.enter(out.value),
+            false => emit_callback.exit(out.value),
         };
     }
 
-    const emit_tokens = try token_callback.tokens.toOwnedSlice();
+    const emit_tokens = try emit_callback.tokens.toOwnedSlice();
     defer allocator.free(emit_tokens);
     var emit_token_reader = lib.qbe.TokenReader.init(emit_tokens);
 
-    var emit = lib.qbe.Emit(@TypeOf(emit_token_reader), std.io.AnyWriter).init(
+    var emit = lib.qbe.EmitWriter(@TypeOf(emit_token_reader), std.io.AnyWriter).init(
         &emit_token_reader,
         output,
         tty_config,

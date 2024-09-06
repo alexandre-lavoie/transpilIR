@@ -359,8 +359,10 @@ pub const BinaryOperationType = enum {
     // Basic
     addition,
     divide,
+    divide_unsigned,
     multiply,
     remainder,
+    remainder_unsigned,
     subtract,
 
     // Bitwise

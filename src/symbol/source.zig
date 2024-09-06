@@ -2,9 +2,10 @@ const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
 const common = @import("../common.zig");
-const test_lib = @import("../test.zig");
 const table = @import("table.zig");
 const types = @import("types.zig");
+
+const test_lib = @import("test.zig");
 
 const SymbolSourceWalkState = enum {
     default,
@@ -119,36 +120,6 @@ pub const SymbolSourceWalkCallback = struct {
 };
 
 //
-// Test Utils
-//
-
-pub fn testSource(allocator: std.mem.Allocator, file: []const u8, symbol_table: *table.SymbolTable) !void {
-    var file_stream: std.io.StreamSource = .{
-        .const_buffer = std.io.fixedBufferStream(file),
-    };
-
-    var tree = try test_lib.testAST(allocator, file);
-    defer tree.deinit();
-
-    var callback = SymbolSourceWalkCallback.init(
-        allocator,
-        symbol_table,
-        &file_stream,
-    );
-
-    var walk = ast.ASTWalk.init(allocator, &tree);
-    defer walk.deinit();
-
-    try walk.start(tree.entrypoint() orelse return error.NotFound);
-    while (try walk.next()) |out| {
-        try switch (out.enter) {
-            true => callback.enter(out.value),
-            false => callback.exit(out.value),
-        };
-    }
-}
-
-//
 // Valid Tests
 //
 
@@ -172,11 +143,14 @@ test "type" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(allocator, file, &symbol_table);
+    try test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -203,11 +177,14 @@ test "function" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(allocator, file, &symbol_table);
+    try test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -240,11 +217,14 @@ test "function type" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(allocator, file, &symbol_table);
+    try test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -284,11 +264,14 @@ test "reused local" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(allocator, file, &symbol_table);
+    try test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -322,11 +305,14 @@ test "reassigned local" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(allocator, file, &symbol_table);
+    try test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -372,11 +358,14 @@ test "call" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(allocator, file, &symbol_table);
+    try test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -418,11 +407,14 @@ test "data" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try testSource(allocator, file, &symbol_table);
+    try test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected_symbols, symbol_table.symbols.items);
@@ -439,11 +431,14 @@ test "error.SymbolNotFound type" {
 
     const file = "type :t = { :dne }";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    const res = testSource(allocator, file, &symbol_table);
+    const res = test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -455,11 +450,14 @@ test "error.SymbolNotFound local type" {
 
     const file = "function $fun(:dne %a) {@s ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    const res = testSource(allocator, file, &symbol_table);
+    const res = test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -471,11 +469,14 @@ test "error.SymbolReuse type" {
 
     const file = "type :t = { w } type :t = { b }";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    const res = testSource(allocator, file, &symbol_table);
+    const res = test_lib.testSource(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolReuse, res);

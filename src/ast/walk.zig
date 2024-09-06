@@ -3,6 +3,8 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const statement = @import("statement.zig");
 
+const test_lib = @import("../test/lib.zig");
+
 const ASTWalkEntry = struct {
     index: statement.StatementIndex,
     enter: bool = true,
@@ -243,8 +245,6 @@ pub const ASTWalk = struct {
 //
 // Test Utils
 //
-
-const test_lib = @import("../test.zig");
 
 fn testEnter(allocator: std.mem.Allocator, buffer: anytype) ![]statement.Statement {
     var tree = try test_lib.testAST(allocator, buffer);

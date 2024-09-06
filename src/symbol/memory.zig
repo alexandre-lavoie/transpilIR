@@ -2,10 +2,11 @@ const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
 const common = @import("../common.zig");
-const test_lib = @import("../test.zig");
 const table = @import("table.zig");
 const types = @import("types.zig");
 const source = @import("source.zig");
+
+const test_lib = @import("test.zig");
 
 const SymbolMemoryEntry = union(enum) {
     local: usize,
@@ -703,32 +704,6 @@ pub const SymbolMemoryWalkCallback = struct {
 };
 
 //
-// Test Utils
-//
-
-pub fn testMemory(allocator: std.mem.Allocator, file: []const u8, symbol_table: *table.SymbolTable) !void {
-    var tree = try test_lib.testAST(allocator, file);
-    defer tree.deinit();
-
-    var callback = SymbolMemoryWalkCallback.init(
-        allocator,
-        symbol_table,
-    );
-    defer callback.deinit();
-
-    var walk = ast.ASTWalk.init(allocator, &tree);
-    defer walk.deinit();
-
-    try walk.start(tree.entrypoint() orelse return error.NotFound);
-    while (try walk.next()) |out| {
-        try switch (out.enter) {
-            true => callback.enter(out.value),
-            false => callback.exit(out.value),
-        };
-    }
-}
-
-//
 // Valid Tests
 //
 
@@ -812,12 +787,14 @@ test "type_definition" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try testMemory(allocator, file, &symbol_table);
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -943,12 +920,14 @@ test "data_definition" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try testMemory(allocator, file, &symbol_table);
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1038,12 +1017,14 @@ test "function" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try testMemory(allocator, file, &symbol_table);
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1168,12 +1149,14 @@ test "call" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try testMemory(allocator, file, &symbol_table);
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1235,12 +1218,14 @@ test "call function pointer" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try testMemory(allocator, file, &symbol_table);
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1328,12 +1313,14 @@ test "assignment" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try testMemory(allocator, file, &symbol_table);
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1463,12 +1450,14 @@ test "return" {
         },
     };
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try testMemory(allocator, file, &symbol_table);
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
@@ -1484,12 +1473,14 @@ test "error.InvalidSize literal" {
 
     const file = "data $d = { z s_1 }";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    const res = testMemory(allocator, file, &symbol_table);
+    const res = test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.InvalidSize, res);
@@ -1501,12 +1492,14 @@ test "error.InvalidSize global" {
 
     const file = "data $d = { z $d }";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    const res = testMemory(allocator, file, &symbol_table);
+    const res = test_lib.testMemory(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.InvalidSize, res);

@@ -1,6 +1,6 @@
 const emit = @import("emit.zig");
-pub const TokenWalkCallback = emit.TokenWalkCallback;
-pub const Emit = emit.Emit;
+pub const EmitWalkCallback = emit.EmitWalkCallback;
+pub const EmitWriter = emit.EmitWriter;
 
 const lexer = @import("lexer.zig");
 pub const Lexer = lexer.Lexer;

@@ -1,0 +1,108 @@
+type :opaque = { 32 }
+type :struct = { :opaque, w 10 }
+type :union = { { w } { s } }
+type :t = { 16 }
+
+export thread section "section" "flags" data $dlink = { b 0 }
+data $dptr = { w 0 }
+data $dvals = { b 32, b s_1.23, b d_4.56, z 100, l $dptr + 1 }
+data $d = { w 0 }
+
+export thread section "section" "flags" function $flink() {
+@s
+    ret
+}
+
+function w $fparams(env %e, w %a, :t %b, ...) {
+@s
+    %vp =l alloc4 32
+    vastart %vp
+    %va =w vaarg %vp
+    ret 0
+}
+
+function $fmath() {
+@s
+    %r =l neg 0
+    %r =l add %r, 0
+    %r =l and %r, 0
+    %r =l div %r, 0
+    %r =l mul %r, 0
+    %r =l or %r, 0
+    %r =l rem %r, 0
+    %r =l sar %r, 0
+    %r =l shl %r, 0
+    %r =l shr %r, 0
+    %r =l sub %r, 0
+    %r =l udiv %r, 0
+    %r =l urem %r, 0
+    %r =l xor %r, 0
+    ret
+}
+
+function $fmem() {
+@s
+    %l =l alloc16 8
+    %l =l alloc4 8
+    %l =l alloc8 8
+    blit %l, %l, 16
+    %l =l load %l
+    %d =d loadd %l
+    %l =l loadl %l
+    %s =s loads %l
+    %b =b loadsb %l
+    %h =h loadsh %l
+    %w =w loadsw %l
+    %b =b loadub %l
+    %h =h loaduh %l
+    %w =w loaduw %l
+    %w =w loadw %l
+    storeb 0, %l
+    stored 0, %l
+    storeh 0, %l
+    storel 0, %l
+    stores 0, %l
+    storew 0, %l
+    ret
+}
+
+function $fcmp() {
+@s
+    %r =b ceqd 0, 0
+    %r =b ceql 0, 0
+    %r =b ceqs 0, 0
+    %r =b ceqw 0, 0
+    %r =b cged 0, 0
+    %r =b cges 0, 0
+    %r =b cgtd 0, 0
+    %r =b cgts 0, 0
+    %r =b cled 0, 0
+    %r =b cles 0, 0
+    %r =b cltd 0, 0
+    %r =b clts 0, 0
+    %r =b cned 0, 0
+    %r =b cnel 0, 0
+    %r =b cnes 0, 0
+    %r =b cnew 0, 0
+    %r =b cod 0, 0
+    %r =b cos 0, 0
+    %r =b csgel 0, 0
+    %r =b csgew 0, 0
+    %r =b csgtl 0, 0
+    %r =b csgtw 0, 0
+    %r =b cslel 0, 0
+    %r =b cslew 0, 0
+    %r =b csltl 0, 0
+    %r =b csltw 0, 0
+    %r =b cugel 0, 0
+    %r =b cugew 0, 0
+    %r =b cugtl 0, 0
+    %r =b cugtw 0, 0
+    %r =b culel 0, 0
+    %r =b culew 0, 0
+    %r =b cultl 0, 0
+    %r =b cultw 0, 0
+    %r =b cuod 0, 0
+    %r =b cuos 0, 0
+    ret
+}

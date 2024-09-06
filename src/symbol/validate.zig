@@ -2,11 +2,10 @@ const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
 const common = @import("../common.zig");
-const test_lib = @import("../test.zig");
 const table = @import("table.zig");
 const types = @import("types.zig");
-const source = @import("source.zig");
-const memory = @import("memory.zig");
+
+const test_lib = @import("test.zig");
 
 pub const SymbolValidateWalkCallback = struct {
     allocator: std.mem.Allocator,
@@ -201,7 +200,7 @@ pub const SymbolValidateWalkCallback = struct {
             .binary_operation => {
                 const right = self.types.pop();
                 const left = self.types.pop();
-                const data_type = self.types.pop();
+                const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
 
@@ -210,8 +209,8 @@ pub const SymbolValidateWalkCallback = struct {
             .comparison => {
                 const right = self.types.pop();
                 const left = self.types.pop();
-                const comparision_type = self.types.pop();
-                const data_type = self.types.pop();
+                const comparision_type = self.types.popOrNull() orelse return error.DataType;
+                const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 switch (data_type) {
                     .single, .double => return error.ComparisonType,
@@ -224,7 +223,7 @@ pub const SymbolValidateWalkCallback = struct {
             },
             .negate => {
                 const value = self.types.pop();
-                const data_type = self.types.pop();
+                const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
 
@@ -239,20 +238,20 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!Self.validateType(self.return_type orelse .void, @"type")) return error.DataType;
             },
             .vastart => {
-                const value = self.types.pop();
+                const value = self.types.popOrNull() orelse return error.DataType;
 
                 if (!Self.validateType(.long, value)) return error.DataType;
             },
             .vaarg => {
                 const value = self.types.pop();
-                const data_type = self.types.pop();
+                const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
 
                 if (!Self.validateType(.long, value)) return error.DataType;
             },
             .phi_parameter => {
-                const @"type" = self.types.pop();
+                const @"type" = self.types.popOrNull() orelse return error.DataType;
 
                 if (!Self.validateType(self.phi_type orelse .void, @"type")) return error.DataType;
             },
@@ -275,9 +274,9 @@ pub const SymbolValidateWalkCallback = struct {
             },
             .convert => {
                 const value = self.types.pop();
-                const from_type = self.types.pop();
-                const to_type = self.types.pop();
-                const data_type = self.types.pop();
+                const from_type = self.types.popOrNull() orelse return error.DataType;
+                const to_type = self.types.popOrNull() orelse return error.DataType;
+                const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
 
@@ -286,7 +285,7 @@ pub const SymbolValidateWalkCallback = struct {
             },
             .copy => {
                 const value = self.types.pop();
-                const data_type = self.types.pop();
+                const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
 
@@ -294,7 +293,7 @@ pub const SymbolValidateWalkCallback = struct {
             },
             .cast => {
                 const value = self.types.pop();
-                const data_type = self.types.pop();
+                const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 const from_type: ast.PrimitiveType = switch (data_type) {
                     .long => .double,
@@ -309,8 +308,8 @@ pub const SymbolValidateWalkCallback = struct {
             },
             .load => {
                 const address = self.types.pop();
-                const memory_type = self.types.pop();
-                const data_type = self.types.pop();
+                const memory_type = self.types.popOrNull() orelse return error.DataType;
+                const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 const source_type = switch (data_type) {
                     .word, .word_unsigned => switch (memory_type) {
@@ -342,7 +341,7 @@ pub const SymbolValidateWalkCallback = struct {
             .store => {
                 const address = self.types.pop();
                 const value = self.types.pop();
-                const memory_type = self.types.pop();
+                const memory_type = self.types.popOrNull() orelse return error.DataType;
 
                 if (!Self.validateType(.long, address)) return error.DataType;
                 if (!Self.validateType(memory_type, value)) return error.DataType;
@@ -355,7 +354,7 @@ pub const SymbolValidateWalkCallback = struct {
             },
             .call => {
                 const return_type = self.types.pop();
-                const address = self.types.pop();
+                const address = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(return_type);
 
@@ -363,39 +362,13 @@ pub const SymbolValidateWalkCallback = struct {
             },
             .assignment => {
                 const value = self.types.pop();
-                const @"type" = self.types.popOrNull() orelse unreachable;
+                const @"type" = self.types.popOrNull() orelse return error.DataType;
 
                 if (!Self.validateType(@"type", value)) return error.DataType;
             },
         }
     }
 };
-
-//
-// Test Utils
-//
-
-pub fn testValidate(allocator: std.mem.Allocator, file: []const u8, symbol_table: *const table.SymbolTable) !void {
-    var tree = try test_lib.testAST(allocator, file);
-    defer tree.deinit();
-
-    var callback = SymbolValidateWalkCallback.init(
-        allocator,
-        symbol_table,
-    );
-    defer callback.deinit();
-
-    var walk = ast.ASTWalk.init(allocator, &tree);
-    defer walk.deinit();
-
-    try walk.start(tree.entrypoint() orelse return error.NotFound);
-    while (try walk.next()) |out| {
-        try switch (out.enter) {
-            true => callback.enter(out.value),
-            false => callback.exit(out.value),
-        };
-    }
-}
 
 //
 // Valid Tests
@@ -406,13 +379,14 @@ test "load global" {
 
     const file = "function $f() {@s %w =w loadw $ptr ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act + Assert
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    try testValidate(allocator, file, &symbol_table);
+    try test_lib.testValidate(allocator, file, &tree, &symbol_table);
 }
 
 test "call no arguments" {
@@ -421,13 +395,14 @@ test "call no arguments" {
 
     const file = "function $f() {@s %v =w call $no_arg() ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act + Assert
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    try testValidate(allocator, file, &symbol_table);
+    try test_lib.testValidate(allocator, file, &tree, &symbol_table);
 }
 
 //
@@ -440,13 +415,14 @@ test "error.SymbolNotFound label" {
 
     const file = "function $f() {@s jmp @dne}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -458,13 +434,14 @@ test "error.SymbolNotFound local" {
 
     const file = "function $f() {@s %l =w add %dne, 1 ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -476,13 +453,14 @@ test "error.MismatchType" {
 
     const file = "function $f() {@s %l =w copy 0 %r =s copy s_0 %r =w add %l, %r ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.MismatchType, res);
@@ -494,13 +472,14 @@ test "error.DataType binary_operator" {
 
     const file = "function $f() {@s %l =w copy 0 %r =w copy 0 %r =s add %l, %r ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -512,13 +491,14 @@ test "error.MismatchType binary_operator" {
 
     const file = "function $f() {@s %l =w copy 0 %r =s copy s_0 %r =w add %l, %r ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.MismatchType, res);
@@ -530,13 +510,14 @@ test "error.ComparisonType" {
 
     const file = "function $f() {@s %r =s ceqw 0, 0 ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.ComparisonType, res);
@@ -548,13 +529,14 @@ test "error.DataType integer comparison" {
 
     const file = "function $f() {@s %l =s copy s_0 %r =s copy s_0 %r =w ceqw %l, %r ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -566,13 +548,14 @@ test "error.DataType float comparison" {
 
     const file = "function $f() {@s %l =w copy 0 %r =w copy 0 %r =w cos %l, %r ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -584,13 +567,14 @@ test "error.DataType negate" {
 
     const file = "function $f() {@s %v =w copy 0 %r =s neg %v ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -602,13 +586,14 @@ test "error.DataType return" {
 
     const file = "function s $f() {@s %v =w copy 0 ret %v}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -620,13 +605,14 @@ test "error.DataType vastart" {
 
     const file = "function $f() {@s %v =s copy 0 vastart %v ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -638,13 +624,14 @@ test "error.DataType vaarg" {
 
     const file = "function $f() {@s %v =s copy 0 %a =w vaarg %v ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -656,13 +643,14 @@ test "error.DataType phi" {
 
     const file = "function $f() {@a %a =w copy 0 @b %b =s copy s_0 @c %c =w phi @a %a, @b %b ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -674,13 +662,14 @@ test "error.DataType branch" {
 
     const file = "function $f() {@a %a =s copy s_0 jnz %a, @t, @f @t @f ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -692,13 +681,14 @@ test "error.DataType blit target" {
 
     const file = "function $f() {@s %to =b copy 0 %from =l copy 0 blit %to, %from, 32 ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -710,13 +700,14 @@ test "error.DataType blit source" {
 
     const file = "function $f() {@s %to =l copy 0 %from =b copy 0 blit %to, %from, 32 ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -728,13 +719,14 @@ test "error.DataType blit size" {
 
     const file = "function $f() {@s %to =l copy 0 %from =l copy 0 blit %to, %from, %to ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -746,13 +738,14 @@ test "error.DataType copy" {
 
     const file = "function $f() {@s %a =s copy s_0 %b =l copy %a ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -764,13 +757,14 @@ test "error.DataType cast" {
 
     const file = "function $f() {@s %s =s copy 0 %rt =d cast %s ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -782,13 +776,14 @@ test "error.DataType conversion" {
 
     const file = "function $f() {@s %s =s copy 0 %rt =d swtof %s ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -800,13 +795,14 @@ test "error.DataType load pointer" {
 
     const file = "function $f() {@s %ptr =b copy 0 %l =l loadl %ptr ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -818,13 +814,14 @@ test "error.DataType load type" {
 
     const file = "function $f() {@s %ptr =l copy 0 %s =s loadl %ptr ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -836,13 +833,14 @@ test "error.DataType store pointer" {
 
     const file = "function $f() {@s %ptr =s copy 0 storew 1, %ptr ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -854,13 +852,14 @@ test "error.DataType store type" {
 
     const file = "function $f() {@s %val =s copy 0 storew %val, 0 ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -872,13 +871,14 @@ test "error.DataType assignment" {
 
     const file = "function $f() {@s %v =s copy 0 %v =w copy 0 ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -890,13 +890,14 @@ test "error.DataType call local" {
 
     const file = "function $f() {@s %f =s copy 0 call %f() ret}";
 
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
     var symbol_table = table.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     // Act
-    try source.testSource(allocator, file, &symbol_table);
-    try memory.testMemory(allocator, file, &symbol_table);
-    const res = testValidate(allocator, file, &symbol_table);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
