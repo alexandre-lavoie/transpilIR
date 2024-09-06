@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const debug_cli = b.addExecutable(.{
-        .name = "qbe-llvm-debug",
+        .name = "transpilir-debug",
         .root_source_file = b.path("src/cli_debug.zig"),
         .target = target,
         .optimize = optimize,
@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(debug_cli);
 
     const lib = b.addStaticLibrary(.{
-        .name = "qbe-llvm",
+        .name = "transpilir",
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
