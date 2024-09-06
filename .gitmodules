@@ -1,3 +1,0 @@
-[submodule "third-party/qbe"]
-	path = third-party/qbe
-	url = git://c9x.me/qbe.git
