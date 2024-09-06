@@ -5,17 +5,24 @@ const common = @import("../common.zig");
 const symbol = @import("../symbol/lib.zig");
 const token = @import("token.zig");
 
+const TokenWalkState = enum {
+    default,
+    assignment_enter,
+    function_enter,
+    data_enter,
+    block_enter,
+    type_enter,
+    type_scope,
+    op_enter,
+    call_enter,
+    phi_enter,
+};
+
 pub const TokenWalkCallback = struct {
     allocator: std.mem.Allocator,
     tokens: TokenList,
 
-    assignment_enter: bool = false,
-    function_enter: bool = false,
-    data_enter: bool = false,
-    block_enter: bool = false,
-    type_scope: bool = false,
-    type_enter: bool = false,
-    op_enter: bool = false,
+    state: TokenWalkState = .default,
 
     const Self = @This();
     const TokenList = std.ArrayList(token.Token);
@@ -59,12 +66,26 @@ pub const TokenWalkCallback = struct {
     }
 
     fn functionOpen(self: *Self) !void {
-        self.function_enter = false;
+        self.state = .default;
 
         const return_type = try self.pop();
         const label = try self.pop();
 
         if (return_type.token_type != .zero) try self.append(return_type);
+        try self.append(label);
+
+        try self.push(.open_parenthesis, null);
+    }
+
+    fn callOpen(self: *Self) !void {
+        self.state = .default;
+
+        const return_type = try self.pop();
+        const label = try self.pop();
+        const call = try self.pop();
+
+        if (return_type.token_type != .zero) try self.append(return_type);
+        try self.append(call);
         try self.append(label);
 
         try self.push(.open_parenthesis, null);
@@ -76,11 +97,7 @@ pub const TokenWalkCallback = struct {
             .linkage,
             .offset,
             .array_type,
-            .call,
-            .call_parameter,
             .function_signature,
-            .vaarg,
-            .vastart,
             .allocate,
             .blit,
             .copy,
@@ -88,41 +105,51 @@ pub const TokenWalkCallback = struct {
             .convert,
             .load,
             .store,
-            .phi,
-            .phi_parameter,
             .comparison,
-            .negate,
             => {},
-            .assignment => self.assignment_enter = true,
+            .assignment => self.state = .assignment_enter,
             .module => try self.push(.module_start, null),
             .line => try self.push(.tab, null),
+            .negate => try self.push(.negate, null),
             .env_type => try self.push(.env, null),
             .zero_type => try self.push(.zero, null),
+            .vastart => try self.push(.vastart, null),
+            .vaarg => try self.push(.vaarg, null),
             .opaque_type,
             .struct_type,
             .union_type,
             => try self.push(.open_curly_brace, null),
+            .phi => {
+                try self.push(.phi, null);
+
+                self.state = .phi_enter;
+            },
             .type_definition => {
                 try self.push(.type, null);
 
-                self.type_scope = true;
-                self.type_enter = true;
+                self.state = .type_enter;
             },
             .data_definition => {
                 try self.push(.data, null);
 
-                self.data_enter = true;
+                self.state = .data_enter;
+            },
+            .call => {
+                try self.push(.call, null);
+
+                self.state = .call_enter;
             },
             .function => {
+                try self.newline();
                 try self.push(.function, null);
 
-                self.function_enter = true;
+                self.state = .function_enter;
             },
             .variadic_parameter => {
                 try self.push(.variable_arguments, null);
                 try self.push(.comma, null);
             },
-            .block => self.block_enter = true,
+            .block => self.state = .block_enter,
             .identifier => |identifier| {
                 const token_type: token.TokenType = switch (identifier.scope) {
                     .global => .global_identifier,
@@ -136,8 +163,8 @@ pub const TokenWalkCallback = struct {
                     statement.span,
                 );
 
-                if (self.block_enter and token_type == .label_identifier) {
-                    self.block_enter = false;
+                if (self.state == .block_enter and token_type == .label_identifier) {
+                    self.state = .default;
 
                     try self.newline();
                 }
@@ -167,16 +194,30 @@ pub const TokenWalkCallback = struct {
                     statement.span,
                 );
             },
-            .function_parameter => {
-                if (self.function_enter) try self.functionOpen();
+            .function_parameter => switch (self.state) {
+                .function_enter => try self.functionOpen(),
+                else => {},
             },
-            .typed_data => {
-                if (self.data_enter) {
-                    self.data_enter = false;
+            .call_parameter => switch (self.state) {
+                .call_enter => try self.callOpen(),
+                else => {},
+            },
+            .phi_parameter => switch (self.state) {
+                .phi_enter => {
+                    self.state = .default;
+
+                    try self.rot2();
+                },
+                else => {},
+            },
+            .typed_data => switch (self.state) {
+                .data_enter => {
+                    self.state = .default;
 
                     try self.push(.assign, null);
                     try self.push(.open_curly_brace, null);
-                }
+                },
+                else => {},
             },
             .@"return" => {
                 try self.push(.tab, null);
@@ -209,7 +250,7 @@ pub const TokenWalkCallback = struct {
                     .xor => .bitwise_xor,
                 }, null);
 
-                self.op_enter = true;
+                self.state = .op_enter;
             },
         }
     }
@@ -220,24 +261,18 @@ pub const TokenWalkCallback = struct {
             .node,
             .env_type,
             .zero_type,
-            .call,
-            .call_parameter,
             .variadic_parameter,
             .vaarg,
             .vastart,
-            .allocate,
             .assignment,
             .blit,
             .copy,
             .cast,
             .convert,
             .load,
-            .store,
             .halt,
             .jump,
             .@"return",
-            .phi,
-            .phi_parameter,
             .comparison,
             .negate,
             => {},
@@ -245,6 +280,7 @@ pub const TokenWalkCallback = struct {
             .block,
             .line,
             => try self.newline(),
+            .phi => _ = try self.pop(),
             .opaque_type,
             .union_type,
             => try self.push(.close_curly_brace, null),
@@ -256,12 +292,22 @@ pub const TokenWalkCallback = struct {
                 try self.push(.close_curly_brace, null);
             },
             .primitive_type => {
-                if (self.type_scope) {
-                    try self.push(.comma, null);
-                } else if (self.op_enter) {
-                    self.op_enter = false;
-                    try self.rot2();
+                switch (self.state) {
+                    .op_enter => {
+                        self.state = .default;
+                        try self.rot2();
+                    },
+                    .type_scope => try self.push(.comma, null),
+                    else => {},
                 }
+            },
+            .allocate => {
+                const size = try self.pop();
+                const alignment = try self.pop();
+
+                try self.push(.allocate, null);
+                try self.append(alignment);
+                try self.append(size);
             },
             .binary_operation => {
                 const right = try self.pop();
@@ -282,20 +328,23 @@ pub const TokenWalkCallback = struct {
             .identifier => |identifier| {
                 switch (identifier.scope) {
                     .type => {
-                        if (self.type_enter) {
-                            self.type_enter = false;
+                        switch (self.state) {
+                            .type_enter => {
+                                self.state = .type_scope;
 
-                            try self.push(.assign, null);
-                        } else if (self.type_scope and identifier.scope == .type) {
-                            try self.push(.comma, null);
-                        } else if (self.op_enter) {
-                            self.op_enter = false;
-                            try self.rot2();
+                                try self.push(.assign, null);
+                            },
+                            .type_scope => try self.push(.comma, null),
+                            .op_enter => {
+                                self.state = .type_scope;
+                                try self.rot2();
+                            },
+                            else => {},
                         }
                     },
                     .local => {
-                        if (self.assignment_enter) {
-                            self.assignment_enter = false;
+                        if (self.state == .assignment_enter) {
+                            self.state = .default;
 
                             try self.push(.assign, null);
                         }
@@ -313,10 +362,11 @@ pub const TokenWalkCallback = struct {
                 try self.push(.close_curly_brace, null);
                 try self.newline();
             },
-            .function_parameter => {
+            .function_parameter, .call_parameter => {
                 try self.rot2();
                 try self.push(.comma, null);
             },
+            .phi_parameter => try self.push(.comma, null),
             .data_definition => {
                 _ = try self.pop();
 
@@ -324,20 +374,46 @@ pub const TokenWalkCallback = struct {
                 try self.newline();
             },
             .type_definition => {
-                self.type_scope = false;
+                self.state = .default;
 
                 try self.newline();
             },
             .function_signature => {
-                if (self.function_enter) {
-                    try self.functionOpen();
-                } else {
-                    _ = try self.pop();
+                switch (self.state) {
+                    .function_enter => try self.functionOpen(),
+                    else => _ = try self.pop(),
                 }
 
                 try self.push(.close_parenthesis, null);
                 try self.push(.open_curly_brace, null);
                 try self.newline();
+            },
+            .call => {
+                switch (self.state) {
+                    .call_enter => try self.callOpen(),
+                    else => _ = try self.pop(),
+                }
+
+                try self.push(.close_parenthesis, null);
+            },
+            .store => {
+                const address = try self.pop();
+                const value = try self.pop();
+
+                const @"type" = try self.pop();
+                const store: token.TokenType = switch (@"type".token_type) {
+                    .byte => .byte_store,
+                    .half_word_store, .word => .word_store,
+                    .long => .long_store,
+                    .single => .single_store,
+                    .double => .double_store,
+                    else => unreachable,
+                };
+
+                try self.push(store, null);
+                try self.append(value);
+                try self.push(.comma, null);
+                try self.append(address);
             },
             .linkage => |linkage| {
                 const flags: ?token.Token = switch (linkage.flags != null) {
@@ -483,6 +559,7 @@ pub fn Emit(comptime Reader: type, comptime Writer: type) type {
                 .newline,
                 .tab,
                 .open_parenthesis,
+                .allocate,
                 => false,
                 else => true,
             };
