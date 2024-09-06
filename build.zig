@@ -13,15 +13,6 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(debug_cli);
 
-    const lib = b.addStaticLibrary(.{
-        .name = "transpilir",
-        .root_source_file = b.path("src/lib.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    b.installArtifact(lib);
-
     const lib_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
