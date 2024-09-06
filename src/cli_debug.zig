@@ -22,10 +22,18 @@ pub fn main() !void {
     };
 
     var output = std.io.getStdOut().writer().any();
-    const tty_config: std.io.tty.Config = .escape_codes;
+    const config: lib.common.EmitWriterConfig = .{
+        .tty = .escape_codes,
+    };
 
     for (files.items) |file_arg| {
-        try run(allocator, file_arg, &output, &tty_config, &target);
+        try run(
+            allocator,
+            file_arg,
+            &output,
+            &config,
+            &target,
+        );
     }
 }
 
@@ -33,7 +41,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     path: []const u8,
     output: *std.io.AnyWriter,
-    tty_config: *const std.io.tty.Config,
+    config: *const lib.common.EmitWriterConfig,
     target: *const lib.common.Target,
 ) !void {
     _ = try output.write("=== File ===\n");
@@ -41,9 +49,9 @@ pub fn run(
     const file_path = try std.fs.cwd().realpathAlloc(allocator, path);
     defer allocator.free(file_path);
 
-    try tty_config.setColor(output, lib.common.PATH_COLOR);
+    try config.tty.setColor(output, lib.common.PATH_COLOR);
     _ = try output.print("{s}\n", .{file_path});
-    try tty_config.setColor(output, .reset);
+    try config.tty.setColor(output, .reset);
 
     const file = try std.fs.openFileAbsolute(file_path, .{});
     defer file.close();
@@ -70,7 +78,7 @@ pub fn run(
 
         try lib.common.printError(
             output,
-            tty_config,
+            &config.tty,
             err,
             path,
             newline_offsets,
@@ -86,13 +94,13 @@ pub fn run(
         const tag_name = @tagName(token.token_type);
         @memcpy(type_column[0..tag_name.len], tag_name);
 
-        try tty_config.setColor(output, lib.common.TYPE_COLOR);
+        try config.tty.setColor(output, lib.common.TYPE_COLOR);
         _ = try output.write(&type_column);
-        try tty_config.setColor(output, .reset);
+        try config.tty.setColor(output, .reset);
 
         try lib.common.printSpan(
             output,
-            tty_config,
+            &config.tty,
             path,
             newline_offsets,
             &token.span,
@@ -124,7 +132,7 @@ pub fn run(
 
         try lib.common.printError(
             output,
-            tty_config,
+            &config.tty,
             err,
             path,
             newline_offsets,
@@ -154,17 +162,17 @@ pub fn run(
                 @memset(&depth_column, ' ');
                 _ = try std.fmt.bufPrint(&depth_column, "{}", .{depth});
 
-                try tty_config.setColor(output, lib.common.LOCATION_COLOR);
+                try config.tty.setColor(output, lib.common.LOCATION_COLOR);
                 _ = try output.write(&depth_column);
 
-                try tty_config.setColor(output, lib.common.TYPE_COLOR);
+                try config.tty.setColor(output, lib.common.TYPE_COLOR);
                 _ = try output.write(&type_column);
 
-                try tty_config.setColor(output, .reset);
+                try config.tty.setColor(output, .reset);
 
                 try lib.common.printSpan(
                     output,
-                    tty_config,
+                    &config.tty,
                     path,
                     newline_offsets,
                     &out.value.span,
@@ -205,7 +213,7 @@ pub fn run(
 
             try lib.common.printError(
                 output,
-                tty_config,
+                &config.tty,
                 err,
                 path,
                 newline_offsets,
@@ -234,7 +242,7 @@ pub fn run(
 
             try lib.common.printError(
                 output,
-                tty_config,
+                &config.tty,
                 err,
                 path,
                 newline_offsets,
@@ -252,19 +260,19 @@ pub fn run(
         @memset(&index_column, ' ');
         _ = try std.fmt.bufPrint(&index_column, "{}", .{i});
 
-        try tty_config.setColor(output, lib.common.LOCATION_COLOR);
+        try config.tty.setColor(output, lib.common.LOCATION_COLOR);
         _ = try output.write(&index_column);
 
-        try tty_config.setColor(output, lib.common.RESERVED_COLOR);
+        try config.tty.setColor(output, lib.common.RESERVED_COLOR);
         _ = try output.print("{s} ", .{@tagName(symbol.identifier.scope)});
 
-        try tty_config.setColor(output, lib.common.TYPE_COLOR);
+        try config.tty.setColor(output, lib.common.TYPE_COLOR);
         _ = try output.print("{s} ", .{memoryLabel(&symbol.memory)});
 
-        try tty_config.setColor(output, lib.common.IDENTIFIER_COLOR);
+        try config.tty.setColor(output, lib.common.IDENTIFIER_COLOR);
         _ = try output.print("{s}", .{symbol.identifier.name});
 
-        try tty_config.setColor(output, lib.common.LOCATION_COLOR);
+        try config.tty.setColor(output, lib.common.LOCATION_COLOR);
         if (symbol.identifier.function) |index| {
             _ = try output.print(":{}\n", .{
                 index,
@@ -273,7 +281,7 @@ pub fn run(
             try output.writeByte('\n');
         }
 
-        try tty_config.setColor(output, .reset);
+        try config.tty.setColor(output, .reset);
     }
 
     _ = try output.write("=== Validate ===\n");
@@ -297,7 +305,7 @@ pub fn run(
 
             try lib.common.printError(
                 output,
-                tty_config,
+                &config.tty,
                 err,
                 path,
                 newline_offsets,
@@ -308,9 +316,9 @@ pub fn run(
 
     if (error_exit) return;
 
-    try tty_config.setColor(output, lib.common.OK_COLOR);
+    try config.tty.setColor(output, lib.common.OK_COLOR);
     _ = try output.write("OK\n");
-    try tty_config.setColor(output, .reset);
+    try config.tty.setColor(output, .reset);
 
     _ = try output.write("=== QBE ===\n");
 
@@ -335,7 +343,7 @@ pub fn run(
     var emit = lib.qbe.EmitWriter(@TypeOf(emit_token_reader), std.io.AnyWriter).init(
         &emit_token_reader,
         output,
-        tty_config,
+        config,
         &symbol_table,
     );
 

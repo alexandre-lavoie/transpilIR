@@ -707,7 +707,7 @@ pub fn EmitWriter(comptime Reader: type, comptime Writer: type) type {
     return struct {
         reader: *Reader,
         writer: *Writer,
-        tty_config: *const std.io.tty.Config,
+        config: *const common.EmitWriterConfig,
         symbol_table: *const symbol.SymbolTable,
 
         state: EmitWriterState = .default,
@@ -731,22 +731,22 @@ pub fn EmitWriter(comptime Reader: type, comptime Writer: type) type {
         }
 
         fn write(self: *Self, color: std.io.tty.Color, buffer: []const u8) !void {
-            try self.tty_config.setColor(self.writer, color);
+            try self.config.tty.setColor(self.writer, color);
             try self.writer_write(buffer);
-            try self.tty_config.setColor(self.writer, .reset);
+            try self.config.tty.setColor(self.writer, .reset);
         }
 
         fn print(self: *Self, color: std.io.tty.Color, comptime format: []const u8, args: anytype) !void {
-            try self.tty_config.setColor(self.writer, color);
+            try self.config.tty.setColor(self.writer, color);
             try self.writer_print(format, args);
-            try self.tty_config.setColor(self.writer, .reset);
+            try self.config.tty.setColor(self.writer, .reset);
         }
 
-        pub fn init(reader: *Reader, writer: *Writer, tty_config: *const std.io.tty.Config, symbol_table: *const symbol.SymbolTable) Self {
+        pub fn init(reader: *Reader, writer: *Writer, config: *const common.EmitWriterConfig, symbol_table: *const symbol.SymbolTable) Self {
             return .{
                 .reader = reader,
                 .writer = writer,
-                .tty_config = tty_config,
+                .config = config,
                 .symbol_table = symbol_table,
             };
         }
@@ -846,7 +846,6 @@ pub fn EmitWriter(comptime Reader: type, comptime Writer: type) type {
 test "Emit" {
     // Arrange
     const allocator = std.testing.allocator;
-    const tty_config: std.io.tty.Config = .no_color;
 
     const file = @embedFile("../test/qbe.ssa");
 
@@ -872,13 +871,17 @@ test "Emit" {
     defer allocator.free(tokens);
     var token_reader = token.TokenReader.init(tokens);
 
+    const emit_config: common.EmitWriterConfig = .{
+        .tty = .no_color,
+    };
+
     var emit_writer = EmitWriter(
         @TypeOf(token_reader),
         @TypeOf(output_writer),
     ).init(
         &token_reader,
         &output_writer,
-        &tty_config,
+        &emit_config,
         &symbol_table,
     );
 

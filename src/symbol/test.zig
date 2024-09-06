@@ -57,8 +57,8 @@ pub fn testValidate(allocator: std.mem.Allocator, file: []const u8, tree: *ast.A
 
     var callback = symbol.SymbolValidateWalkCallback.init(
         allocator,
-        target,
         symbol_table,
+        target,
     );
     defer callback.deinit();
 

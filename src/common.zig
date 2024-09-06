@@ -39,6 +39,10 @@ pub const Architecture = enum {
     a64,
 };
 
+pub const EmitWriterConfig = struct {
+    tty: std.io.tty.Config,
+};
+
 pub fn parseString(input: []const u8, output: []u8) ![]const u8 {
     var i: usize = 0;
     var o: usize = 0;
