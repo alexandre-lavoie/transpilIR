@@ -76,6 +76,12 @@ pub const EmitWalkCallback = struct {
         return self.tokens.popOrNull() orelse return error.NotFound;
     }
 
+    fn peek(self: *Self) !token.TokenType {
+        if (self.tokens.items.len == 0) return error.EmptyStack;
+
+        return self.tokens.items[self.tokens.items.len - 1].token_type;
+    }
+
     fn rot2(self: *Self) !void {
         const v0 = try self.pop();
         const v1 = try self.pop();
@@ -122,7 +128,6 @@ pub const EmitWalkCallback = struct {
             .array_type,
             .function_signature,
             .allocate,
-            .blit,
             .convert,
             .load,
             .store,
@@ -138,6 +143,7 @@ pub const EmitWalkCallback = struct {
             .vaarg => try self.push(.vaarg, null),
             .copy => try self.push(.copy, null),
             .cast => try self.push(.cast, null),
+            .blit => try self.push(.blit, null),
             .opaque_type,
             .struct_type,
             .union_type,
@@ -295,9 +301,6 @@ pub const EmitWalkCallback = struct {
             .variadic_parameter,
             .vastart,
             .assignment,
-            .blit,
-            .convert,
-            .load,
             .halt,
             .jump,
             .@"return",
@@ -436,6 +439,15 @@ pub const EmitWalkCallback = struct {
 
                 try self.push(.close_parenthesis, null);
             },
+            .blit => {
+                const size = try self.pop();
+                const right = try self.pop();
+
+                try self.push(.comma, null);
+                try self.append(right);
+                try self.push(.comma, null);
+                try self.append(size);
+            },
             .store => {
                 const address = try self.pop();
                 const value = try self.pop();
@@ -443,7 +455,7 @@ pub const EmitWalkCallback = struct {
                 const @"type" = try self.pop();
                 const store: token.TokenType = switch (@"type".token_type) {
                     .byte => .byte_store,
-                    .half_word => .word_store,
+                    .half_word => .half_word_store,
                     .word => .word_store,
                     .long => .long_store,
                     .single => .single_store,
@@ -454,6 +466,31 @@ pub const EmitWalkCallback = struct {
                 try self.push(store, null);
                 try self.append(value);
                 try self.push(.comma, null);
+                try self.append(address);
+            },
+            .load => {
+                const address = try self.pop();
+
+                const @"type" = try self.pop();
+                const token_type = switch (@"type".token_type) {
+                    .zero => try self.peek(),
+                    else => @"type".token_type,
+                };
+
+                const load: token.TokenType = switch (token_type) {
+                    .byte => .byte_load,
+                    .byte_unsigned => .byte_load_unsigned,
+                    .half_word => .half_word_load,
+                    .half_word_unsigned => .half_word_load_unsigned,
+                    .word => .word_load,
+                    .word_unsigned => .word_load_unsigned,
+                    .long, .long_unsigned => .long_load,
+                    .single => .single_load,
+                    .double => .double_load,
+                    else => unreachable,
+                };
+
+                try self.push(load, null);
                 try self.append(address);
             },
             .linkage => |linkage| {
@@ -482,7 +519,7 @@ pub const EmitWalkCallback = struct {
                 const left = try self.pop();
                 const @"type" = try self.pop();
 
-                const comparison_op: token.TokenType = switch (@"type".token_type) {
+                const op: token.TokenType = switch (@"type".token_type) {
                     .word => switch (comparison.operation_type) {
                         .equal => .word_equal,
                         .greater_than_equal => .word_greater_than_equal,
@@ -550,10 +587,89 @@ pub const EmitWalkCallback = struct {
                     else => unreachable,
                 };
 
-                try self.push(comparison_op, null);
+                try self.push(op, null);
                 try self.append(left);
                 try self.push(.comma, null);
                 try self.append(right);
+            },
+            .convert => |convert| {
+                const value = try self.pop();
+                const from_type = try self.pop();
+                const to_type = try self.pop();
+
+                const from: token.TokenType = from_type.token_type;
+
+                const to: token.TokenType = switch (convert.signed) {
+                    true => switch (to_type.token_type) {
+                        .type_identifier => .long,
+                        else => to_type.token_type,
+                    },
+                    false => switch (to_type.token_type) {
+                        .byte => .byte_unsigned,
+                        .half_word => .half_word_unsigned,
+                        .word => .word_unsigned,
+                        .long => .long_unsigned,
+                        .type_identifier => .long_unsigned,
+                        else => to_type.token_type,
+                    },
+                };
+
+                const op: token.TokenType = switch (from) {
+                    .byte => .byte_to_integer,
+                    .byte_unsigned => .byte_to_integer_unsigned,
+                    .half_word => .half_word_to_integer,
+                    .half_word_unsigned => .half_word_to_integer_unsigned,
+                    .word => switch (to) {
+                        .single, .double => .word_to_float,
+                        .long => .word_to_long,
+                        else => unreachable,
+                    },
+                    .word_unsigned => switch (to) {
+                        .single, .double => .word_to_float_unsigned,
+                        .long, .long_unsigned => .word_to_long_unsigned,
+                        else => unreachable,
+                    },
+                    .long => switch (to) {
+                        .single, .double => .long_to_float,
+                        else => unreachable,
+                    },
+                    .long_unsigned => switch (to) {
+                        .single, .double => .long_to_float_unsigned,
+                        else => unreachable,
+                    },
+                    .single => switch (to) {
+                        .byte,
+                        .half_word,
+                        .word,
+                        .long,
+                        => .single_to_integer,
+                        .byte_unsigned,
+                        .half_word_unsigned,
+                        .word_unsigned,
+                        .long_unsigned,
+                        => .single_to_integer_unsigned,
+                        .double => .single_to_double,
+                        else => unreachable,
+                    },
+                    .double => switch (to) {
+                        .byte,
+                        .half_word,
+                        .word,
+                        .long,
+                        => .double_to_integer,
+                        .byte_unsigned,
+                        .half_word_unsigned,
+                        .word_unsigned,
+                        .long_unsigned,
+                        => .double_to_integer_unsigned,
+                        .single => .double_to_single,
+                        else => unreachable,
+                    },
+                    else => unreachable,
+                };
+
+                try self.push(op, null);
+                try self.append(value);
             },
         }
     }
@@ -711,7 +827,7 @@ test "Emit" {
     const allocator = std.testing.allocator;
     const tty_config: std.io.tty.Config = .no_color;
 
-    const file = @embedFile("../test/all.ssa");
+    const file = @embedFile("../test/qbe.ssa");
 
     var tree = try symbol_test.testAST(allocator, file);
     defer tree.deinit();

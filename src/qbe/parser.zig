@@ -1263,6 +1263,18 @@ pub fn Parser(comptime Reader: type) type {
                 );
             };
 
+            const signed: bool = switch (self.previous.token_type) {
+                .byte_to_integer_unsigned,
+                .double_to_integer_unsigned,
+                .half_word_to_integer_unsigned,
+                .long_to_float_unsigned,
+                .single_to_integer_unsigned,
+                .word_to_float_unsigned,
+                .word_to_long_unsigned,
+                => false,
+                else => true,
+            };
+
             _ = self.next();
 
             const value = try self.blockValue();
@@ -1272,6 +1284,7 @@ pub fn Parser(comptime Reader: type) type {
             return self.new(
                 .{ .start = start, .end = end },
                 .{ .convert = .{
+                    .signed = signed,
                     .data_type = data_type,
                     .to_type = to_type,
                     .from_type = from_type,

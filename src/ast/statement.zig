@@ -258,6 +258,7 @@ pub const StatementData = union(StatementType) {
     },
 
     convert: struct {
+        signed: bool,
         data_type: StatementIndex,
         to_type: StatementIndex,
         from_type: StatementIndex,
