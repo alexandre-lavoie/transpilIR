@@ -61,6 +61,7 @@ pub const SymbolValidateWalkCallback = struct {
 
         return switch (t) {
             .void => true,
+            .bool,
             .u8,
             .i8,
             => switch (f) {
@@ -74,7 +75,12 @@ pub const SymbolValidateWalkCallback = struct {
             .u16,
             .i16,
             => switch (f) {
-                .f32, .f64, .i8, .u8 => false,
+                .f32,
+                .f64,
+                .i8,
+                .u8,
+                .bool,
+                => false,
                 else => true,
             },
             .u64,
@@ -156,17 +162,17 @@ pub const SymbolValidateWalkCallback = struct {
                     .@"opaque",
                     .@"union",
                     .env,
-                    => try self.types.append(.i64),
+                    => try self.types.append(.ptr),
                     .primitive => |primitive| try self.types.append(primitive),
                     .function => |function| {
                         if (self.return_type == null) {
                             self.return_type = switch (function.@"return") {
-                                .type => .i64,
+                                .type => .ptr,
                                 .primitive => |primitive| primitive,
                             };
                         }
 
-                        try self.types.append(.i64);
+                        try self.types.append(.ptr);
                     },
                     else => {},
                 }
@@ -181,7 +187,7 @@ pub const SymbolValidateWalkCallback = struct {
                 });
             },
             .primitive_type => |primitive| try self.types.append(primitive),
-            .env_type => try self.types.append(.i64),
+            .env_type => try self.types.append(.ptr),
             .phi => self.phi_type = self.types.pop(),
         }
     }
@@ -230,11 +236,6 @@ pub const SymbolValidateWalkCallback = struct {
                 const comparision_type = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
-                switch (data_type) {
-                    .f32, .f64 => return error.ComparisonType,
-                    else => {},
-                }
-
                 try self.types.append(data_type);
 
                 if (!self.validateType(comparision_type, try Self.matchType(left, right))) return error.DataType;
@@ -258,7 +259,7 @@ pub const SymbolValidateWalkCallback = struct {
             .vastart => {
                 const value = self.types.popOrNull() orelse return error.DataType;
 
-                if (!self.validateType(.i64, value)) return error.DataType;
+                if (!self.validateType(.ptr, value)) return error.DataType;
             },
             .vaarg => {
                 const value = self.types.pop();
@@ -266,7 +267,7 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(data_type);
 
-                if (!self.validateType(.i64, value)) return error.DataType;
+                if (!self.validateType(.ptr, value)) return error.DataType;
             },
             .phi_parameter => {
                 const @"type" = self.types.popOrNull() orelse return error.DataType;
@@ -287,8 +288,8 @@ pub const SymbolValidateWalkCallback = struct {
                 const from = self.types.pop();
 
                 if (size != .void) return error.DataType;
-                if (!self.validateType(.i64, to)) return error.DataType;
-                if (!self.validateType(.i64, from)) return error.DataType;
+                if (!self.validateType(.ptr, to)) return error.DataType;
+                if (!self.validateType(.ptr, from)) return error.DataType;
             },
             .convert => {
                 const value = self.types.pop();
@@ -330,7 +331,9 @@ pub const SymbolValidateWalkCallback = struct {
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 const source_type = switch (data_type) {
-                    .i32, .u32 => switch (memory_type) {
+                    .i32,
+                    .u32,
+                    => switch (memory_type) {
                         .i8,
                         .u8,
                         .i16,
@@ -338,7 +341,9 @@ pub const SymbolValidateWalkCallback = struct {
                         => .i32,
                         else => memory_type,
                     },
-                    .i64, .u64 => switch (memory_type) {
+                    .i64,
+                    .u64,
+                    => switch (memory_type) {
                         .i8,
                         .u8,
                         .i16,
@@ -353,7 +358,7 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(data_type);
 
-                if (!self.validateType(.i64, address)) return error.DataType;
+                if (!self.validateType(.ptr, address)) return error.DataType;
                 if (!self.validateType(data_type, source_type)) return error.DataType;
             },
             .store => {
@@ -361,7 +366,7 @@ pub const SymbolValidateWalkCallback = struct {
                 const value = self.types.pop();
                 const memory_type = self.types.popOrNull() orelse return error.DataType;
 
-                if (!self.validateType(.i64, address)) return error.DataType;
+                if (!self.validateType(.ptr, address)) return error.DataType;
                 if (!self.validateType(memory_type, value)) return error.DataType;
             },
             .call_parameter => {
@@ -376,7 +381,7 @@ pub const SymbolValidateWalkCallback = struct {
 
                 try self.types.append(return_type);
 
-                if (!self.validateType(.i64, address)) return error.DataType;
+                if (!self.validateType(.ptr, address)) return error.DataType;
             },
             .assignment => {
                 const value = self.types.pop();
@@ -529,25 +534,6 @@ test "error.MismatchType binary_operator" {
 
     // Assert
     try std.testing.expectError(error.MismatchType, res);
-}
-
-test "error.ComparisonType" {
-    // Arrange
-    const allocator = std.testing.allocator;
-
-    const file = "function $f() {@s %r =s ceqw 0, 0 ret}";
-
-    var tree = try test_lib.testAST(allocator, file);
-    defer tree.deinit();
-
-    var symbol_table = table.SymbolTable.init(allocator);
-    defer symbol_table.deinit();
-
-    // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
-
-    // Assert
-    try std.testing.expectError(error.ComparisonType, res);
 }
 
 test "error.DataType integer comparison" {

@@ -226,6 +226,7 @@ pub const EmitWalkCallback = struct {
             .primitive_type => |primitive| {
                 try self.push(switch (primitive) {
                     .void => .zero,
+                    .bool => .byte_unsigned,
                     .u8 => .byte_unsigned,
                     .i8 => .byte,
                     .f64 => .double,

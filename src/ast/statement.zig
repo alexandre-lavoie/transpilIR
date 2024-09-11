@@ -337,6 +337,7 @@ pub const Scope = enum {
 
 pub const PrimitiveType = enum(u4) {
     void,
+    bool,
     ptr,
     u8,
     i8,

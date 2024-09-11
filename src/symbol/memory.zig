@@ -166,11 +166,9 @@ pub const SymbolMemoryWalkCallback = struct {
         const allocator = self.allocator;
 
         switch (statement.data) {
-            .allocate,
             .binary_operation,
             .blit,
             .branch,
-            .comparison,
             .copy,
             .cast,
             .convert,
@@ -200,6 +198,65 @@ pub const SymbolMemoryWalkCallback = struct {
             .line,
             => {
                 self.entries.clearAndFree();
+            },
+            .allocate => {
+                switch (self.entries.items[1]) {
+                    .primitive => |p| switch (p) {
+                        .bool,
+                        .i8,
+                        .u8,
+                        .i16,
+                        .u16,
+                        .i32,
+                        .u32,
+                        .i64,
+                        .u64,
+                        => {
+                            // TODO: Check that previous is pointer size.
+                            self.entries.items[1] = .{
+                                .primitive = .ptr,
+                            };
+                        },
+                        .ptr => {},
+                        .void,
+                        .f32,
+                        .f64,
+                        => {
+                            return error.InvalidAllocate;
+                        },
+                    },
+                    .type => {},
+                    else => unreachable,
+                }
+            },
+            .comparison => {
+                switch (self.entries.items[1]) {
+                    .primitive => |p| switch (p) {
+                        .i8,
+                        .u8,
+                        .i16,
+                        .u16,
+                        .i32,
+                        .u32,
+                        .i64,
+                        .u64,
+                        => {
+                            self.entries.items[1] = .{
+                                .primitive = .bool,
+                            };
+                        },
+                        .bool => {},
+                        .void,
+                        .ptr,
+                        .f32,
+                        .f64,
+                        => {
+                            return error.ComparisonType;
+                        },
+                    },
+                    .type => return error.ComparisonType,
+                    else => unreachable,
+                }
             },
             .array_type => {
                 const count: usize = switch (self.entries.pop()) {
@@ -1030,6 +1087,116 @@ test "function" {
     try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
+test "allocate" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $test() {@s %r =l alloc4 16 ret}";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "test",
+                .scope = .global,
+            },
+            .memory = .{
+                .function = .{
+                    .linkage = .{},
+                    .@"return" = .{
+                        .primitive = .void,
+                    },
+                    .vararg = false,
+                    .parameters = &[_]types.SymbolMemoryParameterType{},
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 0,
+            },
+            .memory = .label,
+        },
+        .{
+            .identifier = .{
+                .name = "r",
+                .scope = .local,
+                .function = 0,
+            },
+            .memory = .{
+                .primitive = .ptr,
+            },
+        },
+    };
+
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
+test "comparison" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $test() {@s %r =w ceqw 0, 0 ret}";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "test",
+                .scope = .global,
+            },
+            .memory = .{
+                .function = .{
+                    .linkage = .{},
+                    .@"return" = .{
+                        .primitive = .void,
+                    },
+                    .vararg = false,
+                    .parameters = &[_]types.SymbolMemoryParameterType{},
+                },
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "s",
+                .scope = .label,
+                .function = 0,
+            },
+            .memory = .label,
+        },
+        .{
+            .identifier = .{
+                .name = "r",
+                .scope = .local,
+                .function = 0,
+            },
+            .memory = .{
+                .primitive = .bool,
+            },
+        },
+    };
+
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try test_lib.testMemory(allocator, file, &tree, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
+}
+
 test "call" {
     // Arrange
     const allocator = std.testing.allocator;
@@ -1503,4 +1670,61 @@ test "error.InvalidSize global" {
 
     // Assert
     try std.testing.expectError(error.InvalidSize, res);
+}
+
+test "error.InvalidAllocate" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $test() {@s %a =s alloc4 16 ret}";
+
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    const res = test_lib.testMemory(allocator, file, &tree, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.InvalidAllocate, res);
+}
+
+test "error.ComparisonType float" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $test() {@s %a =s ceqw 0, 0 ret}";
+
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    const res = test_lib.testMemory(allocator, file, &tree, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.ComparisonType, res);
+}
+
+test "error.ComparisonType type" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "type :t = {w} function $test() {@s %a =:t ceqw 0, 0 ret}";
+
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    const res = test_lib.testMemory(allocator, file, &tree, &symbol_table);
+
+    // Assert
+    try std.testing.expectError(error.ComparisonType, res);
 }
