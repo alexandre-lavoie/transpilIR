@@ -2,7 +2,7 @@ const std = @import("std");
 
 const token = @import("token.zig");
 
-pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
+pub fn QBELexer(comptime Reader: type, comptime Collection: type) type {
     return struct {
         reader: *Reader,
         collection: *Collection,
@@ -18,7 +18,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             return self.previous;
         }
 
-        fn collection_append(self: *Self, next_token: token.Token) !void {
+        fn collection_append(self: *Self, next_token: token.QBEToken) !void {
             try self.collection.append(next_token);
         }
 
@@ -30,15 +30,15 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
         }
 
         pub fn lex(self: *Self) !void {
-            try self.collection_append(token.Token.init(.module_start));
+            try self.collection_append(token.QBEToken.init(.module_start));
 
             _ = self.reader_readByte();
 
             while (true) {
                 const start = self.offset - 1;
 
-                var next_token: token.Token = try switch (self.previous) {
-                    '\x00' => token.Token.init(.module_end),
+                var next_token: token.QBEToken = try switch (self.previous) {
+                    '\x00' => token.QBEToken.init(.module_end),
                     '#' => {
                         try self.comment();
                         continue;
@@ -89,7 +89,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             }
         }
 
-        fn identifier(self: *Self, previous: u8, token_type: token.TokenType) !token.Token {
+        fn identifier(self: *Self, previous: u8, token_type: token.QBETokenType) !token.QBEToken {
             if (previous != self.previous) return error.InvalidIdentifier;
 
             while (true) {
@@ -99,26 +99,26 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                 }
             }
 
-            return token.Token.init(token_type);
+            return token.QBEToken.init(token_type);
         }
 
-        fn globalIdentifier(self: *Self) !token.Token {
+        fn globalIdentifier(self: *Self) !token.QBEToken {
             return self.identifier('$', .global_identifier);
         }
 
-        fn temporaryIdentifier(self: *Self) !token.Token {
+        fn temporaryIdentifier(self: *Self) !token.QBEToken {
             return self.identifier('%', .local_identifier);
         }
 
-        fn labelIdentifier(self: *Self) !token.Token {
+        fn labelIdentifier(self: *Self) !token.QBEToken {
             return self.identifier('@', .label_identifier);
         }
 
-        fn typeIdentifier(self: *Self) !token.Token {
+        fn typeIdentifier(self: *Self) !token.QBEToken {
             return self.identifier(':', .type_identifier);
         }
 
-        fn stringLiteral(self: *Self) !token.Token {
+        fn stringLiteral(self: *Self) !token.QBEToken {
             if ('"' != self.previous) return error.InvalidString;
 
             while (true) {
@@ -126,7 +126,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                     '"' => {
                         _ = self.reader_readByte();
 
-                        return token.Token.init(.string_literal);
+                        return token.QBEToken.init(.string_literal);
                     },
                     '\x00' => return error.StringNotClosed,
                     '\\' => {
@@ -138,7 +138,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             }
         }
 
-        fn integerLiteral(self: *Self) !token.Token {
+        fn integerLiteral(self: *Self) !token.QBEToken {
             switch (self.previous) {
                 '0'...'9' => {},
                 '-' => switch (self.reader_readByte()) {
@@ -155,26 +155,26 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                 }
             }
 
-            return token.Token.init(.integer_literal);
+            return token.QBEToken.init(.integer_literal);
         }
 
-        fn punctuation(self: *Self, token_type: token.TokenType) !token.Token {
+        fn punctuation(self: *Self, token_type: token.QBETokenType) !token.QBEToken {
             _ = self.reader_readByte();
 
-            return token.Token.init(token_type);
+            return token.QBEToken.init(token_type);
         }
 
-        fn variableArguments(self: *Self) !token.Token {
+        fn variableArguments(self: *Self) !token.QBEToken {
             if (self.previous != '.') return error.InvalidArgumentSpread;
             if (self.reader_readByte() != '.') return error.InvalidArgumentSpread;
             if (self.reader_readByte() != '.') return error.InvalidArgumentSpread;
 
             _ = self.reader_readByte();
 
-            return token.Token.init(.variable_arguments);
+            return token.QBEToken.init(.variable_arguments);
         }
 
-        fn reservedWordOrFloatingLiteral(self: *Self) !token.Token {
+        fn reservedWordOrFloatingLiteral(self: *Self) !token.QBEToken {
             var buffer: [token.longest_reserved_word + 1]u8 = undefined;
 
             buffer[0] = self.previous;
@@ -194,14 +194,14 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
             }
 
             if (token.reserved_words.get(buffer[0..i])) |token_type| {
-                return token.Token.init(token_type);
+                return token.QBEToken.init(token_type);
             } else {
                 return error.ReservedWordError;
             }
         }
 
-        fn floating_literal(self: *Self, ftype: u8) !token.Token {
-            const token_type: token.TokenType = switch (ftype) {
+        fn floating_literal(self: *Self, ftype: u8) !token.QBEToken {
+            const token_type: token.QBETokenType = switch (ftype) {
                 'd' => .double_literal,
                 's' => .single_literal,
                 else => return error.InvalidFloatType,
@@ -238,7 +238,7 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
                 }
             }
 
-            return token.Token.init(token_type);
+            return token.QBEToken.init(token_type);
         }
     };
 }
@@ -247,25 +247,25 @@ pub fn Lexer(comptime Reader: type, comptime Collection: type) type {
 // Test Utils
 //
 
-fn testLex(allocator: std.mem.Allocator, buffer: anytype) ![]token.Token {
+fn testLex(allocator: std.mem.Allocator, buffer: anytype) ![]token.QBEToken {
     var stream = std.io.fixedBufferStream(buffer);
 
     var reader = stream.reader();
 
-    var tokens = std.ArrayList(token.Token).init(allocator);
+    var tokens = std.ArrayList(token.QBEToken).init(allocator);
     defer tokens.deinit();
 
-    var lexer = Lexer(@TypeOf(reader), @TypeOf(tokens)).init(&reader, &tokens);
+    var lexer = QBELexer(@TypeOf(reader), @TypeOf(tokens)).init(&reader, &tokens);
     try lexer.lex();
 
     return try tokens.toOwnedSlice();
 }
 
-fn assertLex(allocator: std.mem.Allocator, buffer: anytype, expected: []const token.Token) !void {
+fn assertLex(allocator: std.mem.Allocator, buffer: anytype, expected: []const token.QBEToken) !void {
     const tokens = try testLex(allocator, buffer);
     defer allocator.free(tokens);
 
-    try std.testing.expectEqualSlices(token.Token, expected, tokens);
+    try std.testing.expectEqualSlices(token.QBEToken, expected, tokens);
 }
 
 //
@@ -277,7 +277,7 @@ test "comment" {
     const allocator = std.testing.allocator;
 
     const file = "\n# Comment\n # Comment!\r\n\t#Comment";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -297,7 +297,7 @@ test "globalIdentifier" {
     const allocator = std.testing.allocator;
 
     const file = "$global# Comment";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -321,7 +321,7 @@ test "localIdentifier" {
     const allocator = std.testing.allocator;
 
     const file = "%local# Comment";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -345,7 +345,7 @@ test "label_identifier" {
     const allocator = std.testing.allocator;
 
     const file = "@label# Comment";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -369,7 +369,7 @@ test "reserved" {
     const allocator = std.testing.allocator;
 
     const file = "alloc4 data function s";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -409,7 +409,7 @@ test "stringLiteral" {
     const allocator = std.testing.allocator;
 
     const file = "\"string\" \"escape\\\"\" \"escape\\\"again\"";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -441,7 +441,7 @@ test "singleLiteral" {
     const allocator = std.testing.allocator;
 
     const file = "s_123 s_-1.2";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -469,7 +469,7 @@ test "doubleLiteral" {
     const allocator = std.testing.allocator;
 
     const file = "d_-2.4";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -493,7 +493,7 @@ test "integerLiteral" {
     const allocator = std.testing.allocator;
 
     const file = "-1 0 123";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -525,7 +525,7 @@ test "assign" {
     const allocator = std.testing.allocator;
 
     const file = "=w =s =";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },
@@ -565,7 +565,7 @@ test "variableArguments" {
     const allocator = std.testing.allocator;
 
     const file = "...";
-    const expected = [_]token.Token{
+    const expected = [_]token.QBEToken{
         .{
             .token_type = .module_start,
             .span = .{ .start = 0, .end = 0 },

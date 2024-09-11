@@ -2,39 +2,18 @@ const std = @import("std");
 
 const common = @import("../common.zig");
 
-pub const Token = struct {
-    token_type: TokenType,
+pub const QBEToken = struct {
+    token_type: QBETokenType,
     span: common.SourceSpan = common.SourceSpan{},
 
     const Self = @This();
 
-    pub fn init(token_type: TokenType) Self {
+    pub fn init(token_type: QBETokenType) Self {
         return Self{ .token_type = token_type };
     }
 };
 
-pub const TokenReader = struct {
-    collection: Collection,
-    offset: usize = 0,
-
-    const Self = @This();
-    const Collection = []const Token;
-
-    pub fn init(collection: Collection) Self {
-        return Self{ .collection = collection };
-    }
-
-    pub fn readToken(self: *Self) *const Token {
-        if (self.offset >= self.collection.len) return &self.collection[self.collection.len - 1];
-
-        const index = self.offset;
-        self.offset += 1;
-
-        return &self.collection[index];
-    }
-};
-
-pub const TokenType = enum(u8) {
+pub const QBETokenType = enum(u8) {
     // Module
     module_start,
     module_end,
@@ -186,7 +165,7 @@ pub const TokenType = enum(u8) {
     tab,
 };
 
-pub fn tokenString(token_type: TokenType) []const u8 {
+pub fn tokenString(token_type: QBETokenType) []const u8 {
     return switch (token_type) {
         .comma => ",",
         .open_parenthesis => "(",
@@ -329,7 +308,7 @@ pub fn tokenString(token_type: TokenType) []const u8 {
 }
 
 pub const longest_reserved_word = 10;
-pub const reserved_words = std.StaticStringMap(TokenType).initComptime(.{
+pub const reserved_words = std.StaticStringMap(QBETokenType).initComptime(.{
     .{ "loadw", .word_load },
     .{ "sh", .half_word },
     .{ "sw", .word },
@@ -451,7 +430,7 @@ pub const reserved_words = std.StaticStringMap(TokenType).initComptime(.{
     .{ tokenString(.zero), .zero },
 });
 
-pub fn tokenColor(token_type: TokenType) std.io.tty.Color {
+pub fn tokenColor(token_type: QBETokenType) std.io.tty.Color {
     return switch (token_type) {
         .module_start,
         .module_end,
@@ -459,16 +438,16 @@ pub fn tokenColor(token_type: TokenType) std.io.tty.Color {
         .tab,
         => .reset,
 
-        .global_identifier => common.GLOBAL_COLOR,
-        .label_identifier => common.LABEL_COLOR,
-        .local_identifier => common.LOCAL_COLOR,
-        .type_identifier => common.TYPE_COLOR,
+        .global_identifier => common.Color.global,
+        .label_identifier => common.Color.label,
+        .local_identifier => common.Color.local,
+        .type_identifier => common.Color.type,
 
         .string_literal,
         .single_literal,
         .double_literal,
         .integer_literal,
-        => common.LITERAL_COLOR,
+        => common.Color.literal,
 
         .comma,
         .open_parenthesis,
@@ -478,7 +457,7 @@ pub fn tokenColor(token_type: TokenType) std.io.tty.Color {
         .variable_arguments,
         .plus,
         .assign,
-        => common.PUNCTUATION_COLOR,
+        => common.Color.punctuation,
 
         .byte_unsigned,
         .byte,
@@ -492,7 +471,7 @@ pub fn tokenColor(token_type: TokenType) std.io.tty.Color {
         .word_unsigned,
         .word,
         .zero,
-        => common.TYPE_COLOR,
+        => common.Color.type,
 
         .common,
         .data,
@@ -598,6 +577,6 @@ pub fn tokenColor(token_type: TokenType) std.io.tty.Color {
         .word_to_long,
         .word_to_float_unsigned,
         .word_to_float,
-        => common.RESERVED_COLOR,
+        => common.Color.reserved,
     };
 }

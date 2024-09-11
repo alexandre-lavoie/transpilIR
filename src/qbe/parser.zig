@@ -12,17 +12,17 @@ const ParseRecord = struct {
     statement: *ast.Statement,
 };
 
-pub fn Parser(comptime Reader: type) type {
+pub fn QBEParser(comptime Reader: type) type {
     return struct {
         reader: *Reader,
         ast: *ast.AST,
-        previous: *const token.Token = undefined,
-        previous_previous: *const token.Token = undefined,
+        previous: *const token.QBEToken = undefined,
+        previous_previous: *const token.QBEToken = undefined,
 
         const Self = @This();
 
-        fn reader_readToken(self: *Self) *const token.Token {
-            return self.reader.readToken();
+        fn reader_next(self: *Self) *const token.QBEToken {
+            return self.reader.next();
         }
 
         pub fn init(reader: *Reader, tree: *ast.AST) Self {
@@ -44,9 +44,9 @@ pub fn Parser(comptime Reader: type) type {
             ));
         }
 
-        fn next(self: *Self) *const token.Token {
+        fn next(self: *Self) *const token.QBEToken {
             self.previous_previous = self.previous;
-            self.previous = self.reader_readToken();
+            self.previous = self.reader_next();
 
             return self.previous;
         }
@@ -95,7 +95,7 @@ pub fn Parser(comptime Reader: type) type {
             var type_tail: ?ast.StatementIndex = null;
 
             while (true) {
-                var token_type: token.TokenType = .type;
+                var token_type: token.QBETokenType = .type;
 
                 const def_start = self.previous.span.start;
                 const def_value = try switch (self.previous.token_type) {
@@ -140,7 +140,7 @@ pub fn Parser(comptime Reader: type) type {
             );
         }
 
-        fn scopeIdentifier(self: *Self, token_type: token.TokenType, scope: ast.Scope, thread: bool, skip_read: bool) !ast.StatementIndex {
+        fn scopeIdentifier(self: *Self, token_type: token.QBETokenType, scope: ast.Scope, thread: bool, skip_read: bool) !ast.StatementIndex {
             if (self.previous.token_type != token_type) return error.InvalidIdentifier;
 
             const span = self.previous.span;
@@ -513,7 +513,7 @@ pub fn Parser(comptime Reader: type) type {
             );
         }
 
-        fn linkageDefinition(self: *Self, out_token_type: *token.TokenType) !ast.StatementIndex {
+        fn linkageDefinition(self: *Self, out_token_type: *token.QBETokenType) !ast.StatementIndex {
             const start = self.previous.span.start;
 
             const link = try self.linkage();

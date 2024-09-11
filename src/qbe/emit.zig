@@ -7,11 +7,11 @@ const token = @import("token.zig");
 
 const symbol_test = @import("../symbol/test.zig");
 
-pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST, target: *const common.Target) ![]token.Token {
+pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST, target: *const common.Target) ![]token.QBEToken {
     var walk = ast.ASTWalk.init(allocator, tree);
     defer walk.deinit();
 
-    var emit_callback = EmitWalkCallback.init(
+    var emit_callback = QBEEmitWalkCallback.init(
         allocator,
         target,
     );
@@ -42,7 +42,7 @@ const EmitWalkState = enum {
     phi_enter,
 };
 
-pub const EmitWalkCallback = struct {
+pub const QBEEmitWalkCallback = struct {
     allocator: std.mem.Allocator,
     target: *const common.Target,
     tokens: TokenList,
@@ -50,7 +50,7 @@ pub const EmitWalkCallback = struct {
     state: EmitWalkState = .default,
 
     const Self = @This();
-    const TokenList = std.ArrayList(token.Token);
+    const TokenList = std.ArrayList(token.QBEToken);
 
     pub fn init(allocator: std.mem.Allocator, target: *const common.Target) Self {
         return .{
@@ -64,22 +64,22 @@ pub const EmitWalkCallback = struct {
         self.tokens.deinit();
     }
 
-    fn push(self: *Self, token_type: token.TokenType, span: ?common.SourceSpan) !void {
+    fn push(self: *Self, token_type: token.QBETokenType, span: ?common.SourceSpan) !void {
         try self.tokens.append(.{
             .token_type = token_type,
             .span = span orelse .{},
         });
     }
 
-    fn append(self: *Self, tok: token.Token) !void {
+    fn append(self: *Self, tok: token.QBEToken) !void {
         try self.tokens.append(tok);
     }
 
-    fn pop(self: *Self) !token.Token {
+    fn pop(self: *Self) !token.QBEToken {
         return self.tokens.popOrNull() orelse return error.NotFound;
     }
 
-    fn peek(self: *Self) !token.TokenType {
+    fn peek(self: *Self) !token.QBETokenType {
         if (self.tokens.items.len == 0) return error.EmptyStack;
 
         return self.tokens.items[self.tokens.items.len - 1].token_type;
@@ -123,7 +123,7 @@ pub const EmitWalkCallback = struct {
         try self.push(.open_parenthesis, null);
     }
 
-    fn pointerType(self: *const Self, signed: bool) token.TokenType {
+    fn pointerType(self: *const Self, signed: bool) token.QBETokenType {
         return switch (signed) {
             true => switch (self.target.arch) {
                 .a8 => .byte,
@@ -205,7 +205,7 @@ pub const EmitWalkCallback = struct {
             },
             .block => self.state = .block_enter,
             .identifier => |identifier| {
-                const token_type: token.TokenType = switch (identifier.scope) {
+                const token_type: token.QBETokenType = switch (identifier.scope) {
                     .global => .global_identifier,
                     .local => .local_identifier,
                     .type => .type_identifier,
@@ -475,7 +475,7 @@ pub const EmitWalkCallback = struct {
                 const value = try self.pop();
 
                 const @"type" = try self.pop();
-                const store: token.TokenType = switch (@"type".token_type) {
+                const store: token.QBETokenType = switch (@"type".token_type) {
                     .byte => .byte_store,
                     .half_word => .half_word_store,
                     .word => .word_store,
@@ -499,7 +499,7 @@ pub const EmitWalkCallback = struct {
                     else => @"type".token_type,
                 };
 
-                const load: token.TokenType = switch (token_type) {
+                const load: token.QBETokenType = switch (token_type) {
                     .byte => .byte_load,
                     .byte_unsigned => .byte_load_unsigned,
                     .half_word => .half_word_load,
@@ -516,11 +516,11 @@ pub const EmitWalkCallback = struct {
                 try self.append(address);
             },
             .linkage => |linkage| {
-                const flags: ?token.Token = switch (linkage.flags != null) {
+                const flags: ?token.QBEToken = switch (linkage.flags != null) {
                     true => try self.pop(),
                     false => null,
                 };
-                const section: ?token.Token = switch (linkage.section != null) {
+                const section: ?token.QBEToken = switch (linkage.section != null) {
                     true => try self.pop(),
                     false => null,
                 };
@@ -541,7 +541,7 @@ pub const EmitWalkCallback = struct {
                 const left = try self.pop();
                 const @"type" = try self.pop();
 
-                const op: token.TokenType = switch (@"type".token_type) {
+                const op: token.QBETokenType = switch (@"type".token_type) {
                     .word => switch (comparison.operation_type) {
                         .equal => .word_equal,
                         .greater_than_equal => .word_greater_than_equal,
@@ -619,9 +619,9 @@ pub const EmitWalkCallback = struct {
                 const from_type = try self.pop();
                 const to_type = try self.pop();
 
-                const from: token.TokenType = from_type.token_type;
+                const from: token.QBETokenType = from_type.token_type;
 
-                const to: token.TokenType = switch (convert.signed) {
+                const to: token.QBETokenType = switch (convert.signed) {
                     true => switch (to_type.token_type) {
                         .type_identifier => self.pointerType(convert.signed),
                         else => to_type.token_type,
@@ -636,7 +636,7 @@ pub const EmitWalkCallback = struct {
                     },
                 };
 
-                const op: token.TokenType = switch (from) {
+                const op: token.QBETokenType = switch (from) {
                     .byte => .byte_to_integer,
                     .byte_unsigned => .byte_to_integer_unsigned,
                     .half_word => .half_word_to_integer,
@@ -704,7 +704,7 @@ const EmitWriterState = enum {
     done,
 };
 
-pub fn EmitWriter(comptime Reader: type, comptime Writer: type) type {
+pub fn QBEEmitWriter(comptime Reader: type, comptime Writer: type) type {
     return struct {
         reader: *Reader,
         writer: *Writer,
@@ -715,8 +715,8 @@ pub fn EmitWriter(comptime Reader: type, comptime Writer: type) type {
 
         const Self = @This();
 
-        fn reader_readToken(self: *Self) *const token.Token {
-            return self.reader.readToken();
+        fn reader_next(self: *Self) *const token.QBEToken {
+            return self.reader.next();
         }
 
         fn writer_writeByte(self: *Self, byte: u8) !void {
@@ -755,7 +755,7 @@ pub fn EmitWriter(comptime Reader: type, comptime Writer: type) type {
         pub fn next(self: *Self) !bool {
             if (self.state == .done) return false;
 
-            const tok = self.reader_readToken();
+            const tok = self.reader_next();
             switch (tok.token_type) {
                 .module_start => return true,
                 .module_end => {
@@ -870,13 +870,13 @@ test "Emit" {
 
     const tokens = try emit(allocator, &tree, &target);
     defer allocator.free(tokens);
-    var token_reader = token.TokenReader.init(tokens);
+    var token_reader = common.CollectionIterator(token.QBEToken).init(tokens);
 
     const emit_config: common.EmitWriterConfig = .{
         .tty = .no_color,
     };
 
-    var emit_writer = EmitWriter(
+    var emit_writer = QBEEmitWriter(
         @TypeOf(token_reader),
         @TypeOf(output_writer),
     ).init(

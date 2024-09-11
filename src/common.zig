@@ -1,17 +1,20 @@
 const std = @import("std");
 
-pub const PATH_COLOR: std.io.tty.Color = .bright_blue;
-pub const ERROR_COLOR: std.io.tty.Color = .red;
-pub const OK_COLOR: std.io.tty.Color = .green;
-pub const IDENTIFIER_COLOR: std.io.tty.Color = .white;
-pub const LOCATION_COLOR: std.io.tty.Color = .yellow;
-pub const RESERVED_COLOR: std.io.tty.Color = .magenta;
-pub const TYPE_COLOR: std.io.tty.Color = .green;
-pub const GLOBAL_COLOR: std.io.tty.Color = .blue;
-pub const LOCAL_COLOR: std.io.tty.Color = .white;
-pub const LABEL_COLOR: std.io.tty.Color = .bright_red;
-pub const PUNCTUATION_COLOR: std.io.tty.Color = .white;
-pub const LITERAL_COLOR: std.io.tty.Color = .yellow;
+// TTY colors
+pub const Color = struct {
+    pub const path: std.io.tty.Color = .bright_blue;
+    pub const @"error": std.io.tty.Color = .red;
+    pub const ok: std.io.tty.Color = .green;
+    pub const identifier: std.io.tty.Color = .white;
+    pub const location: std.io.tty.Color = .yellow;
+    pub const reserved: std.io.tty.Color = .magenta;
+    pub const @"type": std.io.tty.Color = .green;
+    pub const global: std.io.tty.Color = .blue;
+    pub const local: std.io.tty.Color = .white;
+    pub const label: std.io.tty.Color = .bright_red;
+    pub const punctuation: std.io.tty.Color = .white;
+    pub const literal: std.io.tty.Color = .yellow;
+};
 
 // Span inside source file.
 // start is inclusive and end is exclusive -> [start, end)
@@ -26,6 +29,7 @@ pub const SourceSpan = struct {
     }
 };
 
+// Information about target to compile to.
 pub const Target = struct {
     arch: Architecture,
 };
@@ -39,9 +43,34 @@ pub const Architecture = enum {
     a64,
 };
 
+// Config for EmitWriters
 pub const EmitWriterConfig = struct {
     tty: std.io.tty.Config,
 };
+
+// Iterator over a collection of items
+pub fn CollectionIterator(comptime Item: type) type {
+    return struct {
+        collection: Collection,
+        offset: usize = 0,
+
+        const Self = @This();
+        const Collection = []const Item;
+
+        pub fn init(collection: Collection) Self {
+            return Self{ .collection = collection };
+        }
+
+        pub fn next(self: *Self) *const Item {
+            if (self.offset >= self.collection.len) return &self.collection[self.collection.len - 1];
+
+            const index = self.offset;
+            self.offset += 1;
+
+            return &self.collection[index];
+        }
+    };
+}
 
 pub fn parseString(input: []const u8, output: []u8) ![]const u8 {
     var i: usize = 0;
@@ -128,7 +157,7 @@ pub fn indexToFile(newline_offsets: []const usize, index: usize) struct { line: 
 }
 
 pub fn printFileLocation(writer: anytype, tty_config: *const std.io.tty.Config, file: []const u8, line: usize, column: usize) !void {
-    try tty_config.setColor(writer, PATH_COLOR);
+    try tty_config.setColor(writer, Color.path);
     _ = try writer.print("{s}:{}:{}", .{
         file,
         line,
@@ -150,10 +179,10 @@ pub fn printSpan(writer: anytype, tty_config: *const std.io.tty.Config, file: []
 }
 
 pub fn printError(writer: anytype, tty_config: *const std.io.tty.Config, err: anytype, file: []const u8, offsets: []const usize, span: *const SourceSpan) !void {
-    try tty_config.setColor(writer, ERROR_COLOR);
+    try tty_config.setColor(writer, Color.@"error");
     _ = try writer.write("error: ");
 
-    try tty_config.setColor(writer, IDENTIFIER_COLOR);
+    try tty_config.setColor(writer, Color.identifier);
     _ = try writer.print("{any} ", .{err});
 
     try tty_config.setColor(writer, .reset);

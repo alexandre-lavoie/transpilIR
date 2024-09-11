@@ -1,13 +1,12 @@
 const emit = @import("emit.zig");
-pub const EmitWalkCallback = emit.EmitWalkCallback;
-pub const EmitWriter = emit.EmitWriter;
+pub const QBEEmitWalkCallback = emit.QBEEmitWalkCallback;
+pub const QBEEmitWriter = emit.QBEEmitWriter;
 
 const lexer = @import("lexer.zig");
-pub const Lexer = lexer.Lexer;
+pub const QBELexer = lexer.QBELexer;
 
 const parser = @import("parser.zig");
-pub const Parser = parser.Parser;
+pub const QBEParser = parser.QBEParser;
 
 const token = @import("token.zig");
-pub const Token = token.Token;
-pub const TokenReader = token.TokenReader;
+pub const QBEToken = token.QBEToken;

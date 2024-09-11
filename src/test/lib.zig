@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
+const common = @import("../common.zig");
 const qbe = @import("../qbe/lib.zig");
 
 pub fn testAST(allocator: std.mem.Allocator, buffer: anytype) !ast.AST {
@@ -8,21 +9,21 @@ pub fn testAST(allocator: std.mem.Allocator, buffer: anytype) !ast.AST {
 
     var file_reader = file_stream.reader();
 
-    var tokens = std.ArrayList(qbe.Token).init(allocator);
+    var tokens = std.ArrayList(qbe.QBEToken).init(allocator);
     defer tokens.deinit();
 
-    var lex = qbe.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
+    var lex = qbe.QBELexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
     try lex.lex();
 
     const token_slice = try tokens.toOwnedSlice();
     defer tokens.allocator.free(token_slice);
 
-    var token_reader = qbe.TokenReader.init(token_slice);
+    var token_reader = common.CollectionIterator(qbe.QBEToken).init(token_slice);
 
     var tree = ast.AST.init(allocator);
     errdefer tree.deinit();
 
-    var parser = qbe.Parser(@TypeOf(token_reader)).init(&token_reader, &tree);
+    var parser = qbe.QBEParser(@TypeOf(token_reader)).init(&token_reader, &tree);
     _ = try parser.parse();
 
     return tree;

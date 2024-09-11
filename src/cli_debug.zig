@@ -17,12 +17,12 @@ pub fn main() !void {
         try files.append(file_arg);
     }
 
-    const target: lib.common.Target = .{
+    const target: lib.Target = .{
         .arch = .a64,
     };
 
     var output = std.io.getStdOut().writer().any();
-    const config: lib.common.EmitWriterConfig = .{
+    const config: lib.EmitWriterConfig = .{
         .tty = .escape_codes,
     };
 
@@ -41,15 +41,15 @@ pub fn run(
     allocator: std.mem.Allocator,
     path: []const u8,
     output: *std.io.AnyWriter,
-    config: *const lib.common.EmitWriterConfig,
-    target: *const lib.common.Target,
+    config: *const lib.EmitWriterConfig,
+    target: *const lib.Target,
 ) !void {
     _ = try output.write("=== File ===\n");
 
     const file_path = try std.fs.cwd().realpathAlloc(allocator, path);
     defer allocator.free(file_path);
 
-    try config.tty.setColor(output, lib.common.PATH_COLOR);
+    try config.tty.setColor(output, lib.Color.path);
     _ = try output.print("{s}\n", .{file_path});
     try config.tty.setColor(output, .reset);
 
@@ -61,7 +61,7 @@ pub fn run(
     try file.seekTo(0);
     var line_reader = file.reader();
 
-    const newline_offsets = try lib.common.fileNewLines(allocator, &line_reader);
+    const newline_offsets = try lib.fileNewLines(allocator, &line_reader);
     defer allocator.free(newline_offsets);
 
     try file.seekTo(0);
@@ -69,14 +69,14 @@ pub fn run(
 
     _ = try output.write("=== Lexer ===\n");
 
-    var tokens = std.ArrayList(lib.qbe.Token).init(allocator);
+    var tokens = std.ArrayList(lib.QBEToken).init(allocator);
     defer tokens.deinit();
 
-    var lexer = lib.qbe.Lexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
+    var lexer = lib.QBELexer(@TypeOf(file_reader), @TypeOf(tokens)).init(&file_reader, &tokens);
     lexer.lex() catch |err| {
         const position = try file_stream.getPos();
 
-        try lib.common.printError(
+        try lib.printError(
             output,
             &config.tty,
             err,
@@ -94,11 +94,11 @@ pub fn run(
         const tag_name = @tagName(token.token_type);
         @memcpy(type_column[0..tag_name.len], tag_name);
 
-        try config.tty.setColor(output, lib.common.TYPE_COLOR);
+        try config.tty.setColor(output, lib.Color.type);
         _ = try output.write(&type_column);
         try config.tty.setColor(output, .reset);
 
-        try lib.common.printSpan(
+        try lib.printSpan(
             output,
             &config.tty,
             path,
@@ -111,16 +111,16 @@ pub fn run(
     const token_slice = try tokens.toOwnedSlice();
     defer tokens.allocator.free(token_slice);
 
-    var token_reader = lib.qbe.TokenReader.init(token_slice);
+    var token_reader = lib.CollectionIterator(lib.QBEToken).init(token_slice);
 
     _ = try output.write("=== Parser ===\n");
 
-    var ast = lib.ast.AST.init(allocator);
+    var ast = lib.AST.init(allocator);
     defer ast.deinit();
 
-    var parser = lib.qbe.Parser(@TypeOf(token_reader)).init(&token_reader, &ast);
+    var parser = lib.QBEParser(@TypeOf(token_reader)).init(&token_reader, &ast);
     _ = parser.parse() catch |err| {
-        const span: lib.common.SourceSpan = scope: {
+        const span: lib.SourceSpan = scope: {
             if (parser.previous == undefined) {
                 break :scope .{ .start = 0, .end = 0 };
             } else if (parser.previous == undefined) {
@@ -130,7 +130,7 @@ pub fn run(
             }
         };
 
-        try lib.common.printError(
+        try lib.printError(
             output,
             &config.tty,
             err,
@@ -144,7 +144,7 @@ pub fn run(
 
     const entrypoint = ast.entrypoint() orelse unreachable;
 
-    var walk = lib.ast.ASTWalk.init(allocator, &ast);
+    var walk = lib.ASTWalk.init(allocator, &ast);
     defer walk.deinit();
 
     var depth: usize = 0;
@@ -162,15 +162,15 @@ pub fn run(
                 @memset(&depth_column, ' ');
                 _ = try std.fmt.bufPrint(&depth_column, "{}", .{depth});
 
-                try config.tty.setColor(output, lib.common.LOCATION_COLOR);
+                try config.tty.setColor(output, lib.Color.location);
                 _ = try output.write(&depth_column);
 
-                try config.tty.setColor(output, lib.common.TYPE_COLOR);
+                try config.tty.setColor(output, lib.Color.type);
                 _ = try output.write(&type_column);
 
                 try config.tty.setColor(output, .reset);
 
-                try lib.common.printSpan(
+                try lib.printSpan(
                     output,
                     &config.tty,
                     path,
@@ -190,12 +190,12 @@ pub fn run(
 
     _ = try output.write("=== Symbols ===\n");
 
-    var symbol_table = lib.symbol.SymbolTable.init(allocator);
+    var symbol_table = lib.SymbolTable.init(allocator);
     defer symbol_table.deinit();
 
     try file.seekTo(0);
 
-    var source_callback = lib.symbol.SymbolSourceWalkCallback.init(
+    var source_callback = lib.SymbolSourceWalkCallback.init(
         allocator,
         &symbol_table,
         &file_stream,
@@ -211,7 +211,7 @@ pub fn run(
         } catch |err| {
             error_exit = true;
 
-            try lib.common.printError(
+            try lib.printError(
                 output,
                 &config.tty,
                 err,
@@ -224,7 +224,7 @@ pub fn run(
 
     if (error_exit) return;
 
-    var memory_callback = lib.symbol.SymbolMemoryWalkCallback.init(
+    var memory_callback = lib.SymbolMemoryWalkCallback.init(
         allocator,
         &symbol_table,
     );
@@ -240,7 +240,7 @@ pub fn run(
         } catch |err| {
             error_exit = true;
 
-            try lib.common.printError(
+            try lib.printError(
                 output,
                 &config.tty,
                 err,
@@ -260,19 +260,19 @@ pub fn run(
         @memset(&index_column, ' ');
         _ = try std.fmt.bufPrint(&index_column, "{}", .{i});
 
-        try config.tty.setColor(output, lib.common.LOCATION_COLOR);
+        try config.tty.setColor(output, lib.Color.location);
         _ = try output.write(&index_column);
 
-        try config.tty.setColor(output, lib.common.RESERVED_COLOR);
+        try config.tty.setColor(output, lib.Color.reserved);
         _ = try output.print("{s} ", .{@tagName(symbol.identifier.scope)});
 
-        try config.tty.setColor(output, lib.common.TYPE_COLOR);
+        try config.tty.setColor(output, lib.Color.type);
         _ = try output.print("{s} ", .{memoryLabel(&symbol.memory)});
 
-        try config.tty.setColor(output, lib.common.IDENTIFIER_COLOR);
+        try config.tty.setColor(output, lib.Color.identifier);
         _ = try output.print("{s}", .{symbol.identifier.name});
 
-        try config.tty.setColor(output, lib.common.LOCATION_COLOR);
+        try config.tty.setColor(output, lib.Color.location);
         if (symbol.identifier.function) |index| {
             _ = try output.print(":{}\n", .{
                 index,
@@ -286,7 +286,7 @@ pub fn run(
 
     _ = try output.write("=== Validate ===\n");
 
-    var validate_callback = lib.symbol.SymbolValidateWalkCallback.init(
+    var validate_callback = lib.SymbolValidateWalkCallback.init(
         allocator,
         &symbol_table,
         target,
@@ -303,7 +303,7 @@ pub fn run(
         } catch |err| {
             error_exit = true;
 
-            try lib.common.printError(
+            try lib.printError(
                 output,
                 &config.tty,
                 err,
@@ -316,13 +316,13 @@ pub fn run(
 
     if (error_exit) return;
 
-    try config.tty.setColor(output, lib.common.OK_COLOR);
+    try config.tty.setColor(output, lib.Color.ok);
     _ = try output.write("OK\n");
     try config.tty.setColor(output, .reset);
 
     _ = try output.write("=== QBE ===\n");
 
-    var emit_callback = lib.qbe.EmitWalkCallback.init(
+    var emit_callback = lib.QBEEmitWalkCallback.init(
         allocator,
         target,
     );
@@ -338,9 +338,9 @@ pub fn run(
 
     const emit_tokens = try emit_callback.tokens.toOwnedSlice();
     defer allocator.free(emit_tokens);
-    var emit_token_reader = lib.qbe.TokenReader.init(emit_tokens);
+    var emit_token_reader = lib.CollectionIterator(lib.QBEToken).init(emit_tokens);
 
-    var emit = lib.qbe.EmitWriter(@TypeOf(emit_token_reader), std.io.AnyWriter).init(
+    var emit = lib.QBEEmitWriter(@TypeOf(emit_token_reader), std.io.AnyWriter).init(
         &emit_token_reader,
         output,
         config,
@@ -350,7 +350,7 @@ pub fn run(
     while (try emit.next()) {}
 }
 
-fn memoryLabel(memory: *const lib.symbol.SymbolMemory) []const u8 {
+fn memoryLabel(memory: *const lib.SymbolMemory) []const u8 {
     const value = memory.*;
 
     return switch (value) {
