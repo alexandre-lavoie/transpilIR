@@ -5,10 +5,10 @@ type :t = { 16 }
 
 export thread section "section" "flags" data $dlink = { b 0 }
 data $dptr = { w 0 }
-data $dvals = { b 32, b s_1.23, b d_4.56, z 100, l $dptr + 1 }
+data $dvals = { b "ABC", b 32, b s_1.23, b d_4.56, z 100, l $dptr + 1 }
 data $d = { w 0 }
 
-export thread section "section" "flags" function $flink() {
+export section "section" "flags" function $flink() {
 @s
     ret
 }
@@ -110,10 +110,10 @@ function $fconv() {
     %d =d exts 0
     %w =w extsb 0
     %w =w extsh 0
-    %w =w extsw 0
+    %l =l extsw 0
     %w =w extub 0
     %w =w extuh 0
-    %w =w extuw 0
+    %l =l extuw 0
     %d =d sltof 0
     %d =d ultof 0
     %w =w stosi 0
