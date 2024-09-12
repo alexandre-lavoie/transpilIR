@@ -18,6 +18,8 @@ const flow = @import("flow/lib.zig");
 pub const CFG = flow.CFG;
 pub const CFGNode = flow.CFGNode;
 pub const CFGWalkCallback = flow.CFGWalkCallback;
+pub const DomSets = flow.DomSets;
+pub const DomTrees = flow.DomTrees;
 
 const qbe = @import("qbe/lib.zig");
 pub const QBEEmitWalkCallback = qbe.QBEEmitWalkCallback;

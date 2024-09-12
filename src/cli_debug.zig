@@ -351,15 +351,12 @@ pub fn run(
             .enter => |first| {
                 var queue = std.ArrayList(usize).init(allocator);
                 defer queue.deinit();
+                try queue.append(first);
 
                 var seen = std.AutoHashMap(usize, void).init(allocator);
                 defer seen.deinit();
 
-                try queue.append(first);
-
-                while (queue.items.len > 0) {
-                    const label_index = queue.pop();
-
+                while (queue.popOrNull()) |label_index| {
                     if (seen.contains(label_index)) continue;
                     try seen.put(label_index, undefined);
 
@@ -399,6 +396,75 @@ pub fn run(
                             try config.tty.setColor(output, lib.Color.literal);
                             _ = try output.write("$");
                         },
+                        .enter => unreachable,
+                    }
+
+                    _ = try output.write("\n");
+                }
+            },
+            else => unreachable,
+        }
+
+        try config.tty.setColor(output, .reset);
+    }
+
+    _ = try output.write("=== Dominance ===\n");
+
+    var dom_sets = lib.DomSets.init(allocator);
+    defer dom_sets.deinit();
+    try dom_sets.build(&cfg);
+
+    var dom_trees = lib.DomTrees.init(allocator);
+    defer dom_trees.deinit();
+    try dom_trees.build(&dom_sets);
+
+    for (cfg.entrypoints.items) |fn_index| {
+        const fn_symbol = symbol_table.symbols.items[fn_index];
+        const fn_node = cfg.nodes.get(fn_index) orelse unreachable;
+
+        try config.tty.setColor(output, lib.Color.global);
+        _ = try output.print("{s}\n", .{fn_symbol.identifier.name});
+
+        switch (fn_node) {
+            .enter => |first| {
+                var queue = std.ArrayList(usize).init(allocator);
+                defer queue.deinit();
+                try queue.append(first);
+
+                var seen = std.AutoHashMap(usize, void).init(allocator);
+                defer seen.deinit();
+
+                while (queue.popOrNull()) |label_index| {
+                    if (seen.contains(label_index)) continue;
+                    try seen.put(label_index, undefined);
+
+                    const label_symbol = symbol_table.symbols.items[label_index];
+                    const label_node = cfg.nodes.get(label_index) orelse unreachable;
+
+                    try config.tty.setColor(output, lib.Color.label);
+                    _ = try output.write(label_symbol.identifier.name);
+
+                    if (dom_trees.collection.get(label_index)) |next_index| {
+                        try config.tty.setColor(output, .reset);
+                        _ = try output.write(" <- ");
+
+                        const next_symbol = symbol_table.symbols.items[next_index];
+
+                        if (next_symbol.memory == .function) {
+                            try config.tty.setColor(output, lib.Color.global);
+                        } else {
+                            try config.tty.setColor(output, lib.Color.label);
+                        }
+                        _ = try output.write(next_symbol.identifier.name);
+                    }
+
+                    switch (label_node) {
+                        .jump => |next| try queue.append(next),
+                        .branch => |next| {
+                            try queue.append(next.right);
+                            try queue.append(next.left);
+                        },
+                        .exit => {},
                         .enter => unreachable,
                     }
 
