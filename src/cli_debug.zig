@@ -320,6 +320,97 @@ pub fn run(
     _ = try output.write("OK\n");
     try config.tty.setColor(output, .reset);
 
+    _ = try output.write("=== CFG ===\n");
+
+    var cfg = lib.CFG.init(allocator);
+    defer cfg.deinit();
+
+    var cfg_callback = lib.CFGWalkCallback.init(
+        allocator,
+        &symbol_table,
+        &cfg,
+    );
+    defer cfg_callback.deinit();
+
+    try walk.start(entrypoint);
+    while (try walk.next()) |out| {
+        try switch (out.enter) {
+            true => cfg_callback.enter(out.value),
+            false => cfg_callback.exit(out.value),
+        };
+    }
+
+    for (cfg.entrypoints.items) |fn_index| {
+        const fn_symbol = symbol_table.symbols.items[fn_index];
+        const fn_node = cfg.nodes.get(fn_index) orelse unreachable;
+
+        try config.tty.setColor(output, lib.Color.global);
+        _ = try output.print("{s}\n", .{fn_symbol.identifier.name});
+
+        switch (fn_node) {
+            .enter => |first| {
+                var queue = std.ArrayList(usize).init(allocator);
+                defer queue.deinit();
+
+                var seen = std.AutoHashMap(usize, void).init(allocator);
+                defer seen.deinit();
+
+                try queue.append(first);
+
+                while (queue.items.len > 0) {
+                    const label_index = queue.pop();
+
+                    if (seen.contains(label_index)) continue;
+                    try seen.put(label_index, undefined);
+
+                    const label_symbol = symbol_table.symbols.items[label_index];
+                    const label_node = cfg.nodes.get(label_index) orelse unreachable;
+
+                    try config.tty.setColor(output, lib.Color.label);
+                    _ = try output.write(label_symbol.identifier.name);
+
+                    try config.tty.setColor(output, .reset);
+                    _ = try output.write(" -> ");
+
+                    switch (label_node) {
+                        .jump => |next| {
+                            const next_symbol = symbol_table.symbols.items[next];
+                            try config.tty.setColor(output, lib.Color.label);
+                            _ = try output.write(next_symbol.identifier.name);
+
+                            try queue.append(next);
+                        },
+                        .branch => |next| {
+                            const left_symbol = symbol_table.symbols.items[next.left];
+                            try config.tty.setColor(output, lib.Color.label);
+                            _ = try output.write(left_symbol.identifier.name);
+
+                            try config.tty.setColor(output, .reset);
+                            _ = try output.write(", ");
+
+                            const right_symbol = symbol_table.symbols.items[next.right];
+                            try config.tty.setColor(output, lib.Color.label);
+                            _ = try output.write(right_symbol.identifier.name);
+
+                            try queue.append(next.right);
+                            try queue.append(next.left);
+                        },
+                        .exit => {
+                            try config.tty.setColor(output, lib.Color.literal);
+                            _ = try output.write("$");
+                        },
+                        .enter => unreachable,
+                    }
+
+                    _ = try output.write("\n");
+                }
+            },
+            else => unreachable,
+        }
+
+        try config.tty.setColor(output, .reset);
+    }
+
     _ = try output.write("=== QBE ===\n");
 
     var emit_callback = lib.QBEEmitWalkCallback.init(

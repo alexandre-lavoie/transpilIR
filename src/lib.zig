@@ -14,6 +14,11 @@ pub const fileNewLines = common.fileNewLines;
 pub const printError = common.printError;
 pub const printSpan = common.printSpan;
 
+const flow = @import("flow/lib.zig");
+pub const CFG = flow.CFG;
+pub const CFGNode = flow.CFGNode;
+pub const CFGWalkCallback = flow.CFGWalkCallback;
+
 const qbe = @import("qbe/lib.zig");
 pub const QBEEmitWalkCallback = qbe.QBEEmitWalkCallback;
 pub const QBEEmitWriter = qbe.QBEEmitWriter;
