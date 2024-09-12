@@ -4,6 +4,10 @@ const ast = @import("../ast/lib.zig");
 const common = @import("../common.zig");
 const qbe = @import("../qbe/lib.zig");
 
+pub const test_target: common.Target = .{
+    .arch = .a64,
+};
+
 pub fn testAST(allocator: std.mem.Allocator, buffer: anytype) !ast.AST {
     var file_stream = std.io.fixedBufferStream(buffer);
 

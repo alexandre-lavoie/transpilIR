@@ -7,6 +7,7 @@ const symbol = @import("lib.zig");
 const test_lib = @import("../test/lib.zig");
 
 pub const testAST = test_lib.testAST;
+pub const test_target = test_lib.test_target;
 
 pub fn testSource(allocator: std.mem.Allocator, file: []const u8, tree: *ast.AST, symbol_table: *symbol.SymbolTable) !void {
     var file_stream: std.io.StreamSource = .{

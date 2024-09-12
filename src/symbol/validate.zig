@@ -394,14 +394,6 @@ pub const SymbolValidateWalkCallback = struct {
 };
 
 //
-// Test Utils
-//
-
-const test_target: common.Target = .{
-    .arch = .a64,
-};
-
-//
 // Valid Tests
 //
 
@@ -418,7 +410,7 @@ test "load global" {
     defer symbol_table.deinit();
 
     // Act + Assert
-    try test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    try test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 }
 
 test "call no arguments" {
@@ -434,7 +426,7 @@ test "call no arguments" {
     defer symbol_table.deinit();
 
     // Act + Assert
-    try test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    try test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 }
 
 //
@@ -454,7 +446,7 @@ test "error.SymbolNotFound label" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -473,7 +465,7 @@ test "error.SymbolNotFound local" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.SymbolNotFound, res);
@@ -492,7 +484,7 @@ test "error.MismatchType" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.MismatchType, res);
@@ -511,7 +503,7 @@ test "error.DataType binary_operator" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -530,7 +522,7 @@ test "error.MismatchType binary_operator" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.MismatchType, res);
@@ -549,7 +541,7 @@ test "error.DataType integer comparison" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -568,7 +560,7 @@ test "error.DataType float comparison" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -587,7 +579,7 @@ test "error.DataType negate" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -606,7 +598,7 @@ test "error.DataType return" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -625,7 +617,7 @@ test "error.DataType vastart" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -644,7 +636,7 @@ test "error.DataType vaarg" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -663,7 +655,7 @@ test "error.DataType phi" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -682,7 +674,7 @@ test "error.DataType branch" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -701,7 +693,7 @@ test "error.DataType blit target" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -720,7 +712,7 @@ test "error.DataType blit source" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -739,7 +731,7 @@ test "error.DataType blit size" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -758,7 +750,7 @@ test "error.DataType copy" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -777,7 +769,7 @@ test "error.DataType cast" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -796,7 +788,7 @@ test "error.DataType conversion" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -815,7 +807,7 @@ test "error.DataType load pointer" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -834,7 +826,7 @@ test "error.DataType load type" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -853,7 +845,7 @@ test "error.DataType store pointer" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -872,7 +864,7 @@ test "error.DataType store type" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -891,7 +883,7 @@ test "error.DataType assignment" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);
@@ -910,7 +902,7 @@ test "error.DataType call local" {
     defer symbol_table.deinit();
 
     // Act
-    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_target);
+    const res = test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
 
     // Assert
     try std.testing.expectError(error.DataType, res);

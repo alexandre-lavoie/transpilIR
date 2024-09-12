@@ -146,14 +146,6 @@ pub const CFGWalkCallback = struct {
 };
 
 //
-// Test Utils
-//
-
-const test_target: common.Target = .{
-    .arch = .a64,
-};
-
-//
 // Test
 //
 
@@ -173,7 +165,7 @@ test "enter" {
     defer cfg.deinit();
 
     // Act
-    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_target, &cfg);
+    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_lib.test_target, &cfg);
 
     // Assert
 
@@ -206,7 +198,7 @@ test "entrypoints" {
     defer cfg.deinit();
 
     // Act
-    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_target, &cfg);
+    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_lib.test_target, &cfg);
 
     // Assert
     try std.testing.expectEqualSlices(
@@ -232,7 +224,7 @@ test "jump" {
     defer cfg.deinit();
 
     // Act
-    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_target, &cfg);
+    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_lib.test_target, &cfg);
 
     // Assert
 
@@ -271,7 +263,7 @@ test "branch" {
     defer cfg.deinit();
 
     // Act
-    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_target, &cfg);
+    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_lib.test_target, &cfg);
 
     // Assert
 
@@ -323,7 +315,7 @@ test "jump loop" {
     defer cfg.deinit();
 
     // Act
-    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_target, &cfg);
+    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_lib.test_target, &cfg);
 
     // Assert
 
@@ -356,7 +348,7 @@ test "branch label reused" {
     defer cfg.deinit();
 
     // Act
-    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_target, &cfg);
+    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_lib.test_target, &cfg);
 
     // Assert
 
