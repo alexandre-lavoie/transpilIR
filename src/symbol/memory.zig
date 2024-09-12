@@ -123,30 +123,30 @@ pub const SymbolMemoryWalkCallback = struct {
                 switch (identifier.scope) {
                     .local => {
                         try self.entries.append(.{
-                            .local = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
+                            .local = self.symbol_table.getSymbolIndexByInstance(&instance).?,
                         });
                     },
                     .global => {
                         try self.entries.append(.{
-                            .global = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
+                            .global = self.symbol_table.getSymbolIndexByInstance(&instance).?,
                         });
                     },
                     .type => {
                         try self.entries.append(.{
-                            .type = self.symbol_table.getSymbolIndexByInstance(&instance) orelse unreachable,
+                            .type = self.symbol_table.getSymbolIndexByInstance(&instance).?,
                         });
                     },
                     .label => {
                         if (!self.block) return;
                         self.block = false;
 
-                        const symbol = self.symbol_table.getSymbolByInstance(&instance) orelse unreachable;
+                        const symbol = self.symbol_table.getSymbolByInstance(&instance).?;
                         symbol.memory = .label;
                     },
                 }
             },
             .literal => {
-                const literal = self.symbol_table.getLiteralByInstance(&instance) orelse unreachable;
+                const literal = self.symbol_table.getLiteralByInstance(&instance).?;
 
                 try self.entries.append(.{
                     .literal = literal,

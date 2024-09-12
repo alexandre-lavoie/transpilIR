@@ -147,7 +147,7 @@ pub const SymbolValidateWalkCallback = struct {
             .negate,
             => {},
             .identifier => |identifier| {
-                const symbol = self.symbol_table.getSymbolByInstance(&instance) orelse unreachable;
+                const symbol = self.symbol_table.getSymbolByInstance(&instance).?;
 
                 switch (symbol.memory) {
                     .empty => {
@@ -275,7 +275,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(self.phi_type orelse .void, @"type")) return error.DataType;
             },
             .phi => {
-                try self.types.append(self.phi_type orelse unreachable);
+                try self.types.append(self.phi_type.?);
             },
             .branch => {
                 const condition = self.types.pop();

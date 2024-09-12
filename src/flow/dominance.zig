@@ -43,10 +43,10 @@ pub const DomSets = struct {
                 try dom_set.put(current.value, undefined);
                 try self.collection.put(current.value, dom_set);
             }
-            var dom_set: *ArrayHashSet = self.collection.getPtr(current.value) orelse unreachable;
+            var dom_set: *ArrayHashSet = self.collection.getPtr(current.value).?;
 
             if (current.previous) |previous| {
-                const previous_set = self.collection.get(previous) orelse unreachable;
+                const previous_set = self.collection.get(previous).?;
 
                 if (is_new_dom_set) {
                     for (previous_set.keys()) |key| {
@@ -60,7 +60,7 @@ pub const DomSets = struct {
                 }
             }
 
-            switch (graph.nodes.get(current.value) orelse unreachable) {
+            switch (graph.nodes.get(current.value).?) {
                 .enter => |n| if (!dom_set.contains(n)) {
                     try queue.append(.{ .previous = current.value, .value = n });
                 },
@@ -114,7 +114,7 @@ pub const DomTrees = struct {
             for (entry_set.keys()) |index| {
                 if (entry_index == index) continue;
 
-                const set = sets.collection.getPtr(index) orelse unreachable;
+                const set = sets.collection.getPtr(index).?;
                 for (set.keys()) |dom| {
                     if (dom == index) continue;
                     try idom_set.put(dom, undefined);

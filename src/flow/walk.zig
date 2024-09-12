@@ -42,9 +42,7 @@ pub const CFGWalk = struct {
         };
         try self.seen.put(index, undefined);
 
-        const node = self.graph.nodes.getPtr(index) orelse unreachable;
-
-        switch (node.*) {
+        switch (self.graph.nodes.get(index).?) {
             .enter, .jump => |n| try self.queue.append(n),
             .branch => |n| {
                 try self.queue.append(n.right);

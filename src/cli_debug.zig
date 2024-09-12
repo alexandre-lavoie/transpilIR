@@ -142,7 +142,7 @@ pub fn run(
         return;
     };
 
-    const entrypoint = ast.entrypoint() orelse unreachable;
+    const entrypoint = ast.entrypoint().?;
 
     var ast_walk = lib.ASTWalk.init(allocator, &ast);
     defer ast_walk.deinit();
@@ -348,7 +348,7 @@ pub fn run(
 
         while (try cfg_walk.next()) |entry_index| {
             const entry_symbol = symbol_table.symbols.items[entry_index];
-            const entry_node = cfg.nodes.get(entry_index) orelse unreachable;
+            const entry_node = cfg.nodes.get(entry_index).?;
 
             const identifier_color = switch (entry_symbol.memory) {
                 .function => lib.Color.global,

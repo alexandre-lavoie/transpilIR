@@ -1204,7 +1204,7 @@ pub fn QBEParser(comptime Reader: type) type {
         fn convert(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            const data_type_statement = self.ast.get(data_type) orelse unreachable;
+            const data_type_statement = self.ast.get(data_type).?;
 
             const from_type: ast.StatementIndex = scope: {
                 const primitive_type: ast.PrimitiveType = switch (self.previous.token_type) {
