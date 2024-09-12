@@ -144,13 +144,13 @@ pub fn run(
 
     const entrypoint = ast.entrypoint() orelse unreachable;
 
-    var walk = lib.ASTWalk.init(allocator, &ast);
-    defer walk.deinit();
+    var ast_walk = lib.ASTWalk.init(allocator, &ast);
+    defer ast_walk.deinit();
 
     var depth: usize = 0;
 
-    try walk.start(entrypoint);
-    while (try walk.next()) |out| {
+    try ast_walk.start(entrypoint);
+    while (try ast_walk.next()) |out| {
         switch (out.enter) {
             true => {
                 var type_column: [32]u8 = undefined;
@@ -203,8 +203,8 @@ pub fn run(
 
     var error_exit = false;
 
-    try walk.start(entrypoint);
-    while (try walk.next()) |out| {
+    try ast_walk.start(entrypoint);
+    while (try ast_walk.next()) |out| {
         _ = switch (out.enter) {
             true => source_callback.enter(out.value),
             false => source_callback.exit(out.value),
@@ -232,8 +232,8 @@ pub fn run(
 
     error_exit = false;
 
-    try walk.start(entrypoint);
-    while (try walk.next()) |out| {
+    try ast_walk.start(entrypoint);
+    while (try ast_walk.next()) |out| {
         _ = switch (out.enter) {
             true => memory_callback.enter(out.value),
             false => memory_callback.exit(out.value),
@@ -295,8 +295,8 @@ pub fn run(
 
     error_exit = false;
 
-    try walk.start(entrypoint);
-    while (try walk.next()) |out| {
+    try ast_walk.start(entrypoint);
+    while (try ast_walk.next()) |out| {
         _ = switch (out.enter) {
             true => validate_callback.enter(out.value),
             false => validate_callback.exit(out.value),
@@ -325,6 +325,9 @@ pub fn run(
     var cfg = lib.CFG.init(allocator);
     defer cfg.deinit();
 
+    var cfg_walk = lib.CFGWalk.init(allocator, &cfg);
+    defer cfg_walk.deinit();
+
     var cfg_callback = lib.CFGWalkCallback.init(
         allocator,
         &symbol_table,
@@ -332,8 +335,8 @@ pub fn run(
     );
     defer cfg_callback.deinit();
 
-    try walk.start(entrypoint);
-    while (try walk.next()) |out| {
+    try ast_walk.start(entrypoint);
+    while (try ast_walk.next()) |out| {
         try switch (out.enter) {
             true => cfg_callback.enter(out.value),
             false => cfg_callback.exit(out.value),
@@ -341,68 +344,49 @@ pub fn run(
     }
 
     for (cfg.entrypoints.items) |fn_index| {
-        const fn_symbol = symbol_table.symbols.items[fn_index];
-        const fn_node = cfg.nodes.get(fn_index) orelse unreachable;
+        try cfg_walk.start(fn_index);
 
-        try config.tty.setColor(output, lib.Color.global);
-        _ = try output.print("{s}\n", .{fn_symbol.identifier.name});
+        while (try cfg_walk.next()) |entry_index| {
+            const entry_symbol = symbol_table.symbols.items[entry_index];
+            const entry_node = cfg.nodes.get(entry_index) orelse unreachable;
 
-        switch (fn_node) {
-            .enter => |first| {
-                var queue = std.ArrayList(usize).init(allocator);
-                defer queue.deinit();
-                try queue.append(first);
+            const identifier_color = switch (entry_symbol.memory) {
+                .function => lib.Color.global,
+                .label => lib.Color.label,
+                else => unreachable,
+            };
 
-                var seen = std.AutoHashMap(usize, void).init(allocator);
-                defer seen.deinit();
+            try config.tty.setColor(output, identifier_color);
+            _ = try output.write(entry_symbol.identifier.name);
 
-                while (queue.popOrNull()) |label_index| {
-                    if (seen.contains(label_index)) continue;
-                    try seen.put(label_index, undefined);
+            try config.tty.setColor(output, .reset);
+            _ = try output.write(" -> ");
 
-                    const label_symbol = symbol_table.symbols.items[label_index];
-                    const label_node = cfg.nodes.get(label_index) orelse unreachable;
-
+            switch (entry_node) {
+                .enter, .jump => |next| {
+                    const next_symbol = symbol_table.symbols.items[next];
                     try config.tty.setColor(output, lib.Color.label);
-                    _ = try output.write(label_symbol.identifier.name);
+                    _ = try output.write(next_symbol.identifier.name);
+                },
+                .branch => |next| {
+                    const left_symbol = symbol_table.symbols.items[next.left];
+                    try config.tty.setColor(output, lib.Color.label);
+                    _ = try output.write(left_symbol.identifier.name);
 
                     try config.tty.setColor(output, .reset);
-                    _ = try output.write(" -> ");
+                    _ = try output.write(", ");
 
-                    switch (label_node) {
-                        .jump => |next| {
-                            const next_symbol = symbol_table.symbols.items[next];
-                            try config.tty.setColor(output, lib.Color.label);
-                            _ = try output.write(next_symbol.identifier.name);
+                    const right_symbol = symbol_table.symbols.items[next.right];
+                    try config.tty.setColor(output, lib.Color.label);
+                    _ = try output.write(right_symbol.identifier.name);
+                },
+                .exit => {
+                    try config.tty.setColor(output, lib.Color.literal);
+                    _ = try output.write("$");
+                },
+            }
 
-                            try queue.append(next);
-                        },
-                        .branch => |next| {
-                            const left_symbol = symbol_table.symbols.items[next.left];
-                            try config.tty.setColor(output, lib.Color.label);
-                            _ = try output.write(left_symbol.identifier.name);
-
-                            try config.tty.setColor(output, .reset);
-                            _ = try output.write(", ");
-
-                            const right_symbol = symbol_table.symbols.items[next.right];
-                            try config.tty.setColor(output, lib.Color.label);
-                            _ = try output.write(right_symbol.identifier.name);
-
-                            try queue.append(next.right);
-                            try queue.append(next.left);
-                        },
-                        .exit => {
-                            try config.tty.setColor(output, lib.Color.literal);
-                            _ = try output.write("$");
-                        },
-                        .enter => unreachable,
-                    }
-
-                    _ = try output.write("\n");
-                }
-            },
-            else => unreachable,
+            _ = try output.write("\n");
         }
 
         try config.tty.setColor(output, .reset);
@@ -419,59 +403,36 @@ pub fn run(
     try dom_trees.build(&dom_sets);
 
     for (cfg.entrypoints.items) |fn_index| {
-        const fn_symbol = symbol_table.symbols.items[fn_index];
-        const fn_node = cfg.nodes.get(fn_index) orelse unreachable;
+        try cfg_walk.start(fn_index);
 
-        try config.tty.setColor(output, lib.Color.global);
-        _ = try output.print("{s}\n", .{fn_symbol.identifier.name});
+        while (try cfg_walk.next()) |entry_index| {
+            const entry_symbol = symbol_table.symbols.items[entry_index];
 
-        switch (fn_node) {
-            .enter => |first| {
-                var queue = std.ArrayList(usize).init(allocator);
-                defer queue.deinit();
-                try queue.append(first);
+            const identifier_color = switch (entry_symbol.memory) {
+                .function => lib.Color.global,
+                .label => lib.Color.label,
+                else => unreachable,
+            };
 
-                var seen = std.AutoHashMap(usize, void).init(allocator);
-                defer seen.deinit();
+            try config.tty.setColor(output, identifier_color);
+            _ = try output.write(entry_symbol.identifier.name);
 
-                while (queue.popOrNull()) |label_index| {
-                    if (seen.contains(label_index)) continue;
-                    try seen.put(label_index, undefined);
+            if (dom_trees.collection.get(entry_index)) |next_index| {
+                try config.tty.setColor(output, .reset);
+                _ = try output.write(" <- ");
 
-                    const label_symbol = symbol_table.symbols.items[label_index];
-                    const label_node = cfg.nodes.get(label_index) orelse unreachable;
+                const next_symbol = symbol_table.symbols.items[next_index];
+                const next_color = switch (next_symbol.memory) {
+                    .function => lib.Color.global,
+                    .label => lib.Color.label,
+                    else => unreachable,
+                };
 
-                    try config.tty.setColor(output, lib.Color.label);
-                    _ = try output.write(label_symbol.identifier.name);
+                try config.tty.setColor(output, next_color);
+                _ = try output.write(next_symbol.identifier.name);
+            }
 
-                    if (dom_trees.collection.get(label_index)) |next_index| {
-                        try config.tty.setColor(output, .reset);
-                        _ = try output.write(" <- ");
-
-                        const next_symbol = symbol_table.symbols.items[next_index];
-
-                        if (next_symbol.memory == .function) {
-                            try config.tty.setColor(output, lib.Color.global);
-                        } else {
-                            try config.tty.setColor(output, lib.Color.label);
-                        }
-                        _ = try output.write(next_symbol.identifier.name);
-                    }
-
-                    switch (label_node) {
-                        .jump => |next| try queue.append(next),
-                        .branch => |next| {
-                            try queue.append(next.right);
-                            try queue.append(next.left);
-                        },
-                        .exit => {},
-                        .enter => unreachable,
-                    }
-
-                    _ = try output.write("\n");
-                }
-            },
-            else => unreachable,
+            _ = try output.write("\n");
         }
 
         try config.tty.setColor(output, .reset);
@@ -485,8 +446,8 @@ pub fn run(
     );
     defer emit_callback.deinit();
 
-    try walk.start(entrypoint);
-    while (try walk.next()) |out| {
+    try ast_walk.start(entrypoint);
+    while (try ast_walk.next()) |out| {
         try switch (out.enter) {
             true => emit_callback.enter(out.value),
             false => emit_callback.exit(out.value),
