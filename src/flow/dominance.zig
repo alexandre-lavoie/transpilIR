@@ -229,6 +229,40 @@ test "dom_tree loop" {
     try std.testing.expectEqual(1, trees.collection.get(2));
 }
 
+test "dom_tree split" {
+    //   0
+    //   |
+    //   1
+    //  / \
+    // 2   3
+
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    var c = cfg.CFG.init(allocator);
+    defer c.deinit();
+
+    try c.put(0, .{ .enter = 1 });
+    try c.put(1, .{ .branch = .{ .left = 2, .right = 3 } });
+    try c.put(2, .exit);
+    try c.put(3, .exit);
+
+    // Act
+    var sets = DomSets.init(allocator);
+    defer sets.deinit();
+    try sets.build(&c);
+
+    var trees = DomTrees.init(allocator);
+    defer trees.deinit();
+    try trees.build(&sets);
+
+    // Assert
+    try std.testing.expectEqual(null, trees.collection.get(0));
+    try std.testing.expectEqual(0, trees.collection.get(1));
+    try std.testing.expectEqual(1, trees.collection.get(2));
+    try std.testing.expectEqual(1, trees.collection.get(3));
+}
+
 test "dom_tree intersection" {
     //   0
     //   |
@@ -267,14 +301,14 @@ test "dom_tree intersection" {
     try std.testing.expectEqual(1, trees.collection.get(4));
 }
 
-test "dom_tree nested" {
+test "dom_tree complex" {
     //   0
     //   |
-    //   1
-    //  / \
-    // |   2
-    // |  / \
-    // | 3   4*
+    //   1<----.
+    //  / \    |
+    // |   2   |
+    // |  / \  |
+    // | 3   4-'
     // |  \ /
     // |   5
     //  \ /
@@ -290,7 +324,7 @@ test "dom_tree nested" {
     try c.put(1, .{ .branch = .{ .left = 6, .right = 2 } });
     try c.put(2, .{ .branch = .{ .left = 3, .right = 4 } });
     try c.put(3, .{ .jump = 5 });
-    try c.put(4, .{ .branch = .{ .left = 5, .right = 4 } });
+    try c.put(4, .{ .branch = .{ .left = 5, .right = 1 } });
     try c.put(5, .{ .jump = 6 });
     try c.put(6, .exit);
 
