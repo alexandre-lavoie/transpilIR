@@ -338,7 +338,7 @@ pub fn run(
     try ast_walk.start(entrypoint);
     while (try ast_walk.next()) |out| {
         try switch (out.enter) {
-            true => cfg_callback.enter(out.value),
+            true => cfg_callback.enter(out.index, out.value),
             false => cfg_callback.exit(out.value),
         };
     }
@@ -347,7 +347,7 @@ pub fn run(
         try cfg_walk.start(fn_index);
 
         while (try cfg_walk.next()) |entry_index| {
-            const entry_symbol = symbol_table.symbols.items[entry_index];
+            const entry_symbol = try statementSymbol(&ast.collection.items[entry_index], &ast, &symbol_table);
             const entry_node = cfg.nodes.get(entry_index).?;
 
             const identifier_color = switch (entry_symbol.memory) {
@@ -364,19 +364,22 @@ pub fn run(
 
             switch (entry_node) {
                 .enter, .jump => |next| {
-                    const next_symbol = symbol_table.symbols.items[next];
+                    const next_symbol = try statementSymbol(&ast.collection.items[next], &ast, &symbol_table);
+
                     try config.tty.setColor(output, lib.Color.label);
                     _ = try output.write(next_symbol.identifier.name);
                 },
                 .branch => |next| {
-                    const left_symbol = symbol_table.symbols.items[next.left];
+                    const left_symbol = try statementSymbol(&ast.collection.items[next.left], &ast, &symbol_table);
+
                     try config.tty.setColor(output, lib.Color.label);
                     _ = try output.write(left_symbol.identifier.name);
 
                     try config.tty.setColor(output, .reset);
                     _ = try output.write(", ");
 
-                    const right_symbol = symbol_table.symbols.items[next.right];
+                    const right_symbol = try statementSymbol(&ast.collection.items[next.right], &ast, &symbol_table);
+
                     try config.tty.setColor(output, lib.Color.label);
                     _ = try output.write(right_symbol.identifier.name);
                 },
@@ -406,7 +409,7 @@ pub fn run(
         try cfg_walk.start(fn_index);
 
         while (try cfg_walk.next()) |entry_index| {
-            const entry_symbol = symbol_table.symbols.items[entry_index];
+            const entry_symbol = try statementSymbol(&ast.collection.items[entry_index], &ast, &symbol_table);
 
             const identifier_color = switch (entry_symbol.memory) {
                 .function => lib.Color.global,
@@ -421,7 +424,7 @@ pub fn run(
                 try config.tty.setColor(output, .reset);
                 _ = try output.write(" <- ");
 
-                const next_symbol = symbol_table.symbols.items[next_index];
+                const next_symbol = try statementSymbol(&ast.collection.items[next_index], &ast, &symbol_table);
                 const next_color = switch (next_symbol.memory) {
                     .function => lib.Color.global,
                     .label => lib.Color.label,
@@ -476,5 +479,18 @@ fn memoryLabel(memory: *const lib.SymbolMemory) []const u8 {
         .empty => "_",
         .label => "@",
         else => @tagName(value),
+    };
+}
+
+fn statementSymbol(statement: *const lib.Statement, ast: *const lib.AST, symbol_table: *const lib.SymbolTable) !*lib.Symbol {
+    return switch (statement.data) {
+        .identifier => {
+            const instance: lib.Instance = .{ .span = statement.span };
+
+            return symbol_table.getSymbolByInstance(&instance) orelse error.NotFound;
+        },
+        .function => |d| statementSymbol(&ast.collection.items[d.signature], ast, symbol_table),
+        .function_signature => |d| statementSymbol(&ast.collection.items[d.name], ast, symbol_table),
+        else => unreachable,
     };
 }

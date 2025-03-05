@@ -3,6 +3,7 @@ const std = @import("std");
 const ast = @import("ast/lib.zig");
 pub const AST = ast.AST;
 pub const ASTWalk = ast.ASTWalk;
+pub const Statement = ast.Statement;
 
 const common = @import("common.zig");
 pub const Color = common.Color;

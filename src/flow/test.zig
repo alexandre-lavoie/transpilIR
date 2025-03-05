@@ -27,7 +27,7 @@ pub fn testCFG(allocator: std.mem.Allocator, file: []const u8, tree: *ast.AST, s
     try walk.start(tree.entrypoint() orelse return error.NotFound);
     while (try walk.next()) |out| {
         try switch (out.enter) {
-            true => callback.enter(out.value),
+            true => callback.enter(out.index, out.value),
             false => callback.exit(out.value),
         };
     }

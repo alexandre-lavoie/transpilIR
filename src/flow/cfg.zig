@@ -36,56 +36,76 @@ pub const CFG = struct {
         self.entrypoints.deinit();
     }
 
-    pub fn put(self: *Self, sym: usize, node: CFGNode) !void {
-        try self.nodes.put(sym, node);
+    pub fn put(self: *Self, idx: usize, node: CFGNode) !void {
+        try self.nodes.put(idx, node);
         if (node == .enter) {
-            try self.entrypoints.append(sym);
+            try self.entrypoints.append(idx);
         }
     }
 };
 
 const CFGWalkState = enum {
+    // Default/null state
     default,
+    // When a function is entered
     function_enter,
+    // When the first block is entered
     block_entry,
+    // When subsequent blocks are entered
     block_enter,
+    // When inside a block's body
     block_body,
 };
 
 pub const CFGWalkCallback = struct {
     symbol_table: *const symbol.SymbolTable,
-    cfg: *CFG,
-    labels: LabelCollection,
+    ast_cfg: *CFG,
 
     state: CFGWalkState = .default,
     scope: usize = 0,
+    function: usize = 0,
+    symbol_cfg: CFG,
+    symbol_statement_map: SymbolStatementMap,
+    labels: LabelCollection,
 
     const Self = @This();
     const LabelCollection = std.ArrayList(usize);
+    const SymbolStatementMap = std.AutoArrayHashMap(usize, usize);
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *const symbol.SymbolTable, cfg: *CFG) Self {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *const symbol.SymbolTable, ast_cfg: *CFG) Self {
         return .{
             .symbol_table = symbol_table,
-            .cfg = cfg,
+            .ast_cfg = ast_cfg,
+            .symbol_cfg = CFG.init(allocator),
+            .symbol_statement_map = SymbolStatementMap.init(allocator),
             .labels = LabelCollection.init(allocator),
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.labels.deinit();
+        self.symbol_cfg.deinit();
+        self.symbol_statement_map.deinit();
     }
 
-    pub fn enter(self: *Self, statement: *ast.Statement) !void {
+    pub fn enter(self: *Self, index: ast.StatementIndex, statement: *ast.Statement) !void {
         const instance: symbol.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
+            .function => {
+                self.function = index;
+            },
             .function_signature => {
                 self.state = .function_enter;
             },
             .identifier => |identifier| switch (identifier.scope) {
                 .global => switch (self.state) {
                     .function_enter => {
-                        self.scope = self.symbol_table.getSymbolIndexByInstance(&instance) orelse return error.NotFound;
+                        const sym = self.symbol_table.getSymbolIndexByInstance(&instance) orelse return error.NotFound;
+
+                        try self.symbol_statement_map.put(sym, self.function);
+
+                        self.scope = sym;
                         self.state = .block_entry;
                     },
                     else => {},
@@ -95,11 +115,16 @@ pub const CFGWalkCallback = struct {
 
                     switch (self.state) {
                         .block_entry => {
-                            try self.cfg.put(self.scope, .{ .enter = sym });
+                            try self.symbol_cfg.put(self.scope, .{ .enter = sym });
+
+                            try self.symbol_statement_map.put(sym, index);
+
                             self.scope = sym;
                             self.state = .block_body;
                         },
                         .block_enter => {
+                            try self.symbol_statement_map.put(sym, index);
+
                             self.scope = sym;
                             self.state = .block_body;
                         },
@@ -120,9 +145,10 @@ pub const CFGWalkCallback = struct {
     pub fn exit(self: *Self, statement: *ast.Statement) !void {
         switch (statement.data) {
             .phi => self.labels.clearAndFree(),
-            .halt, .@"return" => try self.cfg.put(self.scope, .exit),
+            .halt, .@"return" => try self.symbol_cfg.put(self.scope, .exit),
             .jump => {
-                try self.cfg.put(self.scope, .{ .jump = self.labels.items[0] });
+                try self.symbol_cfg.put(self.scope, .{ .jump = self.labels.items[0] });
+
                 self.labels.clearAndFree();
             },
             .branch => {
@@ -136,11 +162,35 @@ pub const CFGWalkCallback = struct {
                         .right = right,
                     } },
                 };
-                try self.cfg.put(self.scope, node);
+                try self.symbol_cfg.put(self.scope, node);
 
                 self.labels.clearAndFree();
             },
+            .module => try self.buildASTCFG(),
             else => {},
+        }
+    }
+
+    fn buildASTCFG(self: *Self) !void {
+        var iter = self.symbol_cfg.nodes.iterator();
+
+        while (iter.next()) |entry| {
+            const pidx: usize = entry.key_ptr.*;
+            const pnode: CFGNode = entry.value_ptr.*;
+
+            const idx = self.symbol_statement_map.get(pidx).?;
+
+            const node: CFGNode = switch (pnode) {
+                .enter => |n| .{ .enter = self.symbol_statement_map.get(n).? },
+                .jump => |n| .{ .jump = self.symbol_statement_map.get(n).? },
+                .branch => |n| .{ .branch = .{
+                    .left = self.symbol_statement_map.get(n.left).?,
+                    .right = self.symbol_statement_map.get(n.right).?,
+                } },
+                .exit => .exit,
+            };
+
+            try self.ast_cfg.put(idx, node);
         }
     }
 };
@@ -171,14 +221,14 @@ test "enter" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 1 },
-        cfg.nodes.get(0),
+        CFGNode{ .enter = 4 },
+        cfg.nodes.get(2),
     );
 
     // s
     try std.testing.expectEqualDeep(
         .exit,
-        cfg.nodes.get(1),
+        cfg.nodes.get(4),
     );
 }
 
@@ -203,7 +253,7 @@ test "entrypoints" {
     // Assert
     try std.testing.expectEqualSlices(
         usize,
-        &[_]usize{ 0, 2 },
+        &[_]usize{ 2, 12 },
         cfg.entrypoints.items,
     );
 }
@@ -230,20 +280,20 @@ test "jump" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 1 },
-        cfg.nodes.get(0),
+        CFGNode{ .enter = 4 },
+        cfg.nodes.get(2),
     );
 
     // s
     try std.testing.expectEqualDeep(
-        CFGNode{ .jump = 2 },
-        cfg.nodes.get(1),
+        CFGNode{ .jump = 9 },
+        cfg.nodes.get(4),
     );
 
     // e
     try std.testing.expectEqualDeep(
         .exit,
-        cfg.nodes.get(2),
+        cfg.nodes.get(9),
     );
 }
 
@@ -269,33 +319,33 @@ test "branch" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 1 },
-        cfg.nodes.get(0),
+        CFGNode{ .enter = 4 },
+        cfg.nodes.get(2),
     );
 
     // s
     try std.testing.expectEqualDeep(
         CFGNode{
             .branch = .{
-                .left = 2,
-                .right = 3,
+                .left = 11,
+                .right = 16,
             },
         },
-        cfg.nodes.get(1),
+        cfg.nodes.get(4),
     );
 
     // t
     try std.testing.expectEqualDeep(
         CFGNode{
-            .jump = 3,
+            .jump = 16,
         },
-        cfg.nodes.get(2),
+        cfg.nodes.get(11),
     );
 
     // f
     try std.testing.expectEqualDeep(
         .exit,
-        cfg.nodes.get(3),
+        cfg.nodes.get(16),
     );
 }
 
@@ -321,14 +371,14 @@ test "jump loop" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 1 },
-        cfg.nodes.get(0),
+        CFGNode{ .enter = 4 },
+        cfg.nodes.get(2),
     );
 
     // s
     try std.testing.expectEqualDeep(
-        CFGNode{ .jump = 1 },
-        cfg.nodes.get(1),
+        CFGNode{ .jump = 4 },
+        cfg.nodes.get(4),
     );
 }
 
@@ -352,21 +402,26 @@ test "branch label reused" {
 
     // Assert
 
+    // var iter = cfg.nodes.iterator();
+    // while (iter.next()) |entry| {
+    //     std.debug.print("{} {}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+    // }
+
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 1 },
-        cfg.nodes.get(0),
+        CFGNode{ .enter = 4 },
+        cfg.nodes.get(2),
     );
 
     // s
     try std.testing.expectEqualDeep(
-        CFGNode{ .jump = 2 },
-        cfg.nodes.get(1),
+        CFGNode{ .jump = 11 },
+        cfg.nodes.get(4),
     );
 
     // e
     try std.testing.expectEqualDeep(
         .exit,
-        cfg.nodes.get(2),
+        cfg.nodes.get(11),
     );
 }
