@@ -131,7 +131,7 @@ pub const DomTrees = struct {
     }
 };
 
-// Dominance Frontier Sets
+// Immediate Dominance Frontier Sets
 pub const DomFSets = struct {
     allocator: std.mem.Allocator,
     collection: Collection,
@@ -153,7 +153,7 @@ pub const DomFSets = struct {
         self.collection.deinit();
     }
 
-    pub fn build(self: *Self, graph: *const cfg.CFG, trees: *const DomTrees) !void {
+    pub fn build(self: *Self, graph: *const cfg.CFG) !void {
         // Set of immediately previous nodes for each node
         var previous_sets = Collection.init(self.allocator);
         defer {
@@ -192,36 +192,8 @@ pub const DomFSets = struct {
             const nprevious: ArrayHashSet = previous_sets.get(nidx).?;
             if (nprevious.count() < 2) continue;
 
-            // Get previous intersection
-            const idom_o = trees.collection.get(nidx);
-            if (idom_o == null) continue;
-            const idom = idom_o.?;
-
-            // Initialize queue
-            var queue = std.ArrayList(usize).init(self.allocator);
-            defer queue.deinit();
-
-            for (nprevious.keys()) |prev| {
-                try queue.append(prev);
-            }
-
-            // Keep track of seen nodes
-            var seen = ArrayHashSet.init(self.allocator);
-            defer seen.deinit();
-
-            while (queue.popOrNull()) |pidx| {
-                // Ignore seen nodes
-                if (seen.get(pidx) != null) continue;
-                try seen.put(pidx, undefined);
-
-                // Stop when reached intersection
-                if (pidx == idom) continue;
-
-                // Add current to DF of previous
+            for (nprevious.keys()) |pidx| {
                 try self.collection.getPtr(pidx).?.put(nidx, undefined);
-
-                // Continue upward propagation
-                try queue.append(trees.collection.get(pidx).?);
             }
         }
     }
@@ -453,6 +425,10 @@ test "domf_set" {
     // .-4   5*
     //    \ /
     //     6
+    //     |
+    //     7
+    //     |
+    //     8
 
     // Arrange
     const allocator = std.testing.allocator;
@@ -466,27 +442,23 @@ test "domf_set" {
     try c.put(3, .{ .jump = 5 });
     try c.put(4, .{ .branch = .{ .left = 2, .right = 6 } });
     try c.put(5, .{ .branch = .{ .left = 6, .right = 5 } });
-    try c.put(6, .exit);
-
-    var sets = DomSets.init(allocator);
-    defer sets.deinit();
-    try sets.build(&c);
-
-    var trees = DomTrees.init(allocator);
-    defer trees.deinit();
-    try trees.build(&sets);
+    try c.put(6, .{ .jump = 7 });
+    try c.put(7, .{ .jump = 8 });
+    try c.put(8, .exit);
 
     // Act
     var df = DomFSets.init(allocator);
     defer df.deinit();
-    try df.build(&c, &trees);
+    try df.build(&c);
 
     // Assert
     try std.testing.expectEqual(0, df.collection.get(0).?.count());
-    try std.testing.expectEqual(0, df.collection.get(1).?.count());
-    try std.testing.expectEqual(2, df.collection.get(2).?.count());
+    try std.testing.expectEqual(1, df.collection.get(1).?.count());
+    try std.testing.expectEqual(0, df.collection.get(2).?.count());
     try std.testing.expectEqual(1, df.collection.get(3).?.count());
     try std.testing.expectEqual(2, df.collection.get(4).?.count());
     try std.testing.expectEqual(2, df.collection.get(5).?.count());
     try std.testing.expectEqual(0, df.collection.get(6).?.count());
+    try std.testing.expectEqual(0, df.collection.get(7).?.count());
+    try std.testing.expectEqual(0, df.collection.get(8).?.count());
 }
