@@ -64,6 +64,8 @@ pub const CFGWalkCallback = struct {
     state: CFGWalkState = .default,
     scope: usize = 0,
     function: usize = 0,
+    block: usize = 0,
+
     symbol_cfg: CFG,
     symbol_statement_map: SymbolStatementMap,
     labels: LabelCollection,
@@ -92,9 +94,6 @@ pub const CFGWalkCallback = struct {
         const instance: symbol.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
-            .function => {
-                self.function = index;
-            },
             .function_signature => {
                 self.state = .function_enter;
             },
@@ -117,13 +116,13 @@ pub const CFGWalkCallback = struct {
                         .block_entry => {
                             try self.symbol_cfg.put(self.scope, .{ .enter = sym });
 
-                            try self.symbol_statement_map.put(sym, index);
+                            try self.symbol_statement_map.put(sym, self.block);
 
                             self.scope = sym;
                             self.state = .block_body;
                         },
                         .block_enter => {
-                            try self.symbol_statement_map.put(sym, index);
+                            try self.symbol_statement_map.put(sym, self.block);
 
                             self.scope = sym;
                             self.state = .block_body;
@@ -134,9 +133,16 @@ pub const CFGWalkCallback = struct {
                 },
                 else => {},
             },
-            .block => switch (self.state) {
-                .block_entry => {},
-                else => self.state = .block_enter,
+            .function => {
+                self.function = index;
+            },
+            .block => {
+                self.block = index;
+
+                switch (self.state) {
+                    .block_entry => {},
+                    else => self.state = .block_enter,
+                }
             },
             else => {},
         }
@@ -221,14 +227,14 @@ test "enter" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 4 },
+        CFGNode{ .enter = 6 },
         cfg.nodes.get(8),
     );
 
     // s
     try std.testing.expectEqualDeep(
         .exit,
-        cfg.nodes.get(4),
+        cfg.nodes.get(6),
     );
 }
 
@@ -251,6 +257,7 @@ test "entrypoints" {
     try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_lib.test_target, &cfg);
 
     // Assert
+
     try std.testing.expectEqualSlices(
         usize,
         &[_]usize{ 8, 18 },
@@ -280,20 +287,20 @@ test "jump" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 4 },
+        CFGNode{ .enter = 7 },
         cfg.nodes.get(13),
     );
 
     // s
     try std.testing.expectEqualDeep(
-        CFGNode{ .jump = 9 },
-        cfg.nodes.get(4),
+        CFGNode{ .jump = 11 },
+        cfg.nodes.get(7),
     );
 
     // e
     try std.testing.expectEqualDeep(
         .exit,
-        cfg.nodes.get(9),
+        cfg.nodes.get(11),
     );
 }
 
@@ -319,7 +326,7 @@ test "branch" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 4 },
+        CFGNode{ .enter = 9 },
         cfg.nodes.get(20),
     );
 
@@ -327,25 +334,25 @@ test "branch" {
     try std.testing.expectEqualDeep(
         CFGNode{
             .branch = .{
-                .left = 11,
-                .right = 16,
+                .left = 14,
+                .right = 18,
             },
         },
-        cfg.nodes.get(4),
+        cfg.nodes.get(9),
     );
 
     // t
     try std.testing.expectEqualDeep(
         CFGNode{
-            .jump = 16,
+            .jump = 18,
         },
-        cfg.nodes.get(11),
+        cfg.nodes.get(14),
     );
 
     // f
     try std.testing.expectEqualDeep(
         .exit,
-        cfg.nodes.get(16),
+        cfg.nodes.get(18),
     );
 }
 
@@ -371,14 +378,14 @@ test "jump loop" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 4 },
+        CFGNode{ .enter = 7 },
         cfg.nodes.get(9),
     );
 
     // s
     try std.testing.expectEqualDeep(
-        CFGNode{ .jump = 4 },
-        cfg.nodes.get(4),
+        CFGNode{ .jump = 7 },
+        cfg.nodes.get(7),
     );
 }
 
@@ -404,19 +411,19 @@ test "branch label reused" {
 
     // fun
     try std.testing.expectEqualDeep(
-        CFGNode{ .enter = 4 },
+        CFGNode{ .enter = 9 },
         cfg.nodes.get(15),
     );
 
     // s
     try std.testing.expectEqualDeep(
-        CFGNode{ .jump = 11 },
-        cfg.nodes.get(4),
+        CFGNode{ .jump = 13 },
+        cfg.nodes.get(9),
     );
 
     // e
     try std.testing.expectEqualDeep(
         .exit,
-        cfg.nodes.get(11),
+        cfg.nodes.get(13),
     );
 }

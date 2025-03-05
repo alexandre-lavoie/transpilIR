@@ -491,6 +491,7 @@ fn statementSymbol(statement: *const lib.Statement, ast: *const lib.AST, symbol_
         },
         .function => |d| statementSymbol(&ast.collection.items[d.signature], ast, symbol_table),
         .function_signature => |d| statementSymbol(&ast.collection.items[d.name], ast, symbol_table),
+        .block => |d| statementSymbol(&ast.collection.items[d.label], ast, symbol_table),
         else => unreachable,
     };
 }
