@@ -222,7 +222,7 @@ test "enter" {
     // fun
     try std.testing.expectEqualDeep(
         CFGNode{ .enter = 4 },
-        cfg.nodes.get(2),
+        cfg.nodes.get(8),
     );
 
     // s
@@ -253,7 +253,7 @@ test "entrypoints" {
     // Assert
     try std.testing.expectEqualSlices(
         usize,
-        &[_]usize{ 2, 12 },
+        &[_]usize{ 8, 18 },
         cfg.entrypoints.items,
     );
 }
@@ -281,7 +281,7 @@ test "jump" {
     // fun
     try std.testing.expectEqualDeep(
         CFGNode{ .enter = 4 },
-        cfg.nodes.get(2),
+        cfg.nodes.get(13),
     );
 
     // s
@@ -320,7 +320,7 @@ test "branch" {
     // fun
     try std.testing.expectEqualDeep(
         CFGNode{ .enter = 4 },
-        cfg.nodes.get(2),
+        cfg.nodes.get(20),
     );
 
     // s
@@ -372,7 +372,7 @@ test "jump loop" {
     // fun
     try std.testing.expectEqualDeep(
         CFGNode{ .enter = 4 },
-        cfg.nodes.get(2),
+        cfg.nodes.get(9),
     );
 
     // s
@@ -402,15 +402,10 @@ test "branch label reused" {
 
     // Assert
 
-    // var iter = cfg.nodes.iterator();
-    // while (iter.next()) |entry| {
-    //     std.debug.print("{} {}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-    // }
-
     // fun
     try std.testing.expectEqualDeep(
         CFGNode{ .enter = 4 },
-        cfg.nodes.get(2),
+        cfg.nodes.get(15),
     );
 
     // s
