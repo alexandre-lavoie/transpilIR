@@ -1,9 +1,12 @@
 const std = @import("std");
 
+const common = @import("../common.zig");
 const statement = @import("statement.zig");
 
 pub const AST = struct {
     collection: Collection,
+
+    span: usize = 0,
 
     const Self = @This();
     const Collection = std.ArrayList(statement.Statement);
@@ -18,7 +21,7 @@ pub const AST = struct {
         self.collection.deinit();
     }
 
-    pub fn entrypoint(self: *Self) ?statement.StatementIndex {
+    pub fn entrypoint(self: *const Self) ?statement.StatementIndex {
         if (self.collection.items.len == 0) return null;
 
         var i = self.collection.items.len - 1;
@@ -31,24 +34,38 @@ pub const AST = struct {
         }
     }
 
-    pub fn get(self: *Self, index: statement.StatementIndex) ?statement.Statement {
+    pub fn get(self: *const Self, index: statement.StatementIndex) ?statement.Statement {
         if (index >= self.collection.items.len) return null;
 
         return self.collection.items[index];
     }
 
-    pub fn getPtr(self: *Self, index: statement.StatementIndex) ?*statement.Statement {
+    pub fn getPtr(self: *const Self, index: statement.StatementIndex) ?*const statement.Statement {
+        if (index >= self.collection.items.len) return null;
+
+        return &self.collection.items[index];
+    }
+
+    pub fn getPtrMut(self: *Self, index: statement.StatementIndex) ?*statement.Statement {
         if (index >= self.collection.items.len) return null;
 
         return &self.collection.items[index];
     }
 
     pub fn append(self: *Self, next_statement: statement.Statement) !usize {
+        self.span = @max(self.span, next_statement.span.end);
+
         const index = self.collection.items.len;
 
         try self.collection.append(next_statement);
 
         return index;
+    }
+
+    pub fn nextSpan(self: *Self) common.SourceSpan {
+        self.span += 1;
+
+        return .{ .start = self.span, .end = self.span };
     }
 
     pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]statement.Statement {

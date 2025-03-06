@@ -103,7 +103,7 @@ pub const SymbolValidateWalkCallback = struct {
         };
     }
 
-    pub fn enter(self: *Self, statement: *ast.Statement) !void {
+    pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         const instance: types.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
@@ -192,7 +192,7 @@ pub const SymbolValidateWalkCallback = struct {
         }
     }
 
-    pub fn exit(self: *Self, statement: *ast.Statement) !void {
+    pub fn exit(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .identifier,
             .literal,

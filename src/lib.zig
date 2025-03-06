@@ -4,6 +4,7 @@ const ast = @import("ast/lib.zig");
 pub const AST = ast.AST;
 pub const ASTWalk = ast.ASTWalk;
 pub const Statement = ast.Statement;
+pub const ast_utils = ast.utils;
 
 const common = @import("common.zig");
 pub const Color = common.Color;
@@ -22,6 +23,7 @@ pub const CFGWalkCallback = flow.CFGWalkCallback;
 pub const CFGWalk = flow.CFGWalk;
 pub const DomSets = flow.DomSets;
 pub const DomTrees = flow.DomTrees;
+pub const SSA = flow.SSA;
 
 const qbe = @import("qbe/lib.zig");
 pub const QBEEmitWalkCallback = qbe.QBEEmitWalkCallback;

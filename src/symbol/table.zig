@@ -1,10 +1,13 @@
 const std = @import("std");
 
 const ast = @import("../ast/lib.zig");
-const types = @import("./types.zig");
 const common = @import("../common.zig");
+const types = @import("./types.zig");
+const utils = @import("utils.zig");
 
 pub const SymbolTable = struct {
+    allocator: std.mem.Allocator,
+
     symbols: SymbolList,
     symbol_identifier_map: SymbolIdentifierMap,
     symbol_instance_map: SymbolInstanceMap,
@@ -15,14 +18,15 @@ pub const SymbolTable = struct {
     const Self = @This();
 
     const SymbolList = std.ArrayList(types.Symbol);
-    const SymbolIdentifierMap = std.StringArrayHashMap(usize);
-    const SymbolInstanceMap = std.AutoArrayHashMap(types.Instance, usize);
+    const SymbolIdentifierMap = std.AutoArrayHashMap(usize, usize);
+    const SymbolInstanceMap = std.AutoArrayHashMap(usize, usize);
 
     const LiteralList = std.ArrayList(types.Literal);
-    const LiteralInstanceMap = std.AutoArrayHashMap(types.Instance, usize);
+    const LiteralInstanceMap = std.AutoArrayHashMap(usize, usize);
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
+            .allocator = allocator,
             .symbols = SymbolList.init(allocator),
             .symbol_identifier_map = SymbolIdentifierMap.init(allocator),
             .symbol_instance_map = SymbolInstanceMap.init(allocator),
@@ -33,35 +37,13 @@ pub const SymbolTable = struct {
 
     pub fn deinit(self: *Self) void {
         for (self.symbols.items) |*symbol| {
-            const allocator = self.symbols.allocator;
+            self.allocator.free(symbol.identifier.name);
 
-            switch (symbol.memory) {
-                .@"struct" => |s| {
-                    allocator.free(s.members);
-                },
-                .@"union" => |u| {
-                    for (u.structs) |s| {
-                        allocator.free(s.members);
-                    }
-
-                    allocator.free(u.structs);
-                },
-                .data => |d| {
-                    allocator.free(d.entries);
-                },
-                .function => |f| {
-                    allocator.free(f.parameters);
-                },
-                else => {},
-            }
-
-            allocator.free(symbol.identifier.name);
+            utils.freeSymbolMemory(self.allocator, symbol.memory);
         }
+
         self.symbols.deinit();
 
-        for (self.symbol_identifier_map.keys()) |*key| {
-            self.symbol_identifier_map.allocator.free(key.*);
-        }
         self.symbol_identifier_map.deinit();
 
         self.symbol_instance_map.deinit();
@@ -77,15 +59,22 @@ pub const SymbolTable = struct {
         self.literal_instance_map.deinit();
     }
 
-    pub fn addSymbol(self: *Self, identifier: *const types.SymbolIdentifier) !usize {
-        const allocator = self.symbols.allocator;
+    pub fn getSymbolPtr(self: *const Self, idx: usize) ?*const types.Symbol {
+        if (idx >= self.symbols.items.len) return null;
+        return &self.symbols.items[idx];
+    }
 
-        const name = try allocator.alloc(u8, identifier.name.len);
-        errdefer allocator.free(name);
+    pub fn getSymbolPtrMut(self: *Self, idx: usize) ?*types.Symbol {
+        if (idx >= self.symbols.items.len) return null;
+        return &self.symbols.items[idx];
+    }
+
+    pub fn addSymbol(self: *Self, identifier: *const types.SymbolIdentifier) !usize {
+        const name = try self.allocator.alloc(u8, identifier.name.len);
+        errdefer self.allocator.free(name);
         @memcpy(name, identifier.name);
 
-        const key = try identifier.key(allocator);
-        errdefer allocator.free(key);
+        const key = try identifier.key(self.allocator);
 
         const identifier_copy: types.SymbolIdentifier = .{
             .name = name,
@@ -104,19 +93,14 @@ pub const SymbolTable = struct {
     }
 
     pub fn getSymbolByIdentifier(self: *const Self, identifier: *const types.SymbolIdentifier) ?*types.Symbol {
-        const allocator = self.symbols.allocator;
-        const key = identifier.key(allocator) catch return null;
-        defer allocator.free(key);
-
+        const key = identifier.key(self.allocator) catch return null;
         const index = self.symbol_identifier_map.get(key) orelse return null;
 
         return &self.symbols.items[index];
     }
 
     pub fn containsSymbolIdentifier(self: *const Self, identifier: *const types.SymbolIdentifier) bool {
-        const allocator = self.symbols.allocator;
-        const key = identifier.key(allocator) catch return false;
-        defer allocator.free(key);
+        const key = identifier.key(self.allocator) catch return false;
 
         if (self.symbol_identifier_map.get(key)) |_| {
             return true;
@@ -125,31 +109,47 @@ pub const SymbolTable = struct {
         }
     }
 
+    pub fn addSymbolInstanceByIndex(self: *Self, sym: usize, instance: *const types.Instance) !usize {
+        const key = try instance.key(self.allocator);
+        try self.symbol_instance_map.put(key, sym);
+
+        return sym;
+    }
+
     pub fn addSymbolInstance(self: *Self, identifier: *const types.SymbolIdentifier, instance: *const types.Instance) !usize {
-        const allocator = self.symbols.allocator;
-        const key = try identifier.key(allocator);
-        defer allocator.free(key);
+        const idkey = try identifier.key(self.allocator);
+        const index = self.symbol_identifier_map.get(idkey) orelse return error.SymbolNotFound;
 
-        const index = self.symbol_identifier_map.get(key) orelse return error.SymbolNotFound;
+        return self.addSymbolInstanceByIndex(index, instance);
+    }
 
-        try self.symbol_instance_map.put(instance.*, index);
+    pub fn updateSymbolInstanceByIndex(self: *Self, sym: usize, instance: *const types.Instance) !usize {
+        const key = try instance.key(self.allocator);
+        try self.symbol_instance_map.put(key, sym);
 
-        return index;
+        return sym;
+    }
+
+    pub fn updateSymbolInstance(self: *Self, identifier: *const types.SymbolIdentifier, instance: *const types.Instance) !usize {
+        const idkey = try identifier.key(self.allocator);
+        const index = self.symbol_identifier_map.get(idkey) orelse return error.SymbolNotFound;
+
+        return self.updateSymbolInstanceByIndex(index, instance);
+    }
+
+    pub fn getSymbolIndexByInstance(self: *const Self, instance: *const types.Instance) ?usize {
+        const key = instance.key(self.allocator) catch return null;
+
+        return self.symbol_instance_map.get(key) orelse return null;
     }
 
     pub fn getSymbolByInstance(self: *const Self, instance: *const types.Instance) ?*types.Symbol {
-        const index = self.symbol_instance_map.get(instance.*) orelse return null;
+        const index = self.getSymbolIndexByInstance(instance) orelse return null;
 
         return &self.symbols.items[index];
     }
 
-    pub fn getSymbolIndexByInstance(self: *const Self, instance: *const types.Instance) ?usize {
-        return self.symbol_instance_map.get(instance.*) orelse return null;
-    }
-
     pub fn addLiteral(self: *Self, value: *const types.LiteralValue) !usize {
-        const allocator = self.literals.allocator;
-
         const index = self.literals.items.len;
 
         const value_copy: types.LiteralValue = switch (value.*) {
@@ -157,8 +157,8 @@ pub const SymbolTable = struct {
             .single => |f| .{ .single = f },
             .double => |f| .{ .double = f },
             .string => |s| scope: {
-                const t = try allocator.alloc(u8, s.len);
-                errdefer allocator.free(t);
+                const t = try self.allocator.alloc(u8, s.len);
+                errdefer self.allocator.free(t);
 
                 @memcpy(t, s);
 
@@ -172,13 +172,17 @@ pub const SymbolTable = struct {
     }
 
     pub fn addLiteralInstance(self: *Self, index: usize, instance: *const types.Instance) !usize {
-        try self.literal_instance_map.put(instance.*, index);
+        const key = try instance.key(self.allocator);
+
+        try self.literal_instance_map.put(key, index);
 
         return index;
     }
 
     pub fn getLiteralByInstance(self: *const Self, instance: *const types.Instance) ?*types.Literal {
-        const index = self.literal_instance_map.get(instance.*) orelse return null;
+        const key = instance.key(self.allocator) catch return null;
+
+        const index = self.literal_instance_map.get(key) orelse return null;
 
         return &self.literals.items[index];
     }

@@ -11,5 +11,8 @@ pub const PrimitiveType = statement.PrimitiveType;
 pub const BinaryOperationtype = statement.BinaryOperationType;
 pub const ComparisonOperationType = statement.ComparisonOperationType;
 
+pub const utils = @import("utils.zig");
+
 const walk = @import("walk.zig");
 pub const ASTWalk = walk.ASTWalk;
+pub const ASTWalkMut = walk.ASTWalkMut;

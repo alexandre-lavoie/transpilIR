@@ -140,7 +140,7 @@ pub const QBEEmitWalkCallback = struct {
         };
     }
 
-    pub fn enter(self: *Self, statement: *ast.Statement) !void {
+    pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .node,
             .linkage,
@@ -168,10 +168,14 @@ pub const QBEEmitWalkCallback = struct {
             .struct_type,
             .union_type,
             => try self.push(.open_curly_brace, null),
-            .phi => {
+            .phi => |d| {
                 try self.push(.phi, null);
 
-                self.state = .phi_enter;
+                if (d.parameters == null) {
+                    self.state = .default;
+                } else {
+                    self.state = .phi_enter;
+                }
             },
             .type_definition => {
                 try self.push(.type, null);
@@ -314,7 +318,7 @@ pub const QBEEmitWalkCallback = struct {
         }
     }
 
-    pub fn exit(self: *Self, statement: *ast.Statement) !void {
+    pub fn exit(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .literal,
             .node,
@@ -331,7 +335,13 @@ pub const QBEEmitWalkCallback = struct {
             .block,
             .line,
             => try self.newline(),
-            .phi => _ = try self.pop(),
+            .phi => |d| {
+                if (d.parameters != null) {
+                    _ = try self.pop();
+                } else {
+                    try self.rot2();
+                }
+            },
             .opaque_type,
             .union_type,
             => try self.push(.close_curly_brace, null),
@@ -801,15 +811,19 @@ pub fn QBEEmitWriter(comptime Reader: type, comptime Writer: type) type {
                     .type_identifier,
                     .label_identifier,
                     => {
-                        const sym = self.symbol_table.getSymbolByInstance(&instance) orelse return error.NotFound;
-                        const name = sym.identifier.name;
+                        if (self.symbol_table.getSymbolByInstance(&instance)) |sym| {
+                            const name = sym.identifier.name;
 
-                        try switch (sym.identifier.scope) {
-                            .local => self.print(color, "%{s}", .{name}),
-                            .global => self.print(color, "${s}", .{name}),
-                            .type => self.print(color, ":{s}", .{name}),
-                            .label => self.print(color, "@{s}", .{name}),
-                        };
+                            try switch (sym.identifier.scope) {
+                                .local => self.print(color, "%{s}", .{name}),
+                                .global => self.print(color, "${s}", .{name}),
+                                .type => self.print(color, ":{s}", .{name}),
+                                .label => self.print(color, "@{s}", .{name}),
+                            };
+                        } else {
+                            // return error.NotFound;
+                            try self.print(color, "???", .{});
+                        }
                     },
                     .string_literal,
                     .double_literal,

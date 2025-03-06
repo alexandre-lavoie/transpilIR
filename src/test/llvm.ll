@@ -20,7 +20,8 @@ s.label:
 
 define private i32 @fparams(ptr %e, i32 %a, ptr %b) {
 s.label:
-    ret i32 0
+    %r = add i32 %a, 0
+    ret i32 %r
 }
 
 define private void @fmath() {

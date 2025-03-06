@@ -5,6 +5,28 @@ const common = @import("../common.zig");
 
 pub const Instance = struct {
     span: common.SourceSpan,
+
+    const Self = @This();
+
+    pub fn key(self: *const Self, allocator: std.mem.Allocator) !usize {
+        const k = try std.fmt.allocPrint(
+            allocator,
+            "{}:{}",
+            .{
+                self.span.start,
+                self.span.end,
+            },
+        );
+        defer allocator.free(k);
+
+        var hasher = std.hash.XxHash64.init(0);
+
+        hasher.update(k);
+
+        const out = hasher.final();
+
+        return out;
+    }
 };
 
 pub const SymbolIdentifier = struct {
@@ -14,29 +36,40 @@ pub const SymbolIdentifier = struct {
 
     const Self = @This();
 
-    pub fn key(self: *const Self, allocator: std.mem.Allocator) ![]const u8 {
+    pub fn key(self: *const Self, allocator: std.mem.Allocator) !usize {
         const scope_value = @intFromEnum(self.scope);
 
-        if (self.function) |f| {
-            return try std.fmt.allocPrint(
-                allocator,
-                "{s}:{}:{}",
-                .{
-                    self.name,
-                    scope_value,
-                    f,
-                },
-            );
-        } else {
-            return try std.fmt.allocPrint(
-                allocator,
-                "{s}:{}",
-                .{
-                    self.name,
-                    scope_value,
-                },
-            );
-        }
+        const k = try l: {
+            if (self.function) |f| {
+                break :l std.fmt.allocPrint(
+                    allocator,
+                    "{s}:{}:{}",
+                    .{
+                        self.name,
+                        scope_value,
+                        f,
+                    },
+                );
+            } else {
+                break :l std.fmt.allocPrint(
+                    allocator,
+                    "{s}:{}",
+                    .{
+                        self.name,
+                        scope_value,
+                    },
+                );
+            }
+        };
+        defer allocator.free(k);
+
+        var hasher = std.hash.XxHash64.init(0);
+
+        hasher.update(k);
+
+        const out = hasher.final();
+
+        return out;
     }
 };
 
@@ -134,11 +167,17 @@ pub const SymbolMemoryFunction = struct {
     vararg: bool = false,
 };
 
+pub const SymbolMemoryChild = struct {
+    parent: usize,
+    index: usize,
+};
+
 pub const SymbolMemory = union(enum) {
     @"opaque": SymbolMemoryOpaque,
     @"struct": SymbolMemoryStruct,
     @"union": SymbolMemoryUnion,
     data: SymbolMemoryData,
+    child: SymbolMemoryChild,
     empty,
     env,
     function: SymbolMemoryFunction,

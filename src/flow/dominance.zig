@@ -12,6 +12,7 @@ pub const DomSets = struct {
     collection: Collection,
 
     const Self = @This();
+    const Entry = struct { previous: ?usize, value: usize };
 
     // Key is node index and value is set of node indices that dominates this node.
     const Collection = std.AutoArrayHashMap(usize, ArrayHashSet);
@@ -29,20 +30,31 @@ pub const DomSets = struct {
     }
 
     pub fn build(self: *Self, graph: *const cfg.CFG) !void {
-        var queue = std.ArrayList(struct { previous: ?usize, value: usize }).init(self.allocator);
+        var queue = std.ArrayList(Entry).init(self.allocator);
         defer queue.deinit();
 
         for (graph.entrypoints.items) |entrypoint| {
             try queue.append(.{ .previous = null, .value = entrypoint });
         }
 
+        var seen = std.AutoArrayHashMap(Entry, void).init(self.allocator);
+        defer seen.deinit();
+
         while (queue.popOrNull()) |current| {
+            if (seen.contains(current)) {
+                continue;
+            }
+
+            try seen.put(current, undefined);
+
             const is_new_dom_set = !self.collection.contains(current.value);
+
             if (is_new_dom_set) {
                 var dom_set = ArrayHashSet.init(self.allocator);
                 try dom_set.put(current.value, undefined);
                 try self.collection.put(current.value, dom_set);
             }
+
             var dom_set: *ArrayHashSet = self.collection.getPtr(current.value).?;
 
             if (current.previous) |previous| {
@@ -98,6 +110,10 @@ pub const DomTrees = struct {
         self.collection.deinit();
     }
 
+    pub fn predecessor(self: *const Self, idx: usize) ?usize {
+        return self.collection.get(idx);
+    }
+
     pub fn build(self: *Self, sets: *const DomSets) !void {
         var idom_set = ArrayHashSet.init(self.allocator);
         defer idom_set.deinit();
@@ -131,7 +147,7 @@ pub const DomTrees = struct {
     }
 };
 
-// Immediate Dominance Frontier Sets
+// Dominance Frontier Sets
 pub const DomFSets = struct {
     allocator: std.mem.Allocator,
     collection: Collection,
@@ -153,7 +169,11 @@ pub const DomFSets = struct {
         self.collection.deinit();
     }
 
-    pub fn build(self: *Self, graph: *const cfg.CFG) !void {
+    pub fn frontiers(self: *const Self, idx: usize) ?*const ArrayHashSet {
+        return self.collection.getPtr(idx);
+    }
+
+    pub fn build(self: *Self, graph: *const cfg.CFG, dom_trees: *const DomTrees) !void {
         // Set of immediately previous nodes for each node
         var previous_sets = Collection.init(self.allocator);
         defer {
@@ -167,33 +187,43 @@ pub const DomFSets = struct {
             try previous_sets.put(i, ArrayHashSet.init(self.allocator));
         }
 
-        // Populate immediately previous nodes
-        var iter = graph.nodes.iterator();
-        while (iter.next()) |entry| {
-            const idx = entry.key_ptr.*;
-
-            switch (entry.value_ptr.*) {
-                .enter => |n| try previous_sets.getPtr(n).?.put(idx, undefined),
-                .jump => |n| try previous_sets.getPtr(n).?.put(idx, undefined),
-                .branch => |n| {
-                    try previous_sets.getPtr(n.left).?.put(idx, undefined);
-                    try previous_sets.getPtr(n.right).?.put(idx, undefined);
-                },
-                .exit => {},
-            }
-        }
-
         // Populate DF
-        iter = graph.nodes.iterator();
+        var iter = graph.nodes.iterator();
         while (iter.next()) |entry| {
             const nidx = entry.key_ptr.*;
 
             // Only DF if there is at least 2 previous nodes
-            const nprevious: ArrayHashSet = previous_sets.get(nidx).?;
+            const nprevious: *const ArrayHashSet = graph.predecessors(nidx) orelse continue;
             if (nprevious.count() < 2) continue;
 
-            for (nprevious.keys()) |pidx| {
+            // Get previous intersection
+            const idom = dom_trees.predecessor(nidx) orelse continue;
+
+            // Initialize queue
+            var queue = std.ArrayList(usize).init(self.allocator);
+            defer queue.deinit();
+
+            for (nprevious.keys()) |prev| {
+                try queue.append(prev);
+            }
+
+            // Keep track of seen nodes
+            var seen = ArrayHashSet.init(self.allocator);
+            defer seen.deinit();
+
+            while (queue.popOrNull()) |pidx| {
+                // Ignore seen nodes
+                if (seen.get(pidx) != null) continue;
+                try seen.put(pidx, undefined);
+
+                // Stop when reached intersection
+                if (pidx == idom) continue;
+
+                // Add current to DF of previous
                 try self.collection.getPtr(pidx).?.put(nidx, undefined);
+
+                // Continue upward propagation
+                try queue.append(dom_trees.collection.get(pidx).?);
             }
         }
     }
@@ -446,15 +476,23 @@ test "domf_set" {
     try c.put(7, .{ .jump = 8 });
     try c.put(8, .exit);
 
+    var sets = DomSets.init(allocator);
+    defer sets.deinit();
+    try sets.build(&c);
+
+    var trees = DomTrees.init(allocator);
+    defer trees.deinit();
+    try trees.build(&sets);
+
     // Act
     var df = DomFSets.init(allocator);
     defer df.deinit();
-    try df.build(&c);
+    try df.build(&c, &trees);
 
     // Assert
     try std.testing.expectEqual(0, df.collection.get(0).?.count());
-    try std.testing.expectEqual(1, df.collection.get(1).?.count());
-    try std.testing.expectEqual(0, df.collection.get(2).?.count());
+    try std.testing.expectEqual(0, df.collection.get(1).?.count());
+    try std.testing.expectEqual(2, df.collection.get(2).?.count());
     try std.testing.expectEqual(1, df.collection.get(3).?.count());
     try std.testing.expectEqual(2, df.collection.get(4).?.count());
     try std.testing.expectEqual(2, df.collection.get(5).?.count());

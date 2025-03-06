@@ -293,7 +293,7 @@ pub const StatementData = union(StatementType) {
 
     phi: struct {
         data_type: StatementIndex,
-        parameters: StatementIndex,
+        parameters: ?StatementIndex,
     },
 
     phi_parameter: struct {

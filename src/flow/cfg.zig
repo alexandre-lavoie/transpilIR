@@ -6,6 +6,8 @@ const symbol = @import("../symbol/lib.zig");
 
 const test_lib = @import("test.zig");
 
+const ArrayHashSet = std.AutoArrayHashMap(usize, void);
+
 pub const CFGNode = union(enum) {
     enter: usize,
     exit,
@@ -17,29 +19,81 @@ pub const CFGNode = union(enum) {
 };
 
 pub const CFG = struct {
+    allocator: std.mem.Allocator,
     nodes: NodeCollection,
     entrypoints: EntrypointCollection,
+    node_predecessors: PredecessorCollection,
 
     const Self = @This();
     const NodeCollection = std.AutoArrayHashMap(usize, CFGNode);
+    const PredecessorCollection = std.AutoArrayHashMap(usize, ArrayHashSet);
     const EntrypointCollection = std.ArrayList(usize);
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
+            .allocator = allocator,
             .nodes = NodeCollection.init(allocator),
             .entrypoints = EntrypointCollection.init(allocator),
+            .node_predecessors = PredecessorCollection.init(allocator),
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.nodes.deinit();
         self.entrypoints.deinit();
+
+        for (self.node_predecessors.values()) |*p| p.deinit();
+        self.node_predecessors.deinit();
     }
 
     pub fn put(self: *Self, idx: usize, node: CFGNode) !void {
         try self.nodes.put(idx, node);
-        if (node == .enter) {
-            try self.entrypoints.append(idx);
+
+        switch (node) {
+            .enter => |n| {
+                try self.entrypoints.append(idx);
+                try self.addPredecessor(n, idx);
+            },
+            .jump => |n| {
+                try self.addPredecessor(n, idx);
+            },
+            .branch => |n| {
+                try self.addPredecessor(n.left, idx);
+                try self.addPredecessor(n.right, idx);
+            },
+            .exit => {},
+        }
+    }
+
+    pub fn predecessors(self: *const Self, idx: usize) ?*const ArrayHashSet {
+        return self.node_predecessors.getPtr(idx);
+    }
+
+    fn addPredecessor(self: *Self, idx: usize, p: usize) !void {
+        if (!self.node_predecessors.contains(idx)) {
+            try self.node_predecessors.put(idx, ArrayHashSet.init(self.allocator));
+        }
+
+        try self.node_predecessors.getPtr(idx).?.put(p, undefined);
+    }
+
+    pub fn build(self: *Self, tree: *const ast.AST, symbol_table: *const symbol.SymbolTable) !void {
+        var callback = CFGWalkCallback.init(
+            self.allocator,
+            symbol_table,
+            self,
+        );
+        defer callback.deinit();
+
+        var walk = ast.ASTWalk.init(self.allocator, tree);
+        defer walk.deinit();
+
+        try walk.start(tree.entrypoint() orelse return error.NotFound);
+        while (try walk.next()) |out| {
+            try switch (out.enter) {
+                true => callback.enter(out.index, out.value),
+                false => callback.exit(out.value),
+            };
         }
     }
 };
@@ -90,7 +144,7 @@ pub const CFGWalkCallback = struct {
         self.symbol_statement_map.deinit();
     }
 
-    pub fn enter(self: *Self, index: ast.StatementIndex, statement: *ast.Statement) !void {
+    pub fn enter(self: *Self, index: ast.StatementIndex, statement: *const ast.Statement) !void {
         const instance: symbol.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
@@ -148,7 +202,7 @@ pub const CFGWalkCallback = struct {
         }
     }
 
-    pub fn exit(self: *Self, statement: *ast.Statement) !void {
+    pub fn exit(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .phi => self.labels.clearAndFree(),
             .halt, .@"return" => try self.symbol_cfg.put(self.scope, .exit),
@@ -425,5 +479,50 @@ test "branch label reused" {
     try std.testing.expectEqualDeep(
         .exit,
         cfg.nodes.get(13),
+    );
+}
+
+test "multiple jumps" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $fun() {@s jmp @l @l jmp @e @e ret}";
+
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = symbol.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    var cfg = CFG.init(allocator);
+    defer cfg.deinit();
+
+    // Act
+    try test_lib.testCFG(allocator, file, &tree, &symbol_table, &test_lib.test_target, &cfg);
+
+    // Assert
+
+    // fun
+    try std.testing.expectEqualDeep(
+        CFGNode{ .enter = 7 },
+        cfg.nodes.get(18),
+    );
+
+    // s
+    try std.testing.expectEqualDeep(
+        CFGNode{ .jump = 12 },
+        cfg.nodes.get(7),
+    );
+
+    // l
+    try std.testing.expectEqualDeep(
+        CFGNode{ .jump = 16 },
+        cfg.nodes.get(12),
+    );
+
+    // e
+    try std.testing.expectEqualDeep(
+        .exit,
+        cfg.nodes.get(16),
     );
 }

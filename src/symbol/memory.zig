@@ -64,7 +64,7 @@ pub const SymbolMemoryWalkCallback = struct {
         self.entries.deinit();
     }
 
-    pub fn enter(self: *Self, statement: *ast.Statement) !void {
+    pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         const instance: types.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
@@ -162,7 +162,7 @@ pub const SymbolMemoryWalkCallback = struct {
         }
     }
 
-    pub fn exit(self: *Self, statement: *ast.Statement) !void {
+    pub fn exit(self: *Self, statement: *const ast.Statement) !void {
         const allocator = self.allocator;
 
         switch (statement.data) {
@@ -293,7 +293,7 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 switch (value) {
                     .local => |local| {
-                        const symbol = &self.symbol_table.symbols.items[local];
+                        const symbol = self.symbol_table.getSymbolPtrMut(local).?;
 
                         symbol.memory = switch (@"type") {
                             .primitive => |primitive| .{
@@ -319,7 +319,7 @@ pub const SymbolMemoryWalkCallback = struct {
             },
             .assignment => {
                 const symbol: *types.Symbol = switch (self.entries.items[0]) {
-                    .local => |index| &self.symbol_table.symbols.items[index],
+                    .local => |index| self.symbol_table.getSymbolPtrMut(index).?,
                     else => unreachable,
                 };
 
@@ -338,7 +338,7 @@ pub const SymbolMemoryWalkCallback = struct {
                 var i: usize = 0;
 
                 const symbol: *types.Symbol = switch (self.entries.items[i]) {
-                    .type => |index| &self.symbol_table.symbols.items[index],
+                    .type => |index| self.symbol_table.getSymbolPtrMut(index).?,
                     else => unreachable,
                 };
                 i += 1;
@@ -563,7 +563,7 @@ pub const SymbolMemoryWalkCallback = struct {
                 var i: usize = 0;
 
                 var symbol: *types.Symbol = switch (self.entries.items[i]) {
-                    .global => |g| &self.symbol_table.symbols.items[g],
+                    .global => |g| self.symbol_table.getSymbolPtrMut(g).?,
                     else => unreachable,
                 };
                 i += 1;
@@ -620,7 +620,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     else => unreachable,
                 };
 
-                const symbol: *types.Symbol = &self.symbol_table.symbols.items[symbol_index];
+                const symbol: *types.Symbol = self.symbol_table.getSymbolPtrMut(symbol_index).?;
 
                 const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[1]) {
                     .linkage => |l| l,
@@ -685,7 +685,7 @@ pub const SymbolMemoryWalkCallback = struct {
                 };
 
                 const symbol: ?*types.Symbol = switch (self.entries.items[i]) {
-                    .global => |g| &self.symbol_table.symbols.items[g],
+                    .global => |g| self.symbol_table.getSymbolPtrMut(g),
                     .local => null,
                     else => unreachable,
                 };

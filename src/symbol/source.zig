@@ -32,7 +32,7 @@ pub const SymbolSourceWalkCallback = struct {
         };
     }
 
-    pub fn enter(self: *Self, statement: *ast.Statement) !void {
+    pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         const allocator = self.allocator;
 
         switch (statement.data) {
@@ -111,7 +111,7 @@ pub const SymbolSourceWalkCallback = struct {
         }
     }
 
-    pub fn exit(self: *Self, statement: *ast.Statement) !void {
+    pub fn exit(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .function => self.function = null,
             else => {},

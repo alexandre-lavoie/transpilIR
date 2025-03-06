@@ -62,7 +62,7 @@ pub fn QBEParser(comptime Reader: type) type {
             );
 
             if (tail.*) |ti| {
-                const ts = self.ast.getPtr(ti) orelse return error.NotFound;
+                var ts = self.ast.getPtrMut(ti) orelse return error.NotFound;
 
                 switch (ts.data) {
                     .node => |*n| {

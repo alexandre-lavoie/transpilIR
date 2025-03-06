@@ -15,7 +15,8 @@ export section "section" "flags" function $flink() {
 
 function w $fparams(env %e, w %a, :t %b) {
 @s
-    ret 0
+    %r =w copy %a
+    ret %r
 }
 
 function $fmath() {
