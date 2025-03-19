@@ -15,6 +15,8 @@ pub const SymbolTable = struct {
     literals: LiteralList,
     literal_instance_map: LiteralInstanceMap,
 
+    span: usize = 0,
+
     const Self = @This();
 
     const SymbolList = std.ArrayList(types.Symbol);
@@ -57,6 +59,12 @@ pub const SymbolTable = struct {
         self.literals.deinit();
 
         self.literal_instance_map.deinit();
+    }
+
+    pub fn nextSpan(self: *Self) common.SourceSpan {
+        self.span += 1;
+
+        return .{ .start = self.span, .end = self.span };
     }
 
     pub fn getSymbolPtr(self: *const Self, idx: usize) ?*const types.Symbol {
@@ -112,6 +120,8 @@ pub const SymbolTable = struct {
     pub fn addSymbolInstanceByIndex(self: *Self, sym: usize, instance: *const types.Instance) !usize {
         const key = try instance.key(self.allocator);
         try self.symbol_instance_map.put(key, sym);
+
+        self.span = @max(self.span, instance.span.end);
 
         return sym;
     }
@@ -175,6 +185,8 @@ pub const SymbolTable = struct {
         const key = try instance.key(self.allocator);
 
         try self.literal_instance_map.put(key, index);
+
+        self.span = @max(self.span, instance.span.end);
 
         return index;
     }

@@ -6,6 +6,10 @@ pub const ASTWalk = ast.ASTWalk;
 pub const Statement = ast.Statement;
 pub const ast_utils = ast.utils;
 
+const c = @import("c/lib.zig");
+pub const CToken = c.CToken;
+pub const CEmitWalkCallback = c.CEmitWalkCallback;
+
 const common = @import("common.zig");
 pub const Color = common.Color;
 pub const CollectionIterator = common.CollectionIterator;

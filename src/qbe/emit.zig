@@ -821,8 +821,7 @@ pub fn QBEEmitWriter(comptime Reader: type, comptime Writer: type) type {
                                 .label => self.print(color, "@{s}", .{name}),
                             };
                         } else {
-                            // return error.NotFound;
-                            try self.print(color, "???", .{});
+                            return error.NotFound;
                         }
                     },
                     .string_literal,
