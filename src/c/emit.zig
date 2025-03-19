@@ -34,6 +34,11 @@ const EmitWalkState = enum {
     array,
     @"struct",
     @"union",
+    data,
+    typed_data,
+    zero_typed_data,
+    offset,
+    linkage,
 };
 
 pub const CEmitWalkCallback = struct {
@@ -90,7 +95,7 @@ pub const CEmitWalkCallback = struct {
         try self.push(.newline, null);
     }
 
-    fn pushSymbol(self: *Self, token_type: token.CTokenType, comptime fmt: []const u8, args: anytype) !void {
+    fn pushSymbol(self: *Self, token_type: token.CTokenType, comptime fmt: []const u8, args: anytype) !symbol.Instance {
         const name = try std.fmt.allocPrint(self.allocator, fmt, args);
         defer self.allocator.free(name);
 
@@ -99,6 +104,7 @@ pub const CEmitWalkCallback = struct {
             .scope = switch (token_type) {
                 .local_identifier => .local,
                 .global_identifier => .global,
+                .type_identifier => .type,
                 else => unreachable,
             },
         };
@@ -109,13 +115,15 @@ pub const CEmitWalkCallback = struct {
         _ = try self.symbol_table.addSymbolInstanceByIndex(sym_idx, &instance);
 
         try self.push(token_type, span);
+
+        return instance;
     }
 
     fn pushField(self: *Self) !void {
         const idx = self.field_index;
         self.field_index += 1;
 
-        try self.pushSymbol(.local_identifier, "f{}", .{idx});
+        _ = try self.pushSymbol(.local_identifier, "f{}", .{idx});
     }
 
     fn pushState(self: *Self, state: EmitWalkState) !void {
@@ -127,101 +135,255 @@ pub const CEmitWalkCallback = struct {
         self.state = self.state_stack.popOrNull() orelse return error.EmptyStack;
     }
 
+    fn literalValueToToken(t: symbol.LiteralValue) token.CTokenType {
+        return switch (t) {
+            .integer => .integer_literal,
+            .single => .single_literal,
+            .double => .double_literal,
+            .string => .string_literal,
+        };
+    }
+
+    fn literalTypeToToken(t: ast.LiteralType) token.CTokenType {
+        return switch (t) {
+            .integer => .integer_literal,
+            .single => .single_literal,
+            .double => .double_literal,
+            .string => .string_literal,
+        };
+    }
+
+    fn pushPrimitiveType(self: *Self, primitive: ast.PrimitiveType) !void {
+        // Sign
+        switch (primitive) {
+            .ptr,
+            .bool,
+            .u8,
+            .u16,
+            .u32,
+            .u64,
+            => try self.push(.unsigned, null),
+            .void,
+            .i8,
+            .i16,
+            .i32,
+            .i64,
+            .f32,
+            .f64,
+            => {},
+        }
+
+        const token_type: token.CTokenType = switch (primitive) {
+            .void,
+            .ptr,
+            => .void,
+            .bool,
+            .u8,
+            .i8,
+            => .char,
+            .u16,
+            .i16,
+            => .short,
+            .u32,
+            .i32,
+            => .int,
+            .u64,
+            .i64,
+            => .long,
+            .f32 => .float,
+            .f64 => .double,
+        };
+        try self.push(token_type, null);
+
+        if (primitive == .ptr) {
+            try self.push(.pointer, null);
+        }
+    }
+
+    fn pushLiteral(self: *Self, val: *const symbol.LiteralValue) !void {
+        const lit = try self.symbol_table.addLiteral(val);
+
+        const span = self.symbol_table.nextSpan();
+        const instance = symbol.Instance{ .span = span };
+        _ = try self.symbol_table.addLiteralInstance(lit, &instance);
+
+        try self.push(Self.literalValueToToken(val.*), span);
+    }
+
+    fn pushArraySize(self: *Self, count: usize) !void {
+        try self.push(.open_bracket, null);
+
+        const val = symbol.LiteralValue{ .integer = @intCast(count) };
+        try self.pushLiteral(&val);
+
+        try self.push(.close_bracket, null);
+    }
+
+    fn pushCast(self: *Self, primitive: ast.PrimitiveType, pointer: bool) !void {
+        try self.push(.open_parenthesis, null);
+
+        try self.pushPrimitiveType(primitive);
+
+        if (pointer) {
+            try self.push(.pointer, null);
+        }
+
+        try self.push(.close_parenthesis, null);
+    }
+
+    fn pushTypePrefix(self: *Self, instance: *const symbol.Instance) !void {
+        const sym = self.symbol_table.getSymbolByInstance(instance) orelse return error.NotFound;
+
+        switch (sym.memory) {
+            .@"opaque",
+            .@"struct",
+            => try self.push(.@"struct", null),
+            .@"union" => try self.push(.@"union", null),
+            else => {},
+        }
+    }
+
+    fn pushDataType(self: *Self, instance: *const symbol.Instance) !void {
+        const sym = self.symbol_table.getSymbolByInstance(instance) orelse return error.NotFound;
+
+        switch (sym.memory) {
+            .data => |data| {
+                try self.push(.@"struct", null);
+                const dt_instance = try self.pushSymbol(.type_identifier, "{s}", .{sym.identifier.name});
+
+                try self.push(.open_curly_brace, null);
+
+                for (data.entries) |entry| {
+                    switch (entry) {
+                        .init => |d| {
+                            try self.pushPrimitiveType(d.type);
+                            try self.pushField();
+
+                            switch (d.value) {
+                                .string => |v| {
+                                    try self.pushArraySize(v.len);
+                                },
+                                else => {},
+                            }
+
+                            try self.push(.semi_colon, null);
+                        },
+                        .zero => |count| {
+                            try self.pushPrimitiveType(.u8);
+                            try self.pushField();
+                            try self.pushArraySize(count);
+                            try self.push(.semi_colon, null);
+                        },
+                    }
+                }
+
+                try self.push(.close_curly_brace, null);
+
+                try self.push(.semi_colon, null);
+                try self.push(.newline, null);
+
+                try self.push(.@"struct", null);
+                try self.push(.type_identifier, dt_instance.span);
+            },
+            else => {},
+        }
+    }
+
     pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .module => try self.push(.module_start, null),
             .identifier => |identifier| {
+                var data_enter = false;
+
                 const token_type: token.CTokenType = switch (identifier.scope) {
-                    .global => .global_identifier,
+                    .type => l: {
+                        switch (self.state) {
+                            .typed_data, .zero_typed_data => return,
+                            else => {},
+                        }
+
+                        const instance = symbol.Instance{ .span = statement.span };
+
+                        try self.pushTypePrefix(&instance);
+
+                        break :l .type_identifier;
+                    },
+                    .global => l: {
+                        switch (self.state) {
+                            .data => {
+                                data_enter = true;
+
+                                const instance = symbol.Instance{ .span = statement.span };
+
+                                try self.pushDataType(&instance);
+                            },
+                            .offset => {
+                                try self.pushCast(.u8, true);
+                                try self.push(.dereference, null);
+                            },
+                            else => {},
+                        }
+
+                        break :l .global_identifier;
+                    },
                     .local => .local_identifier,
-                    .type => .type_identifier,
                     .label => .label_identifier,
                 };
-
-                if (token_type == .type_identifier) {
-                    const instance = symbol.Instance{ .span = statement.span };
-                    const sym = self.symbol_table.getSymbolByInstance(&instance) orelse return error.NotFound;
-
-                    switch (sym.memory) {
-                        .@"opaque",
-                        .@"struct",
-                        => try self.push(.@"struct", null),
-                        .@"union" => try self.push(.@"union", null),
-                        else => {},
-                    }
-                }
 
                 try self.push(
                     token_type,
                     statement.span,
                 );
 
-                if (self.state == .@"struct") {
-                    try self.pushField();
-                    try self.push(.semi_colon, null);
+                switch (self.state) {
+                    .@"struct" => {
+                        try self.pushField();
+                        try self.push(.semi_colon, null);
+                    },
+                    .data => {
+                        if (data_enter) {
+                            try self.push(.assign, null);
+                            try self.push(.open_curly_brace, null);
+                        }
+                    },
+                    else => {},
                 }
             },
             .literal => |literal| {
-                if (self.state == .array) {
-                    try self.pushField();
-                    try self.push(.open_bracket, null);
+                switch (self.state) {
+                    .array => {
+                        try self.pushField();
+                        try self.push(.open_bracket, null);
+                    },
+                    .offset => {
+                        try self.push(.plus, null);
+                    },
+                    .zero_typed_data => {
+                        try self.push(.open_curly_brace, null);
+
+                        var lit = symbol.LiteralValue{ .integer = 0 };
+                        try self.pushLiteral(&lit);
+
+                        try self.push(.close_curly_brace, null);
+
+                        return;
+                    },
+                    .linkage => return,
+                    else => {},
                 }
 
                 try self.push(
-                    switch (literal.type) {
-                        .integer => .integer_literal,
-                        .single => .single_literal,
-                        .double => .double_literal,
-                        .string => .string_literal,
-                    },
+                    Self.literalTypeToToken(literal.type),
                     statement.span,
                 );
             },
             .primitive_type => |primitive| {
-                // Sign
-                switch (primitive) {
-                    .ptr,
-                    .bool,
-                    .u8,
-                    .u16,
-                    .u32,
-                    .u64,
-                    => try self.push(.unsigned, null),
-                    .void,
-                    .i8,
-                    .i16,
-                    .i32,
-                    .i64,
-                    .f32,
-                    .f64,
-                    => {},
+                switch (self.state) {
+                    .typed_data => return,
+                    else => {},
                 }
 
-                const token_type: token.CTokenType = switch (primitive) {
-                    .void,
-                    .ptr,
-                    => .void,
-                    .bool,
-                    .u8,
-                    .i8,
-                    => .char,
-                    .u16,
-                    .i16,
-                    => .short,
-                    .u32,
-                    .i32,
-                    => .int,
-                    .u64,
-                    .i64,
-                    => .long,
-                    .f32 => .float,
-                    .f64 => .double,
-                };
-                try self.push(token_type, null);
-
-                if (primitive == .ptr) {
-                    try self.push(.pointer, null);
-                }
+                try self.pushPrimitiveType(primitive);
 
                 if (self.state == .@"struct") {
                     try self.pushField();
@@ -251,6 +413,21 @@ pub const CEmitWalkCallback = struct {
             },
             .array_type => {
                 try self.pushState(.array);
+            },
+            .data_definition => {
+                try self.pushState(.data);
+            },
+            .typed_data => {
+                try self.pushState(.typed_data);
+            },
+            .zero_type => {
+                self.state = .zero_typed_data;
+            },
+            .offset => {
+                try self.pushState(.offset);
+            },
+            .linkage => {
+                try self.pushState(.linkage);
             },
             else => {},
         }
@@ -285,7 +462,26 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.close_bracket, null);
                 try self.push(.semi_colon, null);
             },
-            .type_definition => {
+            .data_definition => {
+                try self.popState();
+
+                try self.push(.close_curly_brace, null);
+                try self.push(.semi_colon, null);
+                try self.push(.newline, null);
+            },
+            .typed_data => {
+                try self.popState();
+
+                try self.push(.comma, null);
+            },
+            .offset => {
+                try self.popState();
+            },
+            .linkage => {
+                try self.popState();
+            },
+            .type_definition,
+            => {
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
             },
@@ -354,6 +550,11 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
             if (self.state == .done) return false;
 
             const tok = self.reader_next();
+
+            return try self.parse(tok);
+        }
+
+        fn parse(self: *Self, tok: *const token.CToken) !bool {
             switch (tok.token_type) {
                 .module_start => {
                     try self.print(common.Color.identifier, Self.includes, .{});
@@ -375,6 +576,8 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                     .semi_colon,
                     .open_bracket,
                     .close_bracket,
+                    .close_parenthesis,
+                    .comma,
                     => {},
                     else => try self.writer_writeByte(' '),
                 },
@@ -417,7 +620,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                         try switch (literal.value) {
                             .integer => |v| self.print(color, "{}", .{v}),
                             .single => |v| self.print(color, "{d:.}f", .{v}),
-                            .double => |v| self.print(color, "{d:.}d", .{v}),
+                            .double => |v| self.print(color, "{d:.}", .{v}),
                             .string => |v| self.print(color, "\"{s}\"", .{v}), // TODO: Escape string symbols
                         };
                     },
@@ -428,7 +631,9 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
             self.state = switch (tok.token_type) {
                 .newline,
                 .tab,
+                .open_parenthesis,
                 .open_bracket,
+                .dereference,
                 => .default,
                 else => .space,
             };

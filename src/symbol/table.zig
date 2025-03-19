@@ -121,7 +121,7 @@ pub const SymbolTable = struct {
         const key = try instance.key(self.allocator);
         try self.symbol_instance_map.put(key, sym);
 
-        self.span = @max(self.span, instance.span.end);
+        self.span = @max(self.span, instance.span.end + 1);
 
         return sym;
     }
@@ -136,6 +136,8 @@ pub const SymbolTable = struct {
     pub fn updateSymbolInstanceByIndex(self: *Self, sym: usize, instance: *const types.Instance) !usize {
         const key = try instance.key(self.allocator);
         try self.symbol_instance_map.put(key, sym);
+
+        self.span = @max(self.span, instance.span.end + 1);
 
         return sym;
     }
@@ -186,7 +188,7 @@ pub const SymbolTable = struct {
 
         try self.literal_instance_map.put(key, index);
 
-        self.span = @max(self.span, instance.span.end);
+        self.span = @max(self.span, instance.span.end + 1);
 
         return index;
     }

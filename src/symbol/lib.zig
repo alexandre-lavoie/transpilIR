@@ -6,6 +6,8 @@ pub const Symbol = types.Symbol;
 pub const SymbolIndentifier = types.SymbolIdentifier;
 pub const SymbolMemory = types.SymbolMemory;
 pub const Instance = types.Instance;
+pub const LiteralValue = types.LiteralValue;
+pub const LiteralValueType = types.LiteralValueType;
 
 const source = @import("source.zig");
 pub const SymbolSourceWalkCallback = source.SymbolSourceWalkCallback;

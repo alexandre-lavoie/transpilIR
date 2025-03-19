@@ -53,7 +53,7 @@ pub const AST = struct {
     }
 
     pub fn append(self: *Self, next_statement: statement.Statement) !usize {
-        self.span = @max(self.span, next_statement.span.end);
+        self.span = @max(self.span, next_statement.span.end + 1);
 
         const index = self.collection.items.len;
 
