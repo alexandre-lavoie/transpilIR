@@ -39,6 +39,10 @@ const EmitWalkState = enum {
     zero_typed_data,
     offset,
     linkage,
+    function_return,
+    function_signature,
+    block_label,
+    block_body,
 };
 
 pub const CEmitWalkCallback = struct {
@@ -50,6 +54,7 @@ pub const CEmitWalkCallback = struct {
 
     state: EmitWalkState = .default,
     field_index: usize = 0,
+    stored_token: ?token.CToken = null,
 
     const Self = @This();
     const TokenList = std.ArrayList(token.CToken);
@@ -289,6 +294,18 @@ pub const CEmitWalkCallback = struct {
         }
     }
 
+    fn storeToken(self: *Self) !void {
+        self.stored_token = try self.pop();
+    }
+
+    fn loadToken(self: *Self) !void {
+        if (self.stored_token) |t| {
+            try self.push(t.token_type, t.span);
+        } else {
+            return error.NoToken;
+        }
+    }
+
     pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .module => try self.push(.module_start, null),
@@ -346,6 +363,12 @@ pub const CEmitWalkCallback = struct {
                             try self.push(.open_curly_brace, null);
                         }
                     },
+                    .block_label => {
+                        try self.push(.colon, null);
+                        try self.push(.newline, null);
+
+                        self.state = .block_body;
+                    },
                     else => {},
                 }
             },
@@ -380,14 +403,25 @@ pub const CEmitWalkCallback = struct {
             .primitive_type => |primitive| {
                 switch (self.state) {
                     .typed_data => return,
+                    .function_return => try self.storeToken(),
                     else => {},
                 }
 
                 try self.pushPrimitiveType(primitive);
 
-                if (self.state == .@"struct") {
-                    try self.pushField();
-                    try self.push(.semi_colon, null);
+                switch (self.state) {
+                    .@"struct" => {
+                        try self.pushField();
+                        try self.push(.semi_colon, null);
+                    },
+                    .function_return => {
+                        try self.loadToken();
+
+                        self.state = .function_signature;
+
+                        try self.push(.open_parenthesis, null);
+                    },
+                    else => {},
                 }
             },
             .opaque_type => {
@@ -403,8 +437,11 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.open_curly_brace, null);
             },
             .struct_type => {
-                if (self.state == .@"union") {
-                    try self.push(.@"struct", null);
+                switch (self.state) {
+                    .@"union" => {
+                        try self.push(.@"struct", null);
+                    },
+                    else => {},
                 }
 
                 try self.pushState(.@"struct");
@@ -428,6 +465,33 @@ pub const CEmitWalkCallback = struct {
             },
             .linkage => {
                 try self.pushState(.linkage);
+            },
+            .function_signature => {
+                try self.pushState(.function_return);
+            },
+            .block => {
+                try self.pushState(.block_label);
+            },
+            .line => {
+                try self.push(.tab, null);
+            },
+            .@"return" => {
+                try self.push(.tab, null);
+                try self.push(.@"return", null);
+            },
+            .jump => {
+                try self.push(.tab, null);
+                try self.push(.goto, null);
+            },
+            .halt => {
+                try self.push(.tab, null);
+                try self.push(.@"while", null);
+                try self.push(.open_parenthesis, null);
+
+                const val = symbol.LiteralValue{ .integer = 1 };
+                try self.pushLiteral(&val);
+
+                try self.push(.close_parenthesis, null);
             },
             else => {},
         }
@@ -481,6 +545,28 @@ pub const CEmitWalkCallback = struct {
                 try self.popState();
             },
             .type_definition,
+            => {
+                try self.push(.semi_colon, null);
+                try self.push(.newline, null);
+            },
+            .function_signature => {
+                try self.popState();
+
+                try self.push(.close_parenthesis, null);
+                try self.push(.open_curly_brace, null);
+                try self.push(.newline, null);
+            },
+            .function => {
+                try self.push(.close_curly_brace, null);
+                try self.push(.newline, null);
+            },
+            .block => {
+                try self.popState();
+            },
+            .line,
+            .@"return",
+            .jump,
+            .halt,
             => {
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
@@ -578,6 +664,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                     .close_bracket,
                     .close_parenthesis,
                     .comma,
+                    .colon,
                     => {},
                     else => try self.writer_writeByte(' '),
                 },
@@ -634,6 +721,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                 .open_parenthesis,
                 .open_bracket,
                 .dereference,
+                .colon,
                 => .default,
                 else => .space,
             };
@@ -690,5 +778,5 @@ test "Emit" {
     const actual = try output_array.toOwnedSlice();
     defer allocator.free(actual);
 
-    // std.debug.print("{s}", .{actual});
+    std.debug.print("{s}", .{actual});
 }
