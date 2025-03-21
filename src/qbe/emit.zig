@@ -19,9 +19,12 @@ pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST, target: *const common.
 
     try walk.start(tree.entrypoint() orelse return error.NotFound);
     while (try walk.next()) |out| {
-        try switch (out.enter) {
-            true => emit_callback.enter(out.value),
-            false => emit_callback.exit(out.value),
+        const stat = tree.getPtr(out.index) orelse return error.NotFound;
+
+        try switch (out.state) {
+            .enter => emit_callback.enter(stat),
+            .exit => emit_callback.exit(stat),
+            else => {},
         };
     }
 

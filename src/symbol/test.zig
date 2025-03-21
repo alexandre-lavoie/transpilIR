@@ -25,9 +25,12 @@ pub fn testSource(allocator: std.mem.Allocator, file: []const u8, tree: *ast.AST
 
     try walk.start(tree.entrypoint() orelse return error.NotFound);
     while (try walk.next()) |out| {
-        try switch (out.enter) {
-            true => callback.enter(out.value),
-            false => callback.exit(out.value),
+        const stat = tree.getPtr(out.index) orelse return error.NotFound;
+
+        try switch (out.state) {
+            .enter => callback.enter(stat),
+            .exit => callback.exit(stat),
+            else => {},
         };
     }
 }
@@ -46,9 +49,12 @@ pub fn testMemory(allocator: std.mem.Allocator, file: []const u8, tree: *ast.AST
 
     try walk.start(tree.entrypoint() orelse return error.NotFound);
     while (try walk.next()) |out| {
-        try switch (out.enter) {
-            true => callback.enter(out.value),
-            false => callback.exit(out.value),
+        const stat = tree.getPtr(out.index) orelse return error.NotFound;
+
+        try switch (out.state) {
+            .enter => callback.enter(stat),
+            .exit => callback.exit(stat),
+            else => {},
         };
     }
 }
@@ -68,9 +74,12 @@ pub fn testValidate(allocator: std.mem.Allocator, file: []const u8, tree: *ast.A
 
     try walk.start(tree.entrypoint() orelse return error.NotFound);
     while (try walk.next()) |out| {
-        try switch (out.enter) {
-            true => callback.enter(out.value),
-            false => callback.exit(out.value),
+        const stat = tree.getPtr(out.index) orelse return error.NotFound;
+
+        try switch (out.state) {
+            .enter => callback.enter(stat),
+            .exit => callback.exit(stat),
+            else => {},
         };
     }
 }

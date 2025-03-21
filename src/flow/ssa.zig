@@ -54,9 +54,12 @@ pub const SSA = struct {
 
         try ast_walk.start(self.ast.entrypoint() orelse return error.NotFound);
         while (try ast_walk.next()) |out| {
-            try switch (out.enter) {
-                true => graph_walk.enter(out.index, out.value),
-                false => graph_walk.exit(out.value),
+            const stat = self.ast.getPtr(out.index) orelse return error.NotFound;
+
+            try switch (out.state) {
+                .enter => graph_walk.enter(out.index, stat),
+                .exit => graph_walk.exit(stat),
+                else => {},
             };
         }
 
@@ -166,33 +169,36 @@ pub const SSA = struct {
 
             try ast_walk.start(body);
             while (try ast_walk.next()) |out| {
+                const stat = self.ast.getPtr(out.index) orelse return error.NotFound;
+
                 // Find assignment statements
-                const assign: ?usize = switch (out.value.data) {
+                const assign: ?usize = switch (stat.data) {
                     .phi => l: {
-                        if (out.enter) {
+                        if (out.state == .enter) {
                             current_phi = out.index;
                         }
 
                         break :l null;
                     },
-                    .assignment => |n| switch (out.enter) {
-                        true => l: {
+                    .assignment => |n| switch (out.state) {
+                        .enter => l: {
                             current_assign = n.identifier;
 
                             break :l null;
                         },
-                        false => n.identifier,
+                        .exit => n.identifier,
+                        else => null,
                     },
-                    .function_parameter => |n| switch (out.enter) {
-                        true => l: {
+                    .function_parameter => |n| switch (out.state) {
+                        .enter => l: {
                             current_assign = n.value;
 
                             break :l n.value;
                         },
-                        false => null,
+                        else => null,
                     },
                     .line => l: {
-                        if (!out.enter) {
+                        if (out.state == .exit) {
                             current_phi = null;
                         }
 
@@ -225,17 +231,17 @@ pub const SSA = struct {
                 }
 
                 // Find dependency statements
-                const depend: ?usize = switch (out.value.data) {
+                const depend: ?usize = switch (stat.data) {
                     .identifier => |n| l: {
                         if (current_phi != null) break :l null;
                         if (current_assign == out.index) break :l null;
 
-                        break :l switch (out.enter) {
-                            true => switch (n.scope) {
+                        break :l switch (out.state) {
+                            .enter => switch (n.scope) {
                                 .local => out.index,
                                 else => null,
                             },
-                            false => null,
+                            else => null,
                         };
                     },
                     else => null,
@@ -421,9 +427,11 @@ pub const SSA = struct {
 
         try ast_walk.start(self.ast.entrypoint().?);
         while (try ast_walk.next()) |out| {
-            if (!out.enter) continue;
+            if (out.state != .enter) continue;
 
-            switch (out.value.data) {
+            const stat = self.ast.getPtr(out.index) orelse return error.NotFound;
+
+            switch (stat.data) {
                 .phi_parameter => |n| {
                     const value_ident = try ast.utils.getStatementIdentifierByIndex(
                         n.value,
@@ -486,14 +494,16 @@ pub const SSA = struct {
             try ast_walk.start(block);
 
             while (try ast_walk.next()) |out| {
-                if (!out.enter) continue;
+                if (out.state != .enter) continue;
 
-                switch (out.value.data) {
+                const stat = self.ast.getPtr(out.index) orelse return error.NotFound;
+
+                switch (stat.data) {
                     .identifier => |n| {
                         // Only modify local variables
                         if (n.scope != .local) continue;
 
-                        const instance: symbol.Instance = .{ .span = out.value.span };
+                        const instance: symbol.Instance = .{ .span = stat.span };
                         const sidx = self.symbol_table.getSymbolIndexByInstance(&instance) orelse continue;
                         const sym = self.symbol_table.getSymbolPtr(sidx).?;
 

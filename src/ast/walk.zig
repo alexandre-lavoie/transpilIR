@@ -10,248 +10,271 @@ const ASTWalkEntry = struct {
     enter: bool = true,
 };
 
+pub const ASTWalkOutputState = enum {
+    enter,
+    middle,
+    exit,
+};
+
 pub const ASTWalkOutput = struct {
+    state: ASTWalkOutputState,
     index: statement.StatementIndex,
-    value: *const statement.Statement,
-    enter: bool = true,
+    previous: ?statement.StatementIndex = null,
+    next: ?statement.StatementIndex = null,
 };
 
-pub const ASTWalkOutputMut = struct {
-    index: statement.StatementIndex,
-    value: *statement.Statement,
-    enter: bool = true,
-};
+pub const ASTWalk = struct {
+    tree: *const ast.AST,
+    queue: EntryList,
+    stack: EntryList,
+    scope: ScopeStack,
 
-fn ASTWalkT(Tree: type, Entry: type) type {
-    return struct {
-        tree: Tree,
-        queue: EntryList,
-        stack: EntryList,
+    previous: ?statement.StatementIndex = null,
 
-        const Self = @This();
-        const EntryList = std.ArrayList(ASTWalkEntry);
+    const Self = @This();
+    const EntryList = std.ArrayList(ASTWalkEntry);
+    const ScopeStack = std.ArrayList(usize);
 
-        pub fn init(allocator: std.mem.Allocator, tree: Tree) Self {
-            return Self{
-                .tree = tree,
-                .queue = EntryList.init(allocator),
-                .stack = EntryList.init(allocator),
-            };
-        }
+    pub fn init(allocator: std.mem.Allocator, tree: *const ast.AST) Self {
+        return Self{
+            .tree = tree,
+            .queue = EntryList.init(allocator),
+            .stack = EntryList.init(allocator),
+            .scope = ScopeStack.init(allocator),
+        };
+    }
 
-        pub fn deinit(self: *Self) void {
-            self.queue.deinit();
-            self.stack.deinit();
-        }
+    pub fn deinit(self: *Self) void {
+        self.queue.deinit();
+        self.stack.deinit();
+        self.scope.deinit();
+    }
 
-        pub fn start(self: *Self, index: statement.StatementIndex) !void {
-            try self.queue.append(.{ .index = index });
-        }
+    pub fn start(self: *Self, index: statement.StatementIndex) !void {
+        try self.queue.append(.{ .index = index });
+    }
 
-        pub fn next(self: *Self) !?Entry {
-            const entry = self.queue.popOrNull() orelse return null;
+    pub fn next(self: *Self) !?ASTWalkOutput {
+        const peek = self.queue.getLastOrNull() orelse return null;
 
-            const stat = self.tree.getPtr(entry.index) orelse return error.NotFound;
+        if (!peek.enter) {
+            const entry = self.queue.pop();
 
-            if (!entry.enter) {
-                return .{
-                    .index = entry.index,
-                    .value = stat,
-                    .enter = false,
-                };
-            }
+            self.previous = entry.index;
 
-            var exit_after = true;
-            switch (stat.data) {
-                .identifier => {},
-                .literal => {},
-                .linkage => |*d| {
-                    if (d.section) |section| try self.stack.append(.{ .index = section });
-                    if (d.flags) |flags| try self.stack.append(.{ .index = flags });
-                },
-                .node => |*d| {
-                    try self.stack.append(.{ .index = d.value });
-
-                    exit_after = false;
-                    try self.stack.append(.{ .index = entry.index, .enter = false });
-
-                    if (d.next) |index| try self.stack.append(.{ .index = index });
-                },
-                .module => |*d| {
-                    if (d.types) |types| try self.stack.append(.{ .index = types });
-                    if (d.data) |data| try self.stack.append(.{ .index = data });
-                    if (d.functions) |functions| try self.stack.append(.{ .index = functions });
-                },
-                .data_definition => |*d| {
-                    try self.stack.append(.{ .index = d.identifier });
-                    try self.stack.append(.{ .index = d.linkage });
-                    try self.stack.append(.{ .index = d.values });
-                },
-                .typed_data => |*d| {
-                    try self.stack.append(.{ .index = d.type });
-                    try self.stack.append(.{ .index = d.value });
-                },
-                .offset => |*d| {
-                    try self.stack.append(.{ .index = d.identifier });
-                    try self.stack.append(.{ .index = d.value });
-                },
-                .array_type => |*d| {
-                    try self.stack.append(.{ .index = d.item });
-                    try self.stack.append(.{ .index = d.count });
-                },
-                .env_type => {},
-                .opaque_type => |*d| {
-                    if (d.alignment) |alignment| try self.stack.append(.{ .index = alignment });
-                    try self.stack.append(.{ .index = d.size });
-                },
-                .primitive_type => {},
-                .struct_type => |*d| {
-                    if (d.alignment) |alignment| try self.stack.append(.{ .index = alignment });
-                    try self.stack.append(.{ .index = d.members });
-                },
-                .type_definition => |*d| {
-                    try self.stack.append(.{ .index = d.identifier });
-                    try self.stack.append(.{ .index = d.type });
-                },
-                .union_type => |*d| {
-                    if (d.alignment) |alignment| try self.stack.append(.{ .index = alignment });
-                    try self.stack.append(.{ .index = d.types });
-                },
-                .zero_type => {},
-                .block => |*d| {
-                    try self.stack.append(.{ .index = d.label });
-                    if (d.phis) |phis| try self.stack.append(.{ .index = phis });
-                    if (d.lines) |lines| try self.stack.append(.{ .index = lines });
-                    try self.stack.append(.{ .index = d.flow });
-                },
-                .line => |d| {
-                    try self.stack.append(.{ .index = d });
-                },
-                .call => |*d| {
-                    try self.stack.append(.{ .index = d.target });
-                    try self.stack.append(.{ .index = d.return_type });
-                    if (d.parameters) |parameters| try self.stack.append(.{ .index = parameters });
-                },
-                .function => |*d| {
-                    try self.stack.append(.{ .index = d.signature });
-                    try self.stack.append(.{ .index = d.body });
-                },
-                .function_signature => |*d| {
-                    try self.stack.append(.{ .index = d.name });
-                    try self.stack.append(.{ .index = d.linkage });
-                    try self.stack.append(.{ .index = d.return_type });
-                    if (d.parameters) |parameters| try self.stack.append(.{ .index = parameters });
-                },
-                .function_parameter => |*d| {
-                    try self.stack.append(.{ .index = d.value });
-                    try self.stack.append(.{ .index = d.type });
-                },
-                .call_parameter => |*d| {
-                    try self.stack.append(.{ .index = d.value });
-                    try self.stack.append(.{ .index = d.type });
-                },
-                .variadic_parameter => {},
-                .vaarg => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.parameter });
-                },
-                .vastart => |*d| {
-                    try self.stack.append(.{ .index = d.parameter });
-                },
-                .allocate => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.alignment });
-                    try self.stack.append(.{ .index = d.size });
-                },
-                .assignment => |*d| {
-                    try self.stack.append(.{ .index = d.identifier });
-                    try self.stack.append(.{ .index = d.statement });
-                },
-                .blit => |*d| {
-                    try self.stack.append(.{ .index = d.source });
-                    try self.stack.append(.{ .index = d.target });
-                    try self.stack.append(.{ .index = d.size });
-                },
-                .convert => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.to_type });
-                    try self.stack.append(.{ .index = d.from_type });
-                    try self.stack.append(.{ .index = d.value });
-                },
-                .copy => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.value });
-                },
-                .cast => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.value });
-                },
-                .load => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.memory_type });
-                    try self.stack.append(.{ .index = d.address });
-                },
-                .store => |*d| {
-                    try self.stack.append(.{ .index = d.memory_type });
-                    try self.stack.append(.{ .index = d.value });
-                    try self.stack.append(.{ .index = d.address });
-                },
-                .branch => |*d| {
-                    try self.stack.append(.{ .index = d.condition });
-                    try self.stack.append(.{ .index = d.true });
-                    try self.stack.append(.{ .index = d.false });
-                },
-                .halt => {},
-                .jump => |*d| {
-                    try self.stack.append(.{ .index = d.identifier });
-                },
-                .phi => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    if (d.parameters) |p| try self.stack.append(.{ .index = p });
-                },
-                .phi_parameter => |*d| {
-                    try self.stack.append(.{ .index = d.identifier });
-                    try self.stack.append(.{ .index = d.value });
-                },
-                .@"return" => |*d| {
-                    if (d.value) |value| try self.stack.append(.{ .index = value });
-                },
-                .binary_operation => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.left });
-                    try self.stack.append(.{ .index = d.right });
-                },
-                .comparison => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.comparison_type });
-                    try self.stack.append(.{ .index = d.left });
-                    try self.stack.append(.{ .index = d.right });
-                },
-                .negate => |*d| {
-                    try self.stack.append(.{ .index = d.data_type });
-                    try self.stack.append(.{ .index = d.value });
-                },
-            }
-
-            if (exit_after) {
-                try self.stack.append(.{ .index = entry.index, .enter = false });
-            }
-
-            while (self.stack.popOrNull()) |e| {
-                try self.queue.append(e);
-            }
+            _ = self.scope.popOrNull() orelse return error.EmptyScope;
 
             return .{
+                .state = .exit,
                 .index = entry.index,
-                .value = stat,
-                .enter = true,
             };
         }
-    };
-}
 
-pub const ASTWalk = ASTWalkT(*const ast.AST, ASTWalkOutput);
-pub const ASTWalkMut = ASTWalkT(*ast.AST, ASTWalkOutputMut);
+        if (self.previous) |p| {
+            self.previous = null;
+
+            const index = self.scope.getLastOrNull() orelse return null;
+
+            return .{
+                .state = .middle,
+                .index = index,
+                .previous = p,
+                .next = peek.index,
+            };
+        }
+
+        const entry = self.queue.pop();
+
+        try self.scope.append(entry.index);
+
+        const stat = self.tree.getPtr(entry.index) orelse return error.NotFound;
+
+        var exit_after = true;
+        switch (stat.data) {
+            .identifier => {},
+            .literal => {},
+            .linkage => |*d| {
+                if (d.section) |section| try self.stack.append(.{ .index = section });
+                if (d.flags) |flags| try self.stack.append(.{ .index = flags });
+            },
+            .node => |*d| {
+                try self.stack.append(.{ .index = d.value });
+
+                exit_after = false;
+                try self.stack.append(.{ .index = entry.index, .enter = false });
+
+                if (d.next) |index| try self.stack.append(.{ .index = index });
+            },
+            .module => |*d| {
+                if (d.types) |types| try self.stack.append(.{ .index = types });
+                if (d.data) |data| try self.stack.append(.{ .index = data });
+                if (d.functions) |functions| try self.stack.append(.{ .index = functions });
+            },
+            .data_definition => |*d| {
+                try self.stack.append(.{ .index = d.identifier });
+                try self.stack.append(.{ .index = d.linkage });
+                try self.stack.append(.{ .index = d.values });
+            },
+            .typed_data => |*d| {
+                try self.stack.append(.{ .index = d.type });
+                try self.stack.append(.{ .index = d.value });
+            },
+            .offset => |*d| {
+                try self.stack.append(.{ .index = d.identifier });
+                try self.stack.append(.{ .index = d.value });
+            },
+            .array_type => |*d| {
+                try self.stack.append(.{ .index = d.item });
+                try self.stack.append(.{ .index = d.count });
+            },
+            .env_type => {},
+            .opaque_type => |*d| {
+                if (d.alignment) |alignment| try self.stack.append(.{ .index = alignment });
+                try self.stack.append(.{ .index = d.size });
+            },
+            .primitive_type => {},
+            .struct_type => |*d| {
+                if (d.alignment) |alignment| try self.stack.append(.{ .index = alignment });
+                try self.stack.append(.{ .index = d.members });
+            },
+            .type_definition => |*d| {
+                try self.stack.append(.{ .index = d.identifier });
+                try self.stack.append(.{ .index = d.type });
+            },
+            .union_type => |*d| {
+                if (d.alignment) |alignment| try self.stack.append(.{ .index = alignment });
+                try self.stack.append(.{ .index = d.types });
+            },
+            .zero_type => {},
+            .block => |*d| {
+                try self.stack.append(.{ .index = d.label });
+                if (d.phis) |phis| try self.stack.append(.{ .index = phis });
+                if (d.lines) |lines| try self.stack.append(.{ .index = lines });
+                try self.stack.append(.{ .index = d.flow });
+            },
+            .line => |d| {
+                try self.stack.append(.{ .index = d });
+            },
+            .call => |*d| {
+                try self.stack.append(.{ .index = d.target });
+                try self.stack.append(.{ .index = d.return_type });
+                if (d.parameters) |parameters| try self.stack.append(.{ .index = parameters });
+            },
+            .function => |*d| {
+                try self.stack.append(.{ .index = d.signature });
+                try self.stack.append(.{ .index = d.body });
+            },
+            .function_signature => |*d| {
+                try self.stack.append(.{ .index = d.name });
+                try self.stack.append(.{ .index = d.linkage });
+                try self.stack.append(.{ .index = d.return_type });
+                if (d.parameters) |parameters| try self.stack.append(.{ .index = parameters });
+            },
+            .function_parameter => |*d| {
+                try self.stack.append(.{ .index = d.value });
+                try self.stack.append(.{ .index = d.type });
+            },
+            .call_parameter => |*d| {
+                try self.stack.append(.{ .index = d.value });
+                try self.stack.append(.{ .index = d.type });
+            },
+            .variadic_parameter => {},
+            .vaarg => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.parameter });
+            },
+            .vastart => |*d| {
+                try self.stack.append(.{ .index = d.parameter });
+            },
+            .allocate => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.alignment });
+                try self.stack.append(.{ .index = d.size });
+            },
+            .assignment => |*d| {
+                try self.stack.append(.{ .index = d.identifier });
+                try self.stack.append(.{ .index = d.statement });
+            },
+            .blit => |*d| {
+                try self.stack.append(.{ .index = d.source });
+                try self.stack.append(.{ .index = d.target });
+                try self.stack.append(.{ .index = d.size });
+            },
+            .convert => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.to_type });
+                try self.stack.append(.{ .index = d.from_type });
+                try self.stack.append(.{ .index = d.value });
+            },
+            .copy => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.value });
+            },
+            .cast => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.value });
+            },
+            .load => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.memory_type });
+                try self.stack.append(.{ .index = d.address });
+            },
+            .store => |*d| {
+                try self.stack.append(.{ .index = d.memory_type });
+                try self.stack.append(.{ .index = d.value });
+                try self.stack.append(.{ .index = d.address });
+            },
+            .branch => |*d| {
+                try self.stack.append(.{ .index = d.condition });
+                try self.stack.append(.{ .index = d.true });
+                try self.stack.append(.{ .index = d.false });
+            },
+            .halt => {},
+            .jump => |*d| {
+                try self.stack.append(.{ .index = d.identifier });
+            },
+            .phi => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                if (d.parameters) |p| try self.stack.append(.{ .index = p });
+            },
+            .phi_parameter => |*d| {
+                try self.stack.append(.{ .index = d.identifier });
+                try self.stack.append(.{ .index = d.value });
+            },
+            .@"return" => |*d| {
+                if (d.value) |value| try self.stack.append(.{ .index = value });
+            },
+            .binary_operation => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.left });
+                try self.stack.append(.{ .index = d.right });
+            },
+            .comparison => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.comparison_type });
+                try self.stack.append(.{ .index = d.left });
+                try self.stack.append(.{ .index = d.right });
+            },
+            .negate => |*d| {
+                try self.stack.append(.{ .index = d.data_type });
+                try self.stack.append(.{ .index = d.value });
+            },
+        }
+
+        if (exit_after) {
+            try self.stack.append(.{ .index = entry.index, .enter = false });
+        }
+
+        while (self.stack.popOrNull()) |e| {
+            try self.queue.append(e);
+        }
+
+        return .{
+            .state = .enter,
+            .index = entry.index,
+        };
+    }
+};
 
 //
 // Test Utils
@@ -269,9 +292,11 @@ fn testEnter(allocator: std.mem.Allocator, buffer: anytype) ![]statement.Stateme
 
     try walk.start(tree.entrypoint() orelse return error.NotFound);
     while (try walk.next()) |out| {
-        try switch (out.enter) {
-            true => statements.append(out.value.*),
-            false => {},
+        const stat = tree.get(out.index) orelse return error.NotFound;
+
+        try switch (out.state) {
+            .enter => statements.append(stat),
+            else => {},
         };
     }
 
@@ -280,6 +305,36 @@ fn testEnter(allocator: std.mem.Allocator, buffer: anytype) ![]statement.Stateme
 
 fn assertEnter(allocator: std.mem.Allocator, buffer: anytype, expected: []const statement.StatementType) !void {
     const statements = try testEnter(allocator, buffer);
+    defer allocator.free(statements);
+
+    try test_lib.assertStatementTypes(allocator, expected, statements);
+}
+
+fn testMiddle(allocator: std.mem.Allocator, buffer: anytype) ![]statement.Statement {
+    var tree = try test_lib.testAST(allocator, buffer);
+    defer tree.deinit();
+
+    var statements = std.ArrayList(statement.Statement).init(allocator);
+    defer statements.deinit();
+
+    var walk = ASTWalk.init(allocator, &tree);
+    defer walk.deinit();
+
+    try walk.start(tree.entrypoint() orelse return error.NotFound);
+    while (try walk.next()) |out| {
+        const stat = tree.get(out.index) orelse return error.NotFound;
+
+        try switch (out.state) {
+            .middle => statements.append(stat),
+            else => {},
+        };
+    }
+
+    return try statements.toOwnedSlice();
+}
+
+fn assertMiddle(allocator: std.mem.Allocator, buffer: anytype, expected: []const statement.StatementType) !void {
+    const statements = try testMiddle(allocator, buffer);
     defer allocator.free(statements);
 
     try test_lib.assertStatementTypes(allocator, expected, statements);
@@ -412,4 +467,35 @@ test "function" {
 
     // Act + Assert
     try assertEnter(allocator, file, &expected);
+}
+
+test "middle" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $fun(w %a, :tag %b) {@s %t =w add 1, %a %t2 =w ceqs 1, 1 @e ret}";
+    const expected = [_]statement.StatementType{
+        .function_signature,
+        .function_signature,
+        .function_signature,
+        .function_parameter,
+        .function_signature,
+        .function_parameter,
+        .function,
+        .block,
+        .assignment,
+        .binary_operation,
+        .binary_operation,
+        .block,
+        .assignment,
+        .comparison,
+        .comparison,
+        .comparison,
+        .block,
+        .function,
+        .block,
+    };
+
+    // Act + Assert
+    try assertMiddle(allocator, file, &expected);
 }

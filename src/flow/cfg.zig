@@ -90,9 +90,12 @@ pub const CFG = struct {
 
         try walk.start(tree.entrypoint() orelse return error.NotFound);
         while (try walk.next()) |out| {
-            try switch (out.enter) {
-                true => callback.enter(out.index, out.value),
-                false => callback.exit(out.value),
+            const stat = tree.getPtr(out.index) orelse return error.NotFound;
+
+            try switch (out.state) {
+                .enter => callback.enter(out.index, stat),
+                .exit => callback.exit(stat),
+                else => {},
             };
         }
     }
