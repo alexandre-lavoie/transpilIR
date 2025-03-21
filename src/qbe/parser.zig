@@ -1414,7 +1414,7 @@ pub fn QBEParser(comptime Reader: type) type {
         fn binaryOperation(self: *Self, data_type: ast.StatementIndex) !ast.StatementIndex {
             const start = self.previous.span.start;
 
-            const operation_type: ast.BinaryOperationtype = switch (self.previous.token_type) {
+            const operation_type: ast.BinaryOperationType = switch (self.previous.token_type) {
                 .addition => .addition,
                 .divide => .divide,
                 .divide_unsigned => .divide_unsigned,

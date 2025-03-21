@@ -46,10 +46,15 @@ pub const CEmitWalkCallback = struct {
 
     const opaque_identifier = symbol.SymbolIndentifier{ .name = "opaque", .scope = .local };
 
-    const link_export_identifier = symbol.SymbolIndentifier{ .name = "LINK_EXPORT", .scope = .local };
-    const link_thread_identifier = symbol.SymbolIndentifier{ .name = "LINK_THREAD", .scope = .local };
+    const link_export_identifier = symbol.SymbolIndentifier{ .name = "EXPORT", .scope = .local };
+    const link_thread_identifier = symbol.SymbolIndentifier{ .name = "THREAD", .scope = .local };
     const link_section_identifier = symbol.SymbolIndentifier{ .name = "LINK_SECTION", .scope = .local };
     const link_flags_identifier = symbol.SymbolIndentifier{ .name = "LINK_FLAGS", .scope = .local };
+
+    const allocate_identifier = symbol.SymbolIndentifier{ .name = "ALLOCATE", .scope = .local };
+    const blit_identifier = symbol.SymbolIndentifier{ .name = "BLIT", .scope = .local };
+    const all_nan_identifier = symbol.SymbolIndentifier{ .name = "ALL_NAN", .scope = .local };
+    const any_nan_identifier = symbol.SymbolIndentifier{ .name = "ANY_NAN", .scope = .local };
 
     pub fn init(allocator: std.mem.Allocator, target: *const common.Target, symbol_table: *symbol.SymbolTable) Self {
         return .{
@@ -80,9 +85,27 @@ pub const CEmitWalkCallback = struct {
     }
 
     fn peek(self: *Self) !token.CTokenType {
-        if (self.tokens.items.len == 0) return error.EmptyStack;
+        if (self.tokens.getLastOrNull()) |t| {
+            return t.token_type;
+        } else {
+            return error.EmptyStack;
+        }
+    }
 
-        return self.tokens.items[self.tokens.items.len - 1].token_type;
+    fn dupe(self: *Self) !void {
+        if (self.tokens.getLastOrNull()) |t| {
+            try self.push(t.token_type, t.span);
+        } else {
+            return error.EmptyStack;
+        }
+    }
+
+    fn rot2(self: *Self) !void {
+        const t = try self.pop();
+        const b = try self.pop();
+
+        try self.push(t.token_type, t.span);
+        try self.push(b.token_type, b.span);
     }
 
     fn newline(self: *Self) !void {
@@ -124,6 +147,11 @@ pub const CEmitWalkCallback = struct {
         return instance;
     }
 
+    fn pushSymbolIdentifier(self: *Self, token_type: token.CTokenType, identifier: *const symbol.SymbolIndentifier) !symbol.Instance {
+        const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(identifier) orelse return error.NotFound;
+        return try self.pushSymbolInstance(token_type, sym_idx);
+    }
+
     fn literalValueToToken(t: symbol.LiteralValue) token.CTokenType {
         return switch (t) {
             .integer => .integer_literal,
@@ -143,44 +171,22 @@ pub const CEmitWalkCallback = struct {
     }
 
     fn pushPrimitiveType(self: *Self, primitive: ast.PrimitiveType) !void {
-        // Sign
-        switch (primitive) {
-            .ptr,
-            .bool,
-            .u8,
-            .u16,
-            .u32,
-            .u64,
-            => try self.push(.unsigned, null),
-            .void,
-            .i8,
-            .i16,
-            .i32,
-            .i64,
-            .f32,
-            .f64,
-            => {},
-        }
-
         const token_type: token.CTokenType = switch (primitive) {
             .void,
             .ptr,
             => .void,
+            .i8 => .i8,
             .bool,
             .u8,
-            .i8,
-            => .char,
-            .u16,
-            .i16,
-            => .short,
-            .u32,
-            .i32,
-            => .int,
-            .u64,
-            .i64,
-            => .long,
-            .f32 => .float,
-            .f64 => .double,
+            => .u8,
+            .i16 => .i16,
+            .u16 => .u16,
+            .i32 => .i32,
+            .u32 => .u32,
+            .i64 => .i64,
+            .u64 => .u64,
+            .f32 => .f32,
+            .f64 => .f64,
         };
         try self.push(token_type, null);
 
@@ -317,6 +323,42 @@ pub const CEmitWalkCallback = struct {
         }
     }
 
+    fn dropUntil(self: *Self, token_type: token.CTokenType) !void {
+        while ((try self.peek()) != token_type) {
+            _ = try self.pop();
+        }
+    }
+
+    fn binaryOpToToken(op: ast.BinaryOperationType) token.CTokenType {
+        return switch (op) {
+            .addition => .plus,
+            .divide => .divide,
+            .divide_unsigned => .divide,
+            .multiply => .multiply,
+            .remainder => .remainder,
+            .remainder_unsigned => .remainder,
+            .subtract => .minus,
+            .arthimetic_shift_right => .shift_right,
+            .@"and" => .bitwise_and,
+            .@"or" => .bitwise_or,
+            .logical_shift_right => .shift_right,
+            .shift_left => .shift_left,
+            .xor => .bitwise_xor,
+        };
+    }
+
+    fn comparisonOpToToken(op: ast.ComparisonOperationType) token.CTokenType {
+        return switch (op) {
+            .equal => .equal,
+            .greater_than => .greater_than,
+            .greater_than_equal => .greater_than_equal,
+            .less_than => .less_than,
+            .less_than_equal => .less_than_equal,
+            .not_equal => .not_equal,
+            else => .comma,
+        };
+    }
+
     pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .module => {
@@ -328,6 +370,11 @@ pub const CEmitWalkCallback = struct {
                 _ = try self.symbol_table.addSymbol(&link_thread_identifier);
                 _ = try self.symbol_table.addSymbol(&link_section_identifier);
                 _ = try self.symbol_table.addSymbol(&link_flags_identifier);
+
+                _ = try self.symbol_table.addSymbol(&allocate_identifier);
+                _ = try self.symbol_table.addSymbol(&blit_identifier);
+                _ = try self.symbol_table.addSymbol(&any_nan_identifier);
+                _ = try self.symbol_table.addSymbol(&all_nan_identifier);
 
                 try self.push(.module_start, null);
             },
@@ -363,11 +410,9 @@ pub const CEmitWalkCallback = struct {
             },
             .opaque_type => {
                 try self.push(.open_curly_brace, null);
-                try self.push(.unsigned, null);
-                try self.push(.char, null);
+                try self.push(.u8, null);
 
-                const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&opaque_identifier) orelse return error.NotFound;
-                _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                _ = try self.pushSymbolIdentifier(.local_identifier, &opaque_identifier);
 
                 try self.push(.open_bracket, null);
             },
@@ -392,21 +437,15 @@ pub const CEmitWalkCallback = struct {
                 try self.storeToken();
 
                 if (l.@"export") {
-                    const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&link_export_identifier) orelse return error.NotFound;
-
-                    _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_export_identifier);
                 }
 
                 if (l.thread) {
-                    const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&link_thread_identifier) orelse return error.NotFound;
-
-                    _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_thread_identifier);
                 }
 
                 if (l.section != null) {
-                    const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&link_section_identifier) orelse return error.NotFound;
-
-                    _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_section_identifier);
                     try self.push(.open_parenthesis, null);
                 }
             },
@@ -440,6 +479,27 @@ pub const CEmitWalkCallback = struct {
 
                 try self.push(.close_parenthesis, null);
             },
+            .blit => {
+                _ = try self.pushSymbolIdentifier(.local_identifier, &blit_identifier);
+                try self.push(.open_parenthesis, null);
+            },
+            .allocate,
+            .binary_operation,
+            .cast,
+            .convert,
+            .copy,
+            .negate,
+            .load,
+            => {
+                try self.push(.open_parenthesis, null);
+            },
+            .store => {
+                try self.push(.pointer, null);
+                try self.push(.open_parenthesis, null);
+            },
+            .comparison => {
+                try self.push(.open_parenthesis, null);
+            },
             else => {},
         }
     }
@@ -452,7 +512,7 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.@"struct", null);
             },
             .struct_type => {
-                if (self.tokens.getLast().token_type != .close_bracket) {
+                if ((try self.peek()) != .close_bracket) {
                     try self.pushField();
                 }
 
@@ -468,9 +528,7 @@ pub const CEmitWalkCallback = struct {
                 }
 
                 if (l.flags == next) {
-                    const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&link_flags_identifier) orelse return error.NotFound;
-
-                    _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_flags_identifier);
                     try self.push(.open_parenthesis, null);
                 }
             },
@@ -506,7 +564,7 @@ pub const CEmitWalkCallback = struct {
             },
             .typed_data => |d| {
                 if (d.type == previous) {
-                    if (self.tokens.getLast().token_type != .colon) {
+                    if ((try self.peek()) != .colon) {
                         _ = try self.pop(); // TODO: Remove struct/union?
                     }
                 }
@@ -518,7 +576,7 @@ pub const CEmitWalkCallback = struct {
                 if (fs.return_type == previous) {
                     try self.swapFunctionReturn();
                     try self.push(.open_parenthesis, null);
-                } else if (fs.name != previous and fs.linkage != previous and self.tokens.getLast().token_type != .open_parenthesis) {
+                } else if (fs.name != previous and fs.linkage != previous and (try self.peek()) != .open_parenthesis) {
                     try self.push(.comma, null);
                 }
             },
@@ -546,6 +604,115 @@ pub const CEmitWalkCallback = struct {
             .assignment => {
                 try self.push(.assign, null);
             },
+            .cast => |c| {
+                if (c.data_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+                }
+            },
+            .copy => |c| {
+                if (c.data_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+                }
+            },
+            .convert => |c| {
+                if (c.data_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+                } else if (c.to_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+                } else if (c.from_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+                }
+            },
+            .negate => |n| {
+                if (n.data_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+                    try self.push(.bitwise_not, null);
+                }
+            },
+            .binary_operation => |op| {
+                if (op.data_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+                } else if (op.left == previous) {
+                    try self.push(Self.binaryOpToToken(op.operation_type), null);
+                }
+            },
+            .allocate => |a| {
+                if (a.data_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &allocate_identifier);
+                    try self.push(.open_parenthesis, null);
+                } else if (a.alignment == previous) {
+                    try self.push(.comma, null);
+                }
+            },
+            .blit => {
+                try self.push(.comma, null);
+            },
+            .load => |l| {
+                if (l.data_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+
+                    try self.push(.pointer, null);
+                    try self.push(.open_parenthesis, null);
+                } else if (l.memory_type == previous) {
+                    try self.push(.pointer, null);
+                    try self.push(.close_parenthesis, null);
+                }
+            },
+            .store => |s| {
+                if (s.memory_type == previous) {
+                    try self.push(.pointer, null);
+                    try self.push(.close_parenthesis, null);
+                }
+            },
+            .comparison => |c| {
+                if (c.data_type == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.open_parenthesis, null);
+
+                    switch (c.operation_type) {
+                        .any_nan,
+                        .all_nan,
+                        => {
+                            const identifier: *const symbol.SymbolIndentifier = switch (c.operation_type) {
+                                .any_nan => &any_nan_identifier,
+                                .all_nan => &all_nan_identifier,
+                                else => unreachable,
+                            };
+
+                            _ = try self.pushSymbolIdentifier(.local_identifier, identifier);
+                            try self.push(.open_parenthesis, null);
+                        },
+                        else => {},
+                    }
+
+                    try self.push(.open_parenthesis, null);
+                } else if (c.comparison_type == previous) {
+                    try self.dupe();
+                    try self.push(.close_parenthesis, null);
+                    try self.rot2();
+                } else if (c.left == previous) {
+                    try self.rot2();
+
+                    const t = try self.pop();
+
+                    try self.push(Self.comparisonOpToToken(c.operation_type), null);
+
+                    try self.push(.open_parenthesis, null);
+                    try self.push(t.token_type, t.span);
+                    try self.push(.close_parenthesis, null);
+                }
+            },
             else => {},
         }
     }
@@ -565,7 +732,7 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.close_curly_brace, null);
             },
             .struct_type => {
-                if (self.tokens.getLast().token_type != .close_bracket) {
+                if ((try self.peek()) != .close_bracket) {
                     try self.pushField();
                 }
 
@@ -580,11 +747,12 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.close_curly_brace, null);
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
+                try self.push(.newline, null);
             },
             .typed_data => {
                 const val = try self.pop();
 
-                if (self.tokens.getLast().token_type == .colon) {
+                if ((try self.peek()) == .colon) {
                     // Zero data
 
                     _ = try self.pop(); // TODO: Free data?
@@ -603,6 +771,7 @@ pub const CEmitWalkCallback = struct {
             => {
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
+                try self.push(.newline, null);
             },
             .linkage => |l| {
                 if (l.flags != null) {
@@ -613,6 +782,7 @@ pub const CEmitWalkCallback = struct {
             },
             .function => {
                 try self.push(.close_curly_brace, null);
+                try self.push(.newline, null);
                 try self.push(.newline, null);
             },
             .function_signature => |fs| {
@@ -626,7 +796,7 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.newline, null);
             },
             .function_parameter => {
-                if (self.tokens.getLast().token_type == .colon) {
+                if ((try self.peek()) == .colon) {
                     _ = try self.pop();
                     try self.clearToken();
                 } else {
@@ -641,6 +811,40 @@ pub const CEmitWalkCallback = struct {
             => {
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
+            },
+            .allocate => {
+                try self.push(.close_parenthesis, null);
+                try self.push(.close_parenthesis, null);
+            },
+            .binary_operation,
+            .blit,
+            .cast,
+            .convert,
+            .copy,
+            .negate,
+            .load,
+            => {
+                try self.push(.close_parenthesis, null);
+            },
+            .store => {
+                const address = try self.pop();
+                const value = try self.pop();
+
+                try self.push(address.token_type, address.span);
+                try self.push(.assign, null);
+                try self.push(value.token_type, value.span);
+            },
+            .comparison => |c| {
+                switch (c.operation_type) {
+                    .any_nan,
+                    .all_nan,
+                    => {
+                        try self.push(.close_parenthesis, null);
+                    },
+                    else => {},
+                }
+
+                try self.push(.close_parenthesis, null);
             },
             else => {},
         }
@@ -793,6 +997,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                 .open_bracket,
                 .dereference,
                 .colon,
+                .bitwise_not,
                 => .default,
                 else => .space,
             };
@@ -849,5 +1054,5 @@ test "Emit" {
     const actual = try output_array.toOwnedSlice();
     defer allocator.free(actual);
 
-    // std.debug.print("{s}", .{actual});
+    std.debug.print("{s}", .{actual});
 }
