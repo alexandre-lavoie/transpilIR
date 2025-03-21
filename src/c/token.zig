@@ -82,6 +82,7 @@ pub const CTokenType = enum(u8) {
     f32,
     f64,
     goto,
+    static,
     void,
 
     // Interal spacing
@@ -130,6 +131,7 @@ pub fn tokenString(token_type: CTokenType) []const u8 {
         .semi_colon => ";",
         .shift_left => "<<",
         .shift_right => ">>",
+        .static => "static",
         .tab => "    ",
         .variable_arguments => "...",
         .void => "void",
@@ -216,8 +218,6 @@ pub fn tokenColor(token_type: CTokenType) std.io.tty.Color {
         .@"struct",
         .@"union",
         .@"while",
-        .goto,
-        .void,
         .i8,
         .u8,
         .i16,
@@ -228,6 +228,9 @@ pub fn tokenColor(token_type: CTokenType) std.io.tty.Color {
         .u64,
         .f32,
         .f64,
+        .goto,
+        .static,
+        .void,
         => common.Color.reserved,
     };
 }

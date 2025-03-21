@@ -128,11 +128,11 @@ function $fconv() {
     ret
 }
 
-function $fcall() {
+function w $fcall() {
 @s
     call $fcall_0()
-    call $fcall_1(env 0, w 1, :t 2, ..., w 3)
-    ret
+    %r =w call $fcall_1(w 1, :t 2, ..., s 3)
+    ret %r
 }
 
 function $fvararg(l %fmt, ...) {

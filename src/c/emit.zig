@@ -53,8 +53,12 @@ pub const CEmitWalkCallback = struct {
 
     const allocate_identifier = symbol.SymbolIndentifier{ .name = "ALLOCATE", .scope = .local };
     const blit_identifier = symbol.SymbolIndentifier{ .name = "BLIT", .scope = .local };
+
     const all_nan_identifier = symbol.SymbolIndentifier{ .name = "ALL_NAN", .scope = .local };
     const any_nan_identifier = symbol.SymbolIndentifier{ .name = "ANY_NAN", .scope = .local };
+
+    const vastart_identifier = symbol.SymbolIndentifier{ .name = "VASTART", .scope = .local };
+    const vaarg_identifier = symbol.SymbolIndentifier{ .name = "VAARG", .scope = .local };
 
     pub fn init(allocator: std.mem.Allocator, target: *const common.Target, symbol_table: *symbol.SymbolTable) Self {
         return .{
@@ -373,8 +377,12 @@ pub const CEmitWalkCallback = struct {
 
                 _ = try self.symbol_table.addSymbol(&allocate_identifier);
                 _ = try self.symbol_table.addSymbol(&blit_identifier);
+
                 _ = try self.symbol_table.addSymbol(&any_nan_identifier);
                 _ = try self.symbol_table.addSymbol(&all_nan_identifier);
+
+                _ = try self.symbol_table.addSymbol(&vastart_identifier);
+                _ = try self.symbol_table.addSymbol(&vaarg_identifier);
 
                 try self.push(.module_start, null);
             },
@@ -436,14 +444,6 @@ pub const CEmitWalkCallback = struct {
             .linkage => |l| {
                 try self.storeToken();
 
-                if (l.@"export") {
-                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_export_identifier);
-                }
-
-                if (l.thread) {
-                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_thread_identifier);
-                }
-
                 if (l.section != null) {
                     _ = try self.pushSymbolIdentifier(.local_identifier, &link_section_identifier);
                     try self.push(.open_parenthesis, null);
@@ -485,11 +485,13 @@ pub const CEmitWalkCallback = struct {
             },
             .allocate,
             .binary_operation,
+            .call_parameter,
             .cast,
             .convert,
             .copy,
             .negate,
             .load,
+            .vaarg,
             => {
                 try self.push(.open_parenthesis, null);
             },
@@ -499,6 +501,15 @@ pub const CEmitWalkCallback = struct {
             },
             .comparison => {
                 try self.push(.open_parenthesis, null);
+            },
+            .vastart => {
+                _ = try self.pushSymbolIdentifier(.local_identifier, &vastart_identifier);
+                try self.push(.open_parenthesis, null);
+            },
+            .call => {
+                if ((try self.peek()) == .assign) {
+                    try self.push(.open_parenthesis, null);
+                }
             },
             else => {},
         }
@@ -607,13 +618,11 @@ pub const CEmitWalkCallback = struct {
             .cast => |c| {
                 if (c.data_type == previous) {
                     try self.push(.close_parenthesis, null);
-                    try self.push(.open_parenthesis, null);
                 }
             },
             .copy => |c| {
                 if (c.data_type == previous) {
                     try self.push(.close_parenthesis, null);
-                    try self.push(.open_parenthesis, null);
                 }
             },
             .convert => |c| {
@@ -625,7 +634,6 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.open_parenthesis, null);
                 } else if (c.from_type == previous) {
                     try self.push(.close_parenthesis, null);
-                    try self.push(.open_parenthesis, null);
                 }
             },
             .negate => |n| {
@@ -713,6 +721,36 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.close_parenthesis, null);
                 }
             },
+            .vaarg => {
+                try self.push(.close_parenthesis, null);
+
+                _ = try self.pushSymbolIdentifier(.local_identifier, &vaarg_identifier);
+                try self.push(.open_parenthesis, null);
+            },
+            .call => |c| {
+                if (c.return_type == previous) {
+                    if ((try self.peek()) == .void) {
+                        _ = try self.pop();
+                    } else {
+                        try self.rot2();
+                        try self.push(.close_parenthesis, null);
+                        try self.rot2();
+                    }
+
+                    try self.push(.open_parenthesis, null);
+                } else if (c.target != previous) {
+                    if ((try self.peek()) == .variable_arguments) {
+                        _ = try self.pop();
+                    } else {
+                        _ = try self.push(.comma, null);
+                    }
+                }
+            },
+            .call_parameter => |p| {
+                if (p.value == previous) {
+                    try self.storeToken();
+                }
+            },
             else => {},
         }
     }
@@ -778,6 +816,16 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.close_parenthesis, null);
                 }
 
+                if (l.thread) {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_thread_identifier);
+                }
+
+                if (l.@"export") {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_export_identifier);
+                } else {
+                    _ = try self.push(.static, null);
+                }
+
                 try self.loadToken();
             },
             .function => {
@@ -818,11 +866,10 @@ pub const CEmitWalkCallback = struct {
             },
             .binary_operation,
             .blit,
-            .cast,
-            .convert,
-            .copy,
             .negate,
             .load,
+            .vaarg,
+            .vastart,
             => {
                 try self.push(.close_parenthesis, null);
             },
@@ -845,6 +892,26 @@ pub const CEmitWalkCallback = struct {
                 }
 
                 try self.push(.close_parenthesis, null);
+            },
+            .call => |c| {
+                if (c.parameters == null) {
+                    if ((try self.peek()) == .void) {
+                        _ = try self.pop();
+                    } else {
+                        try self.rot2();
+                        try self.push(.close_parenthesis, null);
+                        try self.rot2();
+                    }
+
+                    try self.push(.open_parenthesis, null);
+                }
+
+                try self.push(.close_parenthesis, null);
+            },
+            .call_parameter => {
+                try self.push(.close_parenthesis, null);
+
+                try self.loadToken();
             },
             else => {},
         }
@@ -1054,5 +1121,5 @@ test "Emit" {
     const actual = try output_array.toOwnedSlice();
     defer allocator.free(actual);
 
-    std.debug.print("{s}", .{actual});
+    // std.debug.print("{s}", .{actual});
 }

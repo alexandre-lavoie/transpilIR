@@ -134,11 +134,11 @@ s.label:
     ret void
 }
 
-define private void @fcall() {
+define private i32 @fcall() {
 s.label:
     call void @fcall_0()
-    call void (ptr, i32, ptr, ...) @fcall_1(ptr inttoptr(i64 0 to ptr), i32 1, ptr inttoptr(i64 2 to ptr), i32 3)
-    ret void
+    %r = call i32 (i32, ptr, ...) @fcall_1(i32 1, ptr inttoptr(i64 2 to ptr), f32 3)
+    ret %r
 }
 
 define private void @fvararg(i64 %fmt, ...) {
