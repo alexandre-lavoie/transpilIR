@@ -24,57 +24,43 @@ pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST, symbol_table: *symbol.
 
         try switch (out.state) {
             .enter => emit_callback.enter(stat),
+            .middle => emit_callback.middle(stat, out.previous.?, out.next.?),
             .exit => emit_callback.exit(stat),
-            else => {},
         };
     }
 
     return try emit_callback.tokens.toOwnedSlice();
 }
 
-const EmitWalkState = enum {
-    default,
-    array,
-    @"struct",
-    @"union",
-    data,
-    typed_data,
-    zero_typed_data,
-    offset,
-    linkage,
-    function_return,
-    function_signature,
-    block_label,
-    block_body,
-};
-
 pub const CEmitWalkCallback = struct {
     allocator: std.mem.Allocator,
     target: *const common.Target,
     symbol_table: *symbol.SymbolTable,
-    state_stack: StateStack,
     tokens: TokenList,
 
-    state: EmitWalkState = .default,
     field_index: usize = 0,
     stored_token: ?token.CToken = null,
 
     const Self = @This();
     const TokenList = std.ArrayList(token.CToken);
-    const StateStack = std.ArrayList(EmitWalkState);
+
+    const opaque_identifier = symbol.SymbolIndentifier{ .name = "opaque", .scope = .local };
+
+    const link_export_identifier = symbol.SymbolIndentifier{ .name = "LINK_EXPORT", .scope = .local };
+    const link_thread_identifier = symbol.SymbolIndentifier{ .name = "LINK_THREAD", .scope = .local };
+    const link_section_identifier = symbol.SymbolIndentifier{ .name = "LINK_SECTION", .scope = .local };
+    const link_flags_identifier = symbol.SymbolIndentifier{ .name = "LINK_FLAGS", .scope = .local };
 
     pub fn init(allocator: std.mem.Allocator, target: *const common.Target, symbol_table: *symbol.SymbolTable) Self {
         return .{
             .allocator = allocator,
             .target = target,
             .symbol_table = symbol_table,
-            .state_stack = StateStack.init(allocator),
             .tokens = TokenList.init(allocator),
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.state_stack.deinit();
         self.tokens.deinit();
     }
 
@@ -103,6 +89,13 @@ pub const CEmitWalkCallback = struct {
         try self.push(.newline, null);
     }
 
+    fn pushField(self: *Self) !void {
+        const idx = self.field_index;
+        self.field_index += 1;
+
+        _ = try self.pushSymbol(.local_identifier, "f{}", .{idx});
+    }
+
     fn pushSymbol(self: *Self, token_type: token.CTokenType, comptime fmt: []const u8, args: anytype) !symbol.Instance {
         const name = try std.fmt.allocPrint(self.allocator, fmt, args);
         defer self.allocator.free(name);
@@ -118,6 +111,10 @@ pub const CEmitWalkCallback = struct {
         };
         const sym_idx = try self.symbol_table.addSymbol(&sym);
 
+        return self.pushSymbolInstance(token_type, sym_idx);
+    }
+
+    fn pushSymbolInstance(self: *Self, token_type: token.CTokenType, sym_idx: usize) !symbol.Instance {
         const span = self.symbol_table.nextSpan();
         var instance = symbol.Instance{ .span = span };
         _ = try self.symbol_table.addSymbolInstanceByIndex(sym_idx, &instance);
@@ -125,22 +122,6 @@ pub const CEmitWalkCallback = struct {
         try self.push(token_type, span);
 
         return instance;
-    }
-
-    fn pushField(self: *Self) !void {
-        const idx = self.field_index;
-        self.field_index += 1;
-
-        _ = try self.pushSymbol(.local_identifier, "f{}", .{idx});
-    }
-
-    fn pushState(self: *Self, state: EmitWalkState) !void {
-        try self.state_stack.append(self.state);
-        self.state = state;
-    }
-
-    fn popState(self: *Self) !void {
-        self.state = self.state_stack.popOrNull() orelse return error.EmptyStack;
     }
 
     fn literalValueToToken(t: symbol.LiteralValue) token.CTokenType {
@@ -257,7 +238,7 @@ pub const CEmitWalkCallback = struct {
         switch (sym.memory) {
             .data => |data| {
                 try self.push(.@"struct", null);
-                const dt_instance = try self.pushSymbol(.type_identifier, "{s}", .{sym.identifier.name});
+                _ = try self.pushSymbol(.type_identifier, "{s}", .{sym.identifier.name});
 
                 try self.push(.open_curly_brace, null);
 
@@ -289,9 +270,6 @@ pub const CEmitWalkCallback = struct {
 
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
-
-                try self.push(.@"struct", null);
-                try self.push(.type_identifier, dt_instance.span);
             },
             else => {},
         }
@@ -309,19 +287,53 @@ pub const CEmitWalkCallback = struct {
         }
     }
 
+    fn clearToken(self: *Self) !void {
+        if (self.stored_token != null) {
+            self.stored_token = null;
+        } else {
+            return error.NoToken;
+        }
+    }
+
+    fn swapFunctionReturn(self: *Self) !void {
+        const ret = try self.pop();
+
+        var queue = try std.ArrayList(token.CToken).initCapacity(self.allocator, 16);
+        defer queue.deinit();
+
+        while (true) {
+            const prev = try self.pop();
+            try queue.append(prev);
+
+            if (prev.token_type == .global_identifier) {
+                break;
+            }
+        }
+
+        try self.push(ret.token_type, ret.span);
+
+        while (queue.popOrNull()) |v| {
+            try self.push(v.token_type, v.span);
+        }
+    }
+
     pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
-            .module => try self.push(.module_start, null),
-            .identifier => |identifier| {
-                var data_enter = false;
+            .module => {
+                self.field_index = 0;
 
+                _ = try self.symbol_table.addSymbol(&opaque_identifier);
+
+                _ = try self.symbol_table.addSymbol(&link_export_identifier);
+                _ = try self.symbol_table.addSymbol(&link_thread_identifier);
+                _ = try self.symbol_table.addSymbol(&link_section_identifier);
+                _ = try self.symbol_table.addSymbol(&link_flags_identifier);
+
+                try self.push(.module_start, null);
+            },
+            .identifier => |identifier| {
                 const token_type: token.CTokenType = switch (identifier.scope) {
                     .type => l: {
-                        switch (self.state) {
-                            .typed_data, .zero_typed_data => return,
-                            else => {},
-                        }
-
                         const instance = symbol.Instance{ .span = statement.span };
 
                         try self.pushTypePrefix(&instance);
@@ -329,21 +341,6 @@ pub const CEmitWalkCallback = struct {
                         break :l .type_identifier;
                     },
                     .global => l: {
-                        switch (self.state) {
-                            .data => {
-                                data_enter = true;
-
-                                const instance = symbol.Instance{ .span = statement.span };
-
-                                try self.pushDataType(&instance);
-                            },
-                            .offset => {
-                                try self.pushCast(.u8, true);
-                                try self.push(.dereference, null);
-                            },
-                            else => {},
-                        }
-
                         break :l .global_identifier;
                     },
                     .local => .local_identifier,
@@ -354,126 +351,68 @@ pub const CEmitWalkCallback = struct {
                     token_type,
                     statement.span,
                 );
-
-                switch (self.state) {
-                    .@"struct" => {
-                        try self.pushField();
-                        try self.push(.semi_colon, null);
-                    },
-                    .data => {
-                        if (data_enter) {
-                            try self.push(.assign, null);
-                            try self.push(.open_curly_brace, null);
-                        }
-                    },
-                    .block_label => {
-                        try self.push(.colon, null);
-                        try self.push(.newline, null);
-
-                        self.state = .block_body;
-                    },
-                    else => {},
-                }
             },
             .literal => |literal| {
-                switch (self.state) {
-                    .array => {
-                        try self.pushField();
-                        try self.push(.open_bracket, null);
-                    },
-                    .offset => {
-                        try self.push(.plus, null);
-                    },
-                    .zero_typed_data => {
-                        try self.push(.open_curly_brace, null);
-
-                        var lit = symbol.LiteralValue{ .integer = 0 };
-                        try self.pushLiteral(&lit);
-
-                        try self.push(.close_curly_brace, null);
-
-                        return;
-                    },
-                    .linkage => return,
-                    else => {},
-                }
-
                 try self.push(
                     Self.literalTypeToToken(literal.type),
                     statement.span,
                 );
             },
             .primitive_type => |primitive| {
-                switch (self.state) {
-                    .typed_data => return,
-                    .function_return => try self.storeToken(),
-                    else => {},
-                }
-
                 try self.pushPrimitiveType(primitive);
-
-                switch (self.state) {
-                    .@"struct" => {
-                        try self.pushField();
-                        try self.push(.semi_colon, null);
-                    },
-                    .function_return => {
-                        try self.loadToken();
-
-                        self.state = .function_signature;
-
-                        try self.push(.open_parenthesis, null);
-                    },
-                    else => {},
-                }
             },
             .opaque_type => {
                 try self.push(.open_curly_brace, null);
                 try self.push(.unsigned, null);
                 try self.push(.char, null);
-                try self.pushField();
+
+                const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&opaque_identifier) orelse return error.NotFound;
+                _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+
                 try self.push(.open_bracket, null);
             },
             .union_type => {
-                try self.pushState(.@"union");
-
                 try self.push(.open_curly_brace, null);
+
+                try self.push(.@"struct", null);
             },
             .struct_type => {
-                switch (self.state) {
-                    .@"union" => {
-                        try self.push(.@"struct", null);
-                    },
-                    else => {},
-                }
-
-                try self.pushState(.@"struct");
-
                 try self.push(.open_curly_brace, null);
             },
-            .array_type => {
-                try self.pushState(.array);
-            },
-            .data_definition => {
-                try self.pushState(.data);
-            },
-            .typed_data => {
-                try self.pushState(.typed_data);
-            },
             .zero_type => {
-                self.state = .zero_typed_data;
+                try self.push(.colon, null);
+            },
+            .env_type => {
+                try self.push(.colon, null);
+            },
+            .variadic_parameter => {
+                try self.push(.variable_arguments, null);
+            },
+            .linkage => |l| {
+                try self.storeToken();
+
+                if (l.@"export") {
+                    const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&link_export_identifier) orelse return error.NotFound;
+
+                    _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                }
+
+                if (l.thread) {
+                    const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&link_thread_identifier) orelse return error.NotFound;
+
+                    _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                }
+
+                if (l.section != null) {
+                    const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&link_section_identifier) orelse return error.NotFound;
+
+                    _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                    try self.push(.open_parenthesis, null);
+                }
             },
             .offset => {
-                try self.pushState(.offset);
-            },
-            .linkage => {
-                try self.pushState(.linkage);
-            },
-            .function_signature => {
-                try self.pushState(.function_return);
-            },
-            .block => {
-                try self.pushState(.block_label);
+                try self.pushCast(.u8, true);
+                try self.push(.dereference, null);
             },
             .line => {
                 try self.push(.tab, null);
@@ -485,6 +424,11 @@ pub const CEmitWalkCallback = struct {
             .jump => {
                 try self.push(.tab, null);
                 try self.push(.goto, null);
+            },
+            .branch => {
+                try self.push(.tab, null);
+                try self.push(.@"if", null);
+                try self.push(.open_parenthesis, null);
             },
             .halt => {
                 try self.push(.tab, null);
@@ -500,6 +444,112 @@ pub const CEmitWalkCallback = struct {
         }
     }
 
+    pub fn middle(self: *Self, statement: *const ast.Statement, previous: usize, next: usize) !void {
+        switch (statement.data) {
+            .union_type => {
+                try self.pushField();
+                try self.push(.semi_colon, null);
+                try self.push(.@"struct", null);
+            },
+            .struct_type => {
+                if (self.tokens.getLast().token_type != .close_bracket) {
+                    try self.pushField();
+                }
+
+                try self.push(.semi_colon, null);
+            },
+            .array_type => {
+                try self.pushField();
+                try self.push(.open_bracket, null);
+            },
+            .linkage => |l| {
+                if (l.section == previous) {
+                    try self.push(.close_parenthesis, null);
+                }
+
+                if (l.flags == next) {
+                    const sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&link_flags_identifier) orelse return error.NotFound;
+
+                    _ = try self.pushSymbolInstance(.local_identifier, sym_idx);
+                    try self.push(.open_parenthesis, null);
+                }
+            },
+            .data_definition => |d| {
+                if (d.identifier == previous) {
+                    const identifier = try self.pop();
+
+                    const instance = symbol.Instance{ .span = identifier.span };
+                    try self.pushDataType(&instance);
+
+                    try self.push(identifier.token_type, identifier.span);
+                } else if (d.linkage == previous) {
+                    // Add type to data
+                    try self.storeToken();
+
+                    const stored_instance = symbol.Instance{ .span = self.stored_token.?.span };
+                    const stored_sym = self.symbol_table.getSymbolByInstance(&stored_instance) orelse return error.NotFound;
+
+                    const type_instance = symbol.SymbolIndentifier{ .name = stored_sym.identifier.name, .scope = .type };
+                    const type_sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&type_instance) orelse return error.NotFound;
+
+                    try self.push(.@"struct", null);
+                    _ = try self.pushSymbolInstance(.type_identifier, type_sym_idx);
+
+                    try self.loadToken();
+
+                    // Open assign
+                    try self.push(.assign, null);
+                    try self.push(.open_curly_brace, null);
+                } else {
+                    try self.push(.comma, null);
+                }
+            },
+            .typed_data => |d| {
+                if (d.type == previous) {
+                    if (self.tokens.getLast().token_type != .colon) {
+                        _ = try self.pop(); // TODO: Remove struct/union?
+                    }
+                }
+            },
+            .offset => {
+                try self.push(.plus, null);
+            },
+            .function_signature => |fs| {
+                if (fs.return_type == previous) {
+                    try self.swapFunctionReturn();
+                    try self.push(.open_parenthesis, null);
+                } else if (fs.name != previous and fs.linkage != previous and self.tokens.getLast().token_type != .open_parenthesis) {
+                    try self.push(.comma, null);
+                }
+            },
+            .function_parameter => |fp| {
+                if (fp.value == previous) {
+                    try self.storeToken();
+                }
+            },
+            .block => |b| {
+                if (b.label == previous) {
+                    try self.push(.colon, null);
+                    try self.push(.newline, null);
+                }
+            },
+            .branch => |b| {
+                if (b.condition == previous) {
+                    try self.push(.close_parenthesis, null);
+                    try self.push(.goto, null);
+                } else if (b.true == previous) {
+                    try self.push(.semi_colon, null);
+                    try self.push(.@"else", null);
+                    try self.push(.goto, null);
+                }
+            },
+            .assignment => {
+                try self.push(.assign, null);
+            },
+            else => {},
+        }
+    }
+
     pub fn exit(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .module => try self.push(.module_end, null),
@@ -509,66 +559,84 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.close_curly_brace, null);
             },
             .union_type => {
-                try self.popState();
+                try self.pushField();
+                try self.push(.semi_colon, null);
 
                 try self.push(.close_curly_brace, null);
             },
             .struct_type => {
-                try self.popState();
+                if (self.tokens.getLast().token_type != .close_bracket) {
+                    try self.pushField();
+                }
+
+                try self.push(.semi_colon, null);
 
                 try self.push(.close_curly_brace, null);
-
-                if (self.state == .@"union") {
-                    try self.pushField();
-                    try self.push(.semi_colon, null);
-                }
             },
             .array_type => {
-                try self.popState();
-
                 try self.push(.close_bracket, null);
-                try self.push(.semi_colon, null);
             },
             .data_definition => {
-                try self.popState();
-
                 try self.push(.close_curly_brace, null);
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
             },
             .typed_data => {
-                try self.popState();
+                const val = try self.pop();
 
-                try self.push(.comma, null);
-            },
-            .offset => {
-                try self.popState();
-            },
-            .linkage => {
-                try self.popState();
+                if (self.tokens.getLast().token_type == .colon) {
+                    // Zero data
+
+                    _ = try self.pop(); // TODO: Free data?
+
+                    try self.push(.open_curly_brace, null);
+
+                    var lit = symbol.LiteralValue{ .integer = 0 };
+                    try self.pushLiteral(&lit);
+
+                    try self.push(.close_curly_brace, null);
+                } else {
+                    try self.push(val.token_type, val.span);
+                }
             },
             .type_definition,
             => {
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
             },
-            .function_signature => {
-                try self.popState();
+            .linkage => |l| {
+                if (l.flags != null) {
+                    try self.push(.close_parenthesis, null);
+                }
 
-                try self.push(.close_parenthesis, null);
-                try self.push(.open_curly_brace, null);
-                try self.push(.newline, null);
+                try self.loadToken();
             },
             .function => {
                 try self.push(.close_curly_brace, null);
                 try self.push(.newline, null);
             },
-            .block => {
-                try self.popState();
+            .function_signature => |fs| {
+                if (fs.parameters == null) {
+                    try self.swapFunctionReturn();
+                    try self.push(.open_parenthesis, null);
+                }
+
+                try self.push(.close_parenthesis, null);
+                try self.push(.open_curly_brace, null);
+                try self.push(.newline, null);
+            },
+            .function_parameter => {
+                if (self.tokens.getLast().token_type == .colon) {
+                    _ = try self.pop();
+                    try self.clearToken();
+                } else {
+                    try self.loadToken();
+                }
             },
             .line,
             .@"return",
             .jump,
+            .branch,
             .halt,
             => {
                 try self.push(.semi_colon, null);

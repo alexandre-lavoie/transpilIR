@@ -100,9 +100,14 @@ pub const SymbolTable = struct {
         return index;
     }
 
-    pub fn getSymbolByIdentifier(self: *const Self, identifier: *const types.SymbolIdentifier) ?*types.Symbol {
+    pub fn getSymbolIndexByIdentifier(self: *const Self, identifier: *const types.SymbolIdentifier) ?usize {
         const key = identifier.key(self.allocator) catch return null;
-        const index = self.symbol_identifier_map.get(key) orelse return null;
+
+        return self.symbol_identifier_map.get(key) orelse return null;
+    }
+
+    pub fn getSymbolByIdentifier(self: *const Self, identifier: *const types.SymbolIdentifier) ?*types.Symbol {
+        const index = self.getSymbolIndexByIdentifier(identifier) orelse return null;
 
         return &self.symbols.items[index];
     }
