@@ -165,6 +165,7 @@ pub const SymbolMemoryFunction = struct {
     @"return": SymbolType,
     parameters: []const SymbolMemoryParameterType,
     vararg: bool = false,
+    external: bool = false,
 };
 
 pub const SymbolMemoryChild = struct {

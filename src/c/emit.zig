@@ -40,7 +40,10 @@ pub const CEmitWalkCallback = struct {
 
     field_index: usize = 0,
     stored_token: ?token.CToken = null,
+
+    forward_declarations: bool = false,
     function_sym_idx: ?usize = null,
+    function_last_param_token: ?token.CToken = null,
     block_sym_idx: ?usize = null,
     phi_token: ?token.CToken = null,
     phi_type: ?token.CToken = null,
@@ -52,7 +55,7 @@ pub const CEmitWalkCallback = struct {
 
     const link_export_identifier = symbol.SymbolIndentifier{ .name = "EXPORT", .scope = .local };
     const link_thread_identifier = symbol.SymbolIndentifier{ .name = "THREAD", .scope = .local };
-    const link_section_identifier = symbol.SymbolIndentifier{ .name = "LINK_SECTION", .scope = .local };
+    const link_identifier = symbol.SymbolIndentifier{ .name = "LINK", .scope = .local };
     const link_flags_identifier = symbol.SymbolIndentifier{ .name = "LINK_FLAGS", .scope = .local };
 
     const allocate_identifier = symbol.SymbolIndentifier{ .name = "ALLOCATE", .scope = .local };
@@ -61,10 +64,12 @@ pub const CEmitWalkCallback = struct {
     const all_nan_identifier = symbol.SymbolIndentifier{ .name = "ALL_NAN", .scope = .local };
     const any_nan_identifier = symbol.SymbolIndentifier{ .name = "ANY_NAN", .scope = .local };
 
-    const vastart_identifier = symbol.SymbolIndentifier{ .name = "VASTART", .scope = .local };
-    const vaarg_identifier = symbol.SymbolIndentifier{ .name = "VAARG", .scope = .local };
+    const vastart_identifier = symbol.SymbolIndentifier{ .name = "VA_START", .scope = .local };
+    const vaarg_identifier = symbol.SymbolIndentifier{ .name = "VA_ARG", .scope = .local };
 
     const block_variable = "__block__";
+    const BlockVariableType = u8; // TODO: Possibly could collide?
+
     const va_variable = "__va_param__";
 
     pub fn init(allocator: std.mem.Allocator, target: *const common.Target, symbol_table: *symbol.SymbolTable) Self {
@@ -182,6 +187,8 @@ pub const CEmitWalkCallback = struct {
                 try self.pushSymbolTypePrefix(self.symbol_table.getSymbolPtr(t) orelse return error.NotFound);
 
                 _ = try self.pushSymbolInstance(.type_identifier, t);
+
+                try self.push(.pointer, null);
             },
             else => unreachable,
         }
@@ -403,6 +410,17 @@ pub const CEmitWalkCallback = struct {
         };
     }
 
+    fn getBlockLabelValue(sym_idx: ?usize) isize {
+        if (sym_idx) |v| {
+            const m: usize = std.math.maxInt(BlockVariableType);
+            const o: u8 = @intCast(v % m);
+
+            return @intCast(o);
+        } else {
+            return 0;
+        }
+    }
+
     fn pushBlockAssign(self: *Self) !void {
         try self.push(.tab, null);
 
@@ -415,8 +433,144 @@ pub const CEmitWalkCallback = struct {
 
         try self.push(.assign, null);
 
-        const lit = symbol.LiteralValue{ .integer = @intCast(self.block_sym_idx.?) };
+        const lit = symbol.LiteralValue{ .integer = Self.getBlockLabelValue(self.block_sym_idx) };
         try self.pushLiteral(&lit);
+
+        try self.push(.semi_colon, null);
+        try self.push(.newline, null);
+    }
+
+    fn pushForwardDeclarations(self: *Self) !void {
+        for (self.symbol_table.symbols.items) |*sym| {
+            switch (sym.memory) {
+                .function => try self.pushForwardDeclaration(sym),
+                else => {},
+            }
+        }
+
+        try self.push(.newline, null);
+    }
+
+    fn pushForwardDeclaration(self: *Self, sym: *const symbol.Symbol) !void {
+        switch (sym.memory) {
+            .function => |*f| {
+                if (!f.external and !f.linkage.@"export") {
+                    try self.push(.static, null);
+                }
+
+                switch (f.@"return") {
+                    .primitive => |v| try self.pushPrimitiveType(v),
+                    .type => |v| {
+                        const instance = try self.pushSymbolInstance(.type_identifier, v);
+
+                        try self.storeToken();
+                        try self.pushTypePrefix(&instance);
+                        try self.loadToken();
+
+                        try self.push(.pointer, null);
+                    },
+                }
+
+                _ = try self.pushSymbolIdentifier(.global_identifier, &sym.identifier);
+
+                try self.push(.open_parenthesis, null);
+
+                for (f.parameters) |p| {
+                    switch (p) {
+                        .primitive => |v| try self.pushPrimitiveType(v),
+                        .type => |v| {
+                            const instance = try self.pushSymbolInstance(.type_identifier, v);
+
+                            try self.storeToken();
+                            try self.pushTypePrefix(&instance);
+                            try self.loadToken();
+
+                            try self.push(.pointer, null);
+                        },
+                        .env => continue,
+                    }
+
+                    try self.push(.comma, null);
+                }
+
+                if ((try self.peek()) == .comma) {
+                    _ = try self.pop();
+                }
+
+                if (f.vararg) {
+                    if (f.parameters.len > 0) {
+                        try self.push(.comma, null);
+                    }
+
+                    try self.push(.variable_arguments, null);
+                }
+
+                try self.push(.close_parenthesis, null);
+                try self.push(.semi_colon, null);
+                try self.push(.newline, null);
+            },
+            else => {},
+        }
+    }
+
+    // TODO: This algo should be possible with less duplicate checks
+    fn pushLocalVariables(self: *Self) !void {
+        const function_sym = self.symbol_table.getSymbolPtr(self.function_sym_idx.?) orelse return error.NotFound;
+        const is_vararg: bool = switch (function_sym.memory) {
+            .function => |f| f.vararg,
+            else => false,
+        };
+
+        const param_count: usize = switch (function_sym.memory) {
+            .function => |f| f.parameters.len,
+            else => 0,
+        };
+
+        var idx: usize = 0;
+        var last_param: ?*const symbol.Symbol = null;
+
+        for (self.symbol_table.symbols.items) |*sym| {
+            if (sym.identifier.function != self.function_sym_idx) {
+                continue;
+            }
+
+            if (sym.identifier.scope != .local) {
+                continue;
+            }
+
+            idx += 1;
+
+            if (idx <= param_count and sym.memory != .env) {
+                last_param = sym;
+                continue;
+            }
+
+            try self.push(.tab, null);
+
+            try self.pushSymbolType(sym);
+            _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
+
+            try self.push(.semi_colon, null);
+            try self.push(.newline, null);
+        }
+
+        if (is_vararg) {
+            if (last_param) |p| {
+                _ = try self.pushSymbolIdentifier(.local_identifier, &p.identifier);
+
+                self.function_last_param_token = try self.pop();
+            }
+        }
+
+        try self.push(.tab, null);
+        try self.push(.u8, null); // TODO: Make sure that it matches BlockVariableType
+
+        _ = try self.pushSymbol(
+            .local_identifier,
+            self.function_sym_idx,
+            block_variable,
+            .{},
+        );
 
         try self.push(.semi_colon, null);
         try self.push(.newline, null);
@@ -426,12 +580,13 @@ pub const CEmitWalkCallback = struct {
         switch (statement.data) {
             .module => {
                 self.field_index = 0;
+                self.forward_declarations = false;
 
                 _ = try self.symbol_table.addSymbol(&opaque_identifier);
 
                 _ = try self.symbol_table.addSymbol(&link_export_identifier);
                 _ = try self.symbol_table.addSymbol(&link_thread_identifier);
-                _ = try self.symbol_table.addSymbol(&link_section_identifier);
+                _ = try self.symbol_table.addSymbol(&link_identifier);
                 _ = try self.symbol_table.addSymbol(&link_flags_identifier);
 
                 _ = try self.symbol_table.addSymbol(&allocate_identifier);
@@ -479,6 +634,10 @@ pub const CEmitWalkCallback = struct {
                     token_type,
                     statement.span,
                 );
+
+                if (self.function_sym_idx != null and identifier.scope == .type) {
+                    try self.push(.pointer, null);
+                }
             },
             .literal => |literal| {
                 try self.push(
@@ -518,7 +677,12 @@ pub const CEmitWalkCallback = struct {
                 try self.storeToken();
 
                 if (l.section != null) {
-                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_section_identifier);
+                    if (l.flags != null) {
+                        _ = try self.pushSymbolIdentifier(.local_identifier, &link_flags_identifier);
+                    } else {
+                        _ = try self.pushSymbolIdentifier(.local_identifier, &link_identifier);
+                    }
+
                     try self.push(.open_parenthesis, null);
                 }
             },
@@ -528,6 +692,12 @@ pub const CEmitWalkCallback = struct {
             },
             .function => {
                 self.function_sym_idx = null;
+
+                if (!self.forward_declarations) {
+                    self.forward_declarations = true;
+
+                    try self.pushForwardDeclarations();
+                }
             },
             .block => {
                 self.block_sym_idx = null;
@@ -604,6 +774,8 @@ pub const CEmitWalkCallback = struct {
     }
 
     pub fn middle(self: *Self, statement: *const ast.Statement, previous: usize, next: usize) !void {
+        _ = next;
+
         switch (statement.data) {
             .union_type => {
                 try self.pushField();
@@ -623,12 +795,7 @@ pub const CEmitWalkCallback = struct {
             },
             .linkage => |l| {
                 if (l.section == previous) {
-                    try self.push(.close_parenthesis, null);
-                }
-
-                if (l.flags == next) {
-                    _ = try self.pushSymbolIdentifier(.local_identifier, &link_flags_identifier);
-                    try self.push(.open_parenthesis, null);
+                    try self.push(.comma, null);
                 }
             },
             .data_definition => |d| {
@@ -810,10 +977,18 @@ pub const CEmitWalkCallback = struct {
                 }
             },
             .vaarg => {
+                try self.dupe();
+
+                try self.storeToken(); // TODO: struct/union type?
+
                 try self.push(.close_parenthesis, null);
 
                 _ = try self.pushSymbolIdentifier(.local_identifier, &vaarg_identifier);
                 try self.push(.open_parenthesis, null);
+
+                try self.loadToken(); // TODO: struct/union type?
+
+                try self.push(.comma, null);
             },
             .call => |c| {
                 if (c.return_type == previous) {
@@ -869,7 +1044,7 @@ pub const CEmitWalkCallback = struct {
                     const instance = symbol.Instance{ .span = tok.span };
                     const sym_idx = self.symbol_table.getSymbolIndexByInstance(&instance) orelse return error.NotFound;
 
-                    const lit = symbol.LiteralValue{ .integer = @intCast(sym_idx) };
+                    const lit = symbol.LiteralValue{ .integer = Self.getBlockLabelValue(sym_idx) };
                     try self.pushLiteral(&lit);
 
                     try self.push(.colon, null);
@@ -939,7 +1114,7 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.newline, null);
             },
             .linkage => |l| {
-                if (l.flags != null) {
+                if (l.section != null) {
                     try self.push(.close_parenthesis, null);
                 }
 
@@ -970,81 +1145,7 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.open_curly_brace, null);
                 try self.push(.newline, null);
 
-                // TODO: This algo should be possible with less duplicate checks
-                const function_sym = self.symbol_table.getSymbolPtr(self.function_sym_idx.?) orelse return error.NotFound;
-                const is_vararg: bool = switch (function_sym.memory) {
-                    .function => |f| f.vararg,
-                    else => false,
-                };
-
-                const param_count: usize = switch (function_sym.memory) {
-                    .function => |f| f.parameters.len,
-                    else => 0,
-                };
-
-                var idx: usize = 0;
-                var last_param: ?*const symbol.Symbol = null;
-
-                for (self.symbol_table.symbols.items) |*sym| {
-                    if (sym.identifier.function != self.function_sym_idx) {
-                        continue;
-                    }
-
-                    if (sym.identifier.scope != .local) {
-                        continue;
-                    }
-
-                    idx += 1;
-
-                    if (idx <= param_count and sym.memory != .env) {
-                        last_param = sym;
-                        continue;
-                    }
-
-                    try self.push(.tab, null);
-
-                    try self.pushSymbolType(sym);
-                    _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
-
-                    try self.push(.semi_colon, null);
-                    try self.push(.newline, null);
-                }
-
-                if (is_vararg) {
-                    if (last_param) |p| {
-                        try self.push(.tab, null);
-                        try self.push(.void, null);
-                        try self.push(.pointer, null);
-
-                        _ = try self.pushSymbol(
-                            .local_identifier,
-                            self.function_sym_idx,
-                            va_variable,
-                            .{},
-                        );
-
-                        try self.push(.assign, null);
-
-                        try self.push(.dereference, null);
-                        _ = try self.pushSymbolIdentifier(.local_identifier, &p.identifier);
-
-                        try self.push(.semi_colon, null);
-                        try self.push(.newline, null);
-                    }
-                }
-
-                try self.push(.tab, null);
-                try self.push(.u64, null);
-
-                _ = try self.pushSymbol(
-                    .local_identifier,
-                    self.function_sym_idx,
-                    block_variable,
-                    .{},
-                );
-
-                try self.push(.semi_colon, null);
-                try self.push(.newline, null);
+                try self.pushLocalVariables();
             },
             .function_parameter => {
                 if ((try self.peek()) == .colon) {
@@ -1072,8 +1173,14 @@ pub const CEmitWalkCallback = struct {
             .negate,
             .load,
             .vaarg,
-            .vastart,
             => {
+                try self.push(.close_parenthesis, null);
+            },
+            .vastart => {
+                try self.push(.comma, null);
+
+                try self.push(self.function_last_param_token.?.token_type, self.function_last_param_token.?.span);
+
                 try self.push(.close_parenthesis, null);
             },
             .store => {
@@ -1150,7 +1257,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
 
         const Self = @This();
 
-        const includes = "";
+        const include_prefix = @embedFile("./include.h");
 
         fn reader_next(self: *Self) *const token.CToken {
             return self.reader.next();
@@ -1200,7 +1307,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
         fn parse(self: *Self, tok: *const token.CToken) !bool {
             switch (tok.token_type) {
                 .module_start => {
-                    try self.print(common.Color.identifier, Self.includes, .{});
+                    try self.print(common.Color.identifier, Self.include_prefix, .{});
 
                     return true;
                 },
@@ -1335,5 +1442,5 @@ test "Emit" {
     const actual = try output_array.toOwnedSlice();
     defer allocator.free(actual);
 
-    // std.debug.print("{s}", .{actual});
+    std.debug.print("{s}", .{actual});
 }

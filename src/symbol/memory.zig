@@ -727,6 +727,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         .@"return" = @"return",
                         .vararg = vararg,
                         .parameters = parameters,
+                        .external = true,
                     },
                 };
 
@@ -1286,6 +1287,7 @@ test "call" {
                         .primitive = .void,
                     },
                     .vararg = true,
+                    .external = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{
                         .env,
                         .{
@@ -1310,6 +1312,7 @@ test "call" {
                         .primitive = .i64,
                     },
                     .vararg = false,
+                    .external = true,
                     .parameters = &[_]types.SymbolMemoryParameterType{},
                 },
             },

@@ -5,7 +5,7 @@
 %union = type { %union.0 }
 %t = type opaque
 
-@dlink = thread_local global { i8 } { i8 0 }, section "section", partition "flags"
+@dlink = thread_local global { i8 } { i8 0 }, section ".dsection"
 @dptr = hidden global { i32 } { i32 0 } 
 @dvals = hidden global { [3 x i8], i8, i8, i8, [100 x i8], ptr } { [3 x i8] c"ABC", i8 32, i8 164, i8 61, [100 x i8] zeroinitializer, ptr getelementptr(i8, ptr @dptr, i64 1) }
 @d = hidden global { i32 } { i32 0 }
@@ -13,7 +13,7 @@
 declare void @fcall_0()
 declare void @fcall_1()
 
-define external void @flink() section "section" partition "flags" {
+define external void @flink() section ".fsection" partition "flag" {
 s.label:
     ret void
 }
@@ -130,7 +130,6 @@ s.label:
     %s.2 = fptrunc double 0.0 to float
     %w.7 = add i32 0, 0
     %w.8 = bitcast float 0.0 to i32
-    %t = fptoui double 0.0 to i64
     ret void
 }
 

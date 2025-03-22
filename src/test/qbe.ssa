@@ -3,12 +3,12 @@ type :struct = { :opaque, w 10 }
 type :union = { { w } { s } }
 type :t = { 16 }
 
-export thread section "section" "flags" data $dlink = { b 0 }
+export thread section ".dsection" data $dlink = { b 0 }
 data $dptr = { w 0 }
 data $dvals = { b "ABC", b 32, b s_1.23, b d_4.56, z 100, l $dptr + 1 }
 data $d = { w 0 }
 
-export section "section" "flags" function $flink() {
+export section ".fsection" "flag" function $flink() {
 @s
     ret
 }
@@ -124,7 +124,6 @@ function $fconv() {
     %s =s truncd 0
     %w =w copy 0
     %w =w cast 0
-    %t =:t dtoui 0
     ret
 }
 
