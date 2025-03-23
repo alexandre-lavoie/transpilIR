@@ -2,7 +2,7 @@ const std = @import("std");
 
 const common = @import("../common.zig");
 
-pub const GCC = struct {
+pub const LLVM = struct {
     allocator: std.mem.Allocator,
     optimization: common.Optimization,
 
@@ -37,7 +37,8 @@ pub const GCC = struct {
             .native => "",
             .amd64,
             .x86_64,
-            => "-march=x86-64",
+            => "--target=x86_64",
+            .wasm32 => "--target=wasm32",
             else => error.UnsupportedTarget,
         };
     }
@@ -46,7 +47,7 @@ pub const GCC = struct {
         var env_map = std.process.getEnvMap(self.allocator) catch return null;
         defer env_map.deinit();
 
-        if (env_map.get("GCC")) |v| {
+        if (env_map.get("LLVM")) |v| {
             const buffer = try self.allocator.alloc(u8, v.len);
             @memcpy(buffer, v);
 
@@ -74,7 +75,7 @@ pub const GCC = struct {
             }
         }
 
-        try args.append(executable orelse "gcc");
+        try args.append(executable orelse "clang");
 
         try args.append("-Wno-int-conversion");
 

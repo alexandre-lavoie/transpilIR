@@ -72,8 +72,9 @@ const Source = enum {
 
 const Compiler = enum {
     gcc,
-    irc,
+    llvm,
     qbe,
+    irc,
 };
 
 const Args = struct {
@@ -221,12 +222,12 @@ pub fn writeHelp(args: Args) !void {
                 try writeHelpEnum(args.debug, lib.IR, Args.default_ir);
             },
             .target => {
-                try args.debug.print("\t-t out\t  output target\n\t\t  ", .{});
+                try args.debug.print("\t-t trgt\t  output target\n\t\t  ", .{});
 
                 try writeHelpEnum(args.debug, lib.Assembly, Args.default_assembly);
             },
             .optimization => {
-                try args.debug.print("\t-z opt\t  optimization level to compile with\n\t\t  ", .{});
+                try args.debug.print("\t-z opt\t  optimization level of compiler\n\t\t  ", .{});
 
                 try writeHelpEnum(args.debug, lib.Optimization, Args.default_optimization);
             },
@@ -304,6 +305,10 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
     const Writer = std.io.AnyWriter;
 
     const compiler_type: Compiler = l: {
+        if (lib.LLVM.isSupported(args.ir, args.assembly)) {
+            break :l .llvm;
+        }
+
         if (lib.GCC.isSupported(args.ir, args.assembly)) {
             break :l .gcc;
         }
@@ -399,6 +404,17 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
         },
         .gcc => {
             var compiler = lib.GCC.init(allocator, args.optimization);
+            compiler.deinit();
+
+            try emit(
+                &compiler,
+                allocator,
+                args,
+                ctx,
+            );
+        },
+        .llvm => {
+            var compiler = lib.LLVM.init(allocator, args.optimization);
             compiler.deinit();
 
             try emit(

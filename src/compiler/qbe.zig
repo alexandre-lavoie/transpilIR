@@ -23,14 +23,19 @@ pub const QBE = struct {
             else => return false,
         }
 
-        switch (assembly) {
-            .native => {},
-            .none,
-            .ir,
-            => return false,
-        }
+        _ = Self.getTarget(assembly) catch return false;
 
         return true;
+    }
+
+    fn getTarget(assembly: common.Assembly) ![]const u8 {
+        return switch (assembly) {
+            .native => "",
+            .amd64,
+            .x86_64,
+            => "amd64_sysv",
+            else => error.UnsupportedTarget,
+        };
     }
 
     fn getExecutable(self: *const Self) !?[]const u8 {
@@ -70,14 +75,10 @@ pub const QBE = struct {
 
         try args.append(executable orelse "qbe");
 
-        const target = switch (assembly) {
-            .native => "",
-            else => return error.UnsupportedTarget,
-        };
-
-        if (target.len > 0) {
-            args.append("-t");
-            args.append(target);
+        const arch = try Self.getTarget(assembly);
+        if (arch.len > 0) {
+            try args.append("-t");
+            try args.append(arch);
         }
 
         try args.append("-");

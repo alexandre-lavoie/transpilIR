@@ -27,8 +27,9 @@ pub const readerToWriter = common.readerToWriter;
 
 const compiler = @import("compiler/lib.zig");
 pub const GCC = compiler.GCC;
-pub const QBE = compiler.QBE;
 pub const IRC = compiler.IRC;
+pub const LLVM = compiler.LLVM;
+pub const QBE = compiler.QBE;
 
 const flow = @import("flow/lib.zig");
 pub const CFG = flow.CFG;
