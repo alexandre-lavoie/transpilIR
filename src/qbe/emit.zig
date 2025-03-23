@@ -28,8 +28,8 @@ pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST, target: *const common.
 
         try switch (out.state) {
             .enter => emit_callback.enter(stat),
+            .middle => emit_callback.middle(stat, out.previous.?, out.next.?),
             .exit => emit_callback.exit(stat),
-            else => {},
         };
     }
 
@@ -197,6 +197,8 @@ pub const QBEEmitWalkCallback = struct {
                     .type_exit => try self.newline(),
                     else => {},
                 }
+
+                self.state = .default;
 
                 try self.push(.data, null);
             },
