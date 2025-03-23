@@ -7,8 +7,9 @@ pub const Statement = ast.Statement;
 pub const ast_utils = ast.utils;
 
 const c = @import("c/lib.zig");
-pub const CToken = c.CToken;
 pub const CEmitWalkCallback = c.CEmitWalkCallback;
+pub const CEmitWriter = c.CEmitWriter;
+pub const CToken = c.CToken;
 
 const common = @import("common.zig");
 pub const Color = common.Color;

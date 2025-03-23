@@ -64,7 +64,7 @@ pub const SymbolMemoryWalkCallback = struct {
         self.entries.deinit();
     }
 
-    pub fn enter(self: *Self, statement: *const ast.Statement) !void {
+    pub fn enter(self: *Self, statement: ast.Statement) !void {
         const instance: types.Instance = .{ .span = statement.span };
 
         switch (statement.data) {
@@ -123,30 +123,30 @@ pub const SymbolMemoryWalkCallback = struct {
                 switch (identifier.scope) {
                     .local => {
                         try self.entries.append(.{
-                            .local = self.symbol_table.getSymbolIndexByInstance(&instance).?,
+                            .local = self.symbol_table.getSymbolIndexByInstance(&instance) orelse return error.InvalidLocal,
                         });
                     },
                     .global => {
                         try self.entries.append(.{
-                            .global = self.symbol_table.getSymbolIndexByInstance(&instance).?,
+                            .global = self.symbol_table.getSymbolIndexByInstance(&instance) orelse return error.InvalidGlobal,
                         });
                     },
                     .type => {
                         try self.entries.append(.{
-                            .type = self.symbol_table.getSymbolIndexByInstance(&instance).?,
+                            .type = self.symbol_table.getSymbolIndexByInstance(&instance) orelse return error.InvalidType,
                         });
                     },
                     .label => {
                         if (!self.block) return;
                         self.block = false;
 
-                        const symbol = self.symbol_table.getSymbolByInstance(&instance).?;
+                        const symbol = self.symbol_table.getSymbolByInstance(&instance) orelse return error.InvalidLabel;
                         symbol.memory = .label;
                     },
                 }
             },
             .literal => {
-                const literal = self.symbol_table.getLiteralByInstance(&instance).?;
+                const literal = self.symbol_table.getLiteralByInstance(&instance) orelse return error.InvalidLiteral;
 
                 try self.entries.append(.{
                     .literal = literal,
@@ -162,7 +162,7 @@ pub const SymbolMemoryWalkCallback = struct {
         }
     }
 
-    pub fn exit(self: *Self, statement: *const ast.Statement) !void {
+    pub fn exit(self: *Self, statement: ast.Statement) !void {
         const allocator = self.allocator;
 
         switch (statement.data) {
@@ -200,6 +200,10 @@ pub const SymbolMemoryWalkCallback = struct {
                 self.entries.clearAndFree();
             },
             .allocate => {
+                if (self.entries.items.len < 2) {
+                    return error.InvalidAllocate;
+                }
+
                 switch (self.entries.items[1]) {
                     .primitive => |p| switch (p) {
                         .bool,
@@ -226,7 +230,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         },
                     },
                     .type => {},
-                    else => unreachable,
+                    else => return error.InvalidAllocate,
                 }
             },
             .comparison => {
@@ -255,7 +259,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         },
                     },
                     .type => return error.ComparisonType,
-                    else => unreachable,
+                    else => return error.ComparisonType,
                 }
             },
             .array_type => {
@@ -264,7 +268,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         .integer => |integer| @as(usize, @intCast(integer)),
                         else => unreachable,
                     },
-                    else => unreachable,
+                    else => return error.InvalidArrayType,
                 };
 
                 try self.entries.append(switch (self.entries.pop()) {
@@ -288,12 +292,12 @@ pub const SymbolMemoryWalkCallback = struct {
                 });
             },
             .function_parameter => {
-                const @"type" = self.entries.pop();
-                const value = self.entries.pop();
+                const @"type" = self.entries.popOrNull() orelse return error.InvalidFunctionParameter;
+                const value = self.entries.popOrNull() orelse return error.InvalidFunctionParameter;
 
                 switch (value) {
                     .local => |local| {
-                        const symbol = self.symbol_table.getSymbolPtrMut(local).?;
+                        const symbol = self.symbol_table.getSymbolPtrMut(local) orelse return error.InvalidFunctionParameter;
 
                         symbol.memory = switch (@"type") {
                             .primitive => |primitive| .{
@@ -306,28 +310,32 @@ pub const SymbolMemoryWalkCallback = struct {
                             else => unreachable,
                         };
                     },
-                    else => unreachable,
+                    else => return error.InvalidFunctionParameter,
                 }
 
                 try self.entries.append(@"type");
             },
             .call_parameter => {
-                const @"type" = self.entries.pop();
-                _ = self.entries.pop();
+                const @"type" = self.entries.popOrNull() orelse return error.InvalidCallParameter;
+                _ = self.entries.popOrNull() orelse return error.InvalidCallParameter;
 
                 try self.entries.append(@"type");
             },
             .assignment => {
+                if (self.entries.items.len == 0) {
+                    return error.InvalidAssignment;
+                }
+
                 const symbol: *types.Symbol = switch (self.entries.items[0]) {
-                    .local => |index| self.symbol_table.getSymbolPtrMut(index).?,
-                    else => unreachable,
+                    .local => |index| self.symbol_table.getSymbolPtrMut(index) orelse return error.InvalidAssignment,
+                    else => return error.InvalidAssignment,
                 };
 
                 if (symbol.memory == .empty) {
                     symbol.memory = switch (self.entries.items[1]) {
                         .primitive => |v| .{ .primitive = v },
                         .type => |v| .{ .type = v },
-                        else => unreachable,
+                        else => return error.InvalidAssignment,
                     };
                 }
 
@@ -338,8 +346,8 @@ pub const SymbolMemoryWalkCallback = struct {
                 var i: usize = 0;
 
                 const symbol: *types.Symbol = switch (self.entries.items[i]) {
-                    .type => |index| self.symbol_table.getSymbolPtrMut(index).?,
-                    else => unreachable,
+                    .type => |index| self.symbol_table.getSymbolPtrMut(index) orelse return error.InvalidTypeDefinition,
+                    else => return error.InvalidTypeDefinition,
                 };
                 i += 1;
 
@@ -470,7 +478,7 @@ pub const SymbolMemoryWalkCallback = struct {
                 self.entries.clearAndFree();
             },
             .phi_parameter => {
-                const local = self.entries.pop();
+                const local = self.entries.popOrNull() orelse return error.InvalidPhiParameter;
 
                 _ = local;
             },
@@ -484,7 +492,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         },
                         else => unreachable,
                     },
-                    else => unreachable,
+                    else => return error.InvalidLinkage,
                 };
 
                 const section: ?[]const u8 = switch (self.entries.items.len) {
@@ -516,21 +524,21 @@ pub const SymbolMemoryWalkCallback = struct {
                     .data_offset = .{
                         .index = switch (index) {
                             .global => |v| v,
-                            else => unreachable,
+                            else => return error.InvalidOffset,
                         },
                         .offset = switch (offset) {
                             .literal => |literal| switch (literal.value) {
                                 .integer => |v| v,
-                                else => unreachable,
+                                else => return error.InvalidOffset,
                             },
-                            else => unreachable,
+                            else => return error.InvalidOffset,
                         },
                     },
                 });
             },
             .typed_data => {
-                const value = self.entries.pop();
-                const value_type = self.entries.pop();
+                const value = self.entries.popOrNull() orelse return error.EmptyEntries;
+                const value_type = self.entries.popOrNull() orelse return error.EmptyEntries;
 
                 try self.entries.append(switch (value_type) {
                     .primitive => |primitive| .{
@@ -540,7 +548,7 @@ pub const SymbolMemoryWalkCallback = struct {
                                 .value = switch (value) {
                                     .literal => |v| .{ .literal = v },
                                     .data_offset => |v| .{ .symbol = v },
-                                    else => unreachable,
+                                    else => return error.InvalidTypedData,
                                 },
                             },
                         },
@@ -556,21 +564,25 @@ pub const SymbolMemoryWalkCallback = struct {
                             },
                         },
                     },
-                    else => unreachable,
+                    else => return error.InvalidTypedData,
                 });
             },
             .data_definition => {
                 var i: usize = 0;
 
+                if (self.entries.items.len == 0) {
+                    return error.InvalidDataDefinition;
+                }
+
                 var symbol: *types.Symbol = switch (self.entries.items[i]) {
-                    .global => |g| self.symbol_table.getSymbolPtrMut(g).?,
-                    else => unreachable,
+                    .global => |g| self.symbol_table.getSymbolPtrMut(g) orelse return error.InvalidDataDefinition,
+                    else => return error.InvalidDataDefinition,
                 };
                 i += 1;
 
                 const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[i]) {
                     .linkage => |l| l,
-                    else => unreachable,
+                    else => return error.InvalidDataDefinition,
                 };
                 i += 1;
 
@@ -615,27 +627,31 @@ pub const SymbolMemoryWalkCallback = struct {
                 self.entries.clearAndFree();
             },
             .function_signature => {
+                if (self.entries.items.len == 0) {
+                    return error.InvalidFunctionSignatureLength;
+                }
+
                 const symbol_index: usize = switch (self.entries.items[0]) {
                     .global => |g| g,
-                    else => unreachable,
+                    else => return error.InvalidFunctionSignatureSymbol,
                 };
 
-                const symbol: *types.Symbol = self.symbol_table.getSymbolPtrMut(symbol_index).?;
+                const symbol: *types.Symbol = self.symbol_table.getSymbolPtrMut(symbol_index) orelse return error.InvalidFunctionSignatureSymbol;
 
                 const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[1]) {
                     .linkage => |l| l,
-                    else => unreachable,
+                    else => return error.InvalidFunctionSignatureLinkage,
                 };
 
                 const @"return": types.SymbolType = switch (self.entries.items[2]) {
                     .primitive => |p| .{ .primitive = p },
                     .type => |t| .{ .type = t },
-                    else => unreachable,
+                    else => return error.InvalidFunctionSignatureReturn,
                 };
 
                 const vararg: bool = switch (self.entries.items[self.entries.items.len - 1]) {
                     .variadic => scope: {
-                        _ = self.entries.pop();
+                        _ = self.entries.popOrNull() orelse return error.InvalidFunctionSignatureVarying;
 
                         break :scope true;
                     },
@@ -651,7 +667,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         .primitive => |p| .{ .primitive = p },
                         .type => |t| .{ .type = t },
                         .env => .env,
-                        else => unreachable,
+                        else => return error.InvalidFunctionSignatureParameter,
                     };
                 }
 
@@ -673,7 +689,7 @@ pub const SymbolMemoryWalkCallback = struct {
 
                         symbol.memory = memory;
                     },
-                    else => unreachable,
+                    else => return error.InvalidFunctionSignatureMemory,
                 }
 
                 self.entries.clearAndFree();
@@ -684,10 +700,14 @@ pub const SymbolMemoryWalkCallback = struct {
                     false => 0,
                 };
 
+                if (i >= self.entries.items.len) {
+                    return error.InvalidCallLength;
+                }
+
                 const symbol: ?*types.Symbol = switch (self.entries.items[i]) {
                     .global => |g| self.symbol_table.getSymbolPtrMut(g),
                     .local => null,
-                    else => unreachable,
+                    else => return error.InvalidCallSymbol,
                 };
                 i += 1;
 
@@ -695,7 +715,7 @@ pub const SymbolMemoryWalkCallback = struct {
                 const @"return": types.SymbolType = switch (return_entry) {
                     .primitive => |p| .{ .primitive = p },
                     .type => |t| .{ .type = t },
-                    else => unreachable,
+                    else => return error.InvalidCallReturn,
                 };
                 i += 1;
 
@@ -713,7 +733,7 @@ pub const SymbolMemoryWalkCallback = struct {
                             vararg = true;
                             break;
                         },
-                        else => unreachable,
+                        else => return error.InvalidCallParameter,
                     };
                 }
 
@@ -741,7 +761,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         => {
                             allocator.free(parameters);
                         },
-                        else => unreachable,
+                        else => return error.InvalidCall,
                     }
                 } else {
                     allocator.free(parameters);

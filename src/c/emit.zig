@@ -1441,6 +1441,4 @@ test "Emit" {
 
     const actual = try output_array.toOwnedSlice();
     defer allocator.free(actual);
-
-    std.debug.print("{s}", .{actual});
 }

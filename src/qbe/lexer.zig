@@ -29,6 +29,10 @@ pub fn QBELexer(comptime Reader: type, comptime Collection: type) type {
             };
         }
 
+        pub fn deinit(self: *Self) void {
+            _ = self;
+        }
+
         pub fn lex(self: *Self) !void {
             try self.collection_append(token.QBEToken.init(.module_start));
 

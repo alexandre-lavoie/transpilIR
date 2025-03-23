@@ -122,6 +122,13 @@ pub fn fileNewLines(allocator: std.mem.Allocator, reader: anytype) ![]usize {
 }
 
 pub fn indexToFile(newline_offsets: []const usize, index: usize) struct { line: usize, column: usize } {
+    if (newline_offsets.len == 0) {
+        return .{
+            .line = 0,
+            .column = 0,
+        };
+    }
+
     var left: usize = 0;
     const size = newline_offsets.len;
     var right = size;

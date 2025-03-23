@@ -147,7 +147,7 @@ pub const SymbolValidateWalkCallback = struct {
             .negate,
             => {},
             .identifier => |identifier| {
-                const symbol = self.symbol_table.getSymbolByInstance(&instance).?;
+                const symbol = self.symbol_table.getSymbolByInstance(&instance) orelse return error.IdentifierNotFound;
 
                 switch (symbol.memory) {
                     .empty => {
@@ -188,7 +188,7 @@ pub const SymbolValidateWalkCallback = struct {
             },
             .primitive_type => |primitive| try self.types.append(primitive),
             .env_type => try self.types.append(.ptr),
-            .phi => self.phi_type = self.types.pop(),
+            .phi => self.phi_type = self.types.popOrNull() orelse return error.DataType,
         }
     }
 
@@ -222,8 +222,8 @@ pub const SymbolValidateWalkCallback = struct {
             => self.types.clearAndFree(),
             .function => self.return_type = null,
             .binary_operation => {
-                const right = self.types.pop();
-                const left = self.types.pop();
+                const right = self.types.popOrNull() orelse return error.DataType;
+                const left = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
@@ -231,8 +231,8 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(data_type, try Self.matchType(left, right))) return error.DataType;
             },
             .comparison => {
-                const right = self.types.pop();
-                const left = self.types.pop();
+                const right = self.types.popOrNull() orelse return error.DataType;
+                const left = self.types.popOrNull() orelse return error.DataType;
                 const comparision_type = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
@@ -241,7 +241,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(comparision_type, try Self.matchType(left, right))) return error.DataType;
             },
             .negate => {
-                const value = self.types.pop();
+                const value = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
@@ -262,7 +262,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(.ptr, value)) return error.DataType;
             },
             .vaarg => {
-                const value = self.types.pop();
+                const value = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
@@ -275,24 +275,24 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(self.phi_type orelse .void, @"type")) return error.DataType;
             },
             .phi => {
-                try self.types.append(self.phi_type.?);
+                try self.types.append(self.phi_type orelse return error.DataType);
             },
             .branch => {
-                const condition = self.types.pop();
+                const condition = self.types.popOrNull() orelse return error.DataType;
 
                 if (!self.validateType(.i8, condition)) return error.DataType;
             },
             .blit => {
-                const size = self.types.pop();
-                const to = self.types.pop();
-                const from = self.types.pop();
+                const size = self.types.popOrNull() orelse return error.DataType;
+                const to = self.types.popOrNull() orelse return error.DataType;
+                const from = self.types.popOrNull() orelse return error.DataType;
 
                 if (size != .void) return error.DataType;
                 if (!self.validateType(.ptr, to)) return error.DataType;
                 if (!self.validateType(.ptr, from)) return error.DataType;
             },
             .convert => {
-                const value = self.types.pop();
+                const value = self.types.popOrNull() orelse return error.DataType;
                 const from_type = self.types.popOrNull() orelse return error.DataType;
                 const to_type = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
@@ -303,7 +303,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(data_type, to_type)) return error.DataType;
             },
             .copy => {
-                const value = self.types.pop();
+                const value = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(data_type);
@@ -311,7 +311,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(data_type, value)) return error.DataType;
             },
             .cast => {
-                const value = self.types.pop();
+                const value = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
                 const from_type: ast.PrimitiveType = switch (data_type) {
@@ -326,7 +326,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(from_type, value)) return error.DataType;
             },
             .load => {
-                const address = self.types.pop();
+                const address = self.types.popOrNull() orelse return error.DataType;
                 const memory_type = self.types.popOrNull() orelse return error.DataType;
                 const data_type = self.types.popOrNull() orelse return error.DataType;
 
@@ -362,21 +362,21 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(data_type, source_type)) return error.DataType;
             },
             .store => {
-                const address = self.types.pop();
-                const value = self.types.pop();
+                const address = self.types.popOrNull() orelse return error.DataType;
+                const value = self.types.popOrNull() orelse return error.DataType;
                 const memory_type = self.types.popOrNull() orelse return error.DataType;
 
                 if (!self.validateType(.ptr, address)) return error.DataType;
                 if (!self.validateType(memory_type, value)) return error.DataType;
             },
             .call_parameter => {
-                const @"type" = self.types.pop();
-                const value = self.types.pop();
+                const @"type" = self.types.popOrNull() orelse return error.DataType;
+                const value = self.types.popOrNull() orelse return error.DataType;
 
                 if (!self.validateType(@"type", value)) return error.DataType;
             },
             .call => {
-                const return_type = self.types.pop();
+                const return_type = self.types.popOrNull() orelse return error.DataType;
                 const address = self.types.popOrNull() orelse return error.DataType;
 
                 try self.types.append(return_type);
@@ -384,7 +384,7 @@ pub const SymbolValidateWalkCallback = struct {
                 if (!self.validateType(.ptr, address)) return error.DataType;
             },
             .assignment => {
-                const value = self.types.pop();
+                const value = self.types.popOrNull() orelse return error.DataType;
                 const @"type" = self.types.popOrNull() orelse return error.DataType;
 
                 if (!self.validateType(@"type", value)) return error.DataType;

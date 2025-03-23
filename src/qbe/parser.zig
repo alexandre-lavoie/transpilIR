@@ -32,6 +32,10 @@ pub fn QBEParser(comptime Reader: type) type {
             };
         }
 
+        pub fn deinit(self: *Self) void {
+            _ = self;
+        }
+
         pub fn parse(self: *Self) !usize {
             _ = self.next();
             return try self.module();

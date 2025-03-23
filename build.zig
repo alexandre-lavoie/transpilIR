@@ -4,14 +4,14 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const debug_cli = b.addExecutable(.{
-        .name = "transpilir-debug",
-        .root_source_file = b.path("src/cli_debug.zig"),
+    const cli = b.addExecutable(.{
+        .name = "transpilir",
+        .root_source_file = b.path("src/cli.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    b.installArtifact(debug_cli);
+    b.installArtifact(cli);
 
     const lib_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/lib.zig"),

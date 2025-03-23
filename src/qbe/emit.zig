@@ -11,11 +11,16 @@ pub fn emit(allocator: std.mem.Allocator, tree: *ast.AST, target: *const common.
     var walk = ast.ASTWalk.init(allocator, tree);
     defer walk.deinit();
 
+    var symbol_table = symbol.SymbolTable.init(allocator);
+
     var emit_callback = QBEEmitWalkCallback.init(
         allocator,
         target,
+        &symbol_table,
     );
     defer emit_callback.deinit();
+
+    symbol_table.deinit();
 
     try walk.start(tree.entrypoint() orelse return error.NotFound);
     while (try walk.next()) |out| {
@@ -55,7 +60,9 @@ pub const QBEEmitWalkCallback = struct {
     const Self = @This();
     const TokenList = std.ArrayList(token.QBEToken);
 
-    pub fn init(allocator: std.mem.Allocator, target: *const common.Target) Self {
+    pub fn init(allocator: std.mem.Allocator, target: *const common.Target, symbol_table: *symbol.SymbolTable) Self {
+        _ = symbol_table;
+
         return .{
             .allocator = allocator,
             .target = target,
@@ -319,6 +326,13 @@ pub const QBEEmitWalkCallback = struct {
                 self.state = .op_enter;
             },
         }
+    }
+
+    pub fn middle(self: *Self, statement: *const ast.Statement, previous: usize, next: usize) !void {
+        _ = self;
+        _ = statement;
+        _ = previous;
+        _ = next;
     }
 
     pub fn exit(self: *Self, statement: *const ast.Statement) !void {
