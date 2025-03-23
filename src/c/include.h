@@ -11,6 +11,8 @@
 #define VA_START(ap, paramN) va_start(*(va_list*)(ap), paramN)
 #define VA_ARG(T, ap) va_arg(*(va_list*)(ap), T)
 
+#define ALIGN(n) __attribute__((aligned(n)))
+#define ALIGN_DEFAULT ALIGN(1)
 #define ALLOCATE(align, size) alloca(size)
 #define BLIT(dest, src, n) memcpy(dest, src, n)
 

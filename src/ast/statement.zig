@@ -130,6 +130,7 @@ pub const StatementData = union(StatementType) {
     // Data
 
     data_definition: struct {
+        alignment: ?StatementIndex,
         linkage: StatementIndex,
         identifier: StatementIndex,
         values: StatementIndex,

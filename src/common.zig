@@ -48,6 +48,48 @@ pub const EmitWriterConfig = struct {
     tty: std.io.tty.Config,
 };
 
+// Type of IR
+pub const IR = enum {
+    none,
+    c,
+    qbe,
+
+    pub fn isEnabled(t: IR) bool {
+        return switch (t) {
+            .none => false,
+            else => true,
+        };
+    }
+};
+
+// Type of assembly
+pub const Assembly = enum {
+    none,
+    native,
+    ir,
+
+    pub fn isEnabled(t: Assembly) bool {
+        return switch (t) {
+            .none => false,
+            else => true,
+        };
+    }
+};
+
+// Optimization level for compiler
+pub const Optimization = enum {
+    o0,
+    o1,
+    o2,
+    o3,
+
+    pub fn isEnabled(o: Optimization) bool {
+        _ = o;
+
+        return true;
+    }
+};
+
 // Iterator over a collection of items
 pub fn CollectionIterator(comptime Item: type) type {
     return struct {
@@ -196,6 +238,23 @@ pub fn printError(writer: anytype, tty_config: *const std.io.tty.Config, err: an
 
     try printSpan(writer, tty_config, file, offsets, span);
     try writer.writeByte('\n');
+}
+
+// Copy contents of a reader to a writer
+pub fn readerToWriter(reader: anytype, writer: anytype) !void {
+    var chunk: [1024]u8 = undefined;
+    while (true) {
+        const size = try reader.read(&chunk);
+        if (size == 0) {
+            break;
+        }
+
+        _ = try writer.write(chunk[0..size]);
+
+        if (size < 1024) {
+            break;
+        }
+    }
 }
 
 test "indexToFile" {

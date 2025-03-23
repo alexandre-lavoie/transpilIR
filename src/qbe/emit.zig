@@ -40,7 +40,6 @@ const EmitWalkState = enum {
     default,
     assignment_enter,
     function_enter,
-    data_enter,
     block_enter,
     type_enter,
     type_scope,
@@ -162,6 +161,7 @@ pub const QBEEmitWalkCallback = struct {
             .load,
             .store,
             .comparison,
+            .typed_data,
             => {},
             .assignment => self.state = .assignment_enter,
             .module => try self.push(.module_start, null),
@@ -199,8 +199,6 @@ pub const QBEEmitWalkCallback = struct {
                 }
 
                 try self.push(.data, null);
-
-                self.state = .data_enter;
             },
             .call => {
                 try self.push(.call, null);
@@ -281,15 +279,6 @@ pub const QBEEmitWalkCallback = struct {
                 },
                 else => {},
             },
-            .typed_data => switch (self.state) {
-                .data_enter => {
-                    self.state = .default;
-
-                    try self.push(.assign, null);
-                    try self.push(.open_curly_brace, null);
-                },
-                else => {},
-            },
             .@"return" => {
                 try self.push(.tab, null);
                 try self.push(.@"return", null);
@@ -329,10 +318,66 @@ pub const QBEEmitWalkCallback = struct {
     }
 
     pub fn middle(self: *Self, statement: *const ast.Statement, previous: usize, next: usize) !void {
-        _ = self;
-        _ = statement;
-        _ = previous;
         _ = next;
+
+        switch (statement.data) {
+            .struct_type => |s| {
+                if (s.alignment == previous) {
+                    try self.rot2();
+
+                    _ = try self.pop();
+
+                    try self.push(.@"align", null);
+
+                    try self.rot2();
+
+                    try self.push(.open_curly_brace, null);
+                }
+            },
+            .union_type => |s| {
+                if (s.alignment == previous) {
+                    try self.rot2();
+
+                    _ = try self.pop();
+
+                    try self.push(.@"align", null);
+
+                    try self.rot2();
+
+                    try self.push(.open_curly_brace, null);
+                }
+            },
+            .opaque_type => |o| {
+                if (o.alignment == previous) {
+                    try self.rot2();
+
+                    _ = try self.pop();
+
+                    try self.push(.@"align", null);
+
+                    try self.rot2();
+
+                    try self.push(.open_curly_brace, null);
+                }
+            },
+            .data_definition => |d| {
+                if (d.linkage == previous) {
+                    try self.push(.assign, null);
+                    try self.push(.open_curly_brace, null);
+                } else if (d.alignment == previous) {
+                    try self.rot2();
+
+                    _ = try self.pop();
+
+                    try self.push(.@"align", null);
+
+                    try self.rot2();
+
+                    try self.push(.open_curly_brace, null);
+                }
+            },
+            else => {},
+        }
     }
 
     pub fn exit(self: *Self, statement: *const ast.Statement) !void {

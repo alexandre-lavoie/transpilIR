@@ -12,14 +12,23 @@ pub const CEmitWriter = c.CEmitWriter;
 pub const CToken = c.CToken;
 
 const common = @import("common.zig");
+pub const Assembly = common.Assembly;
 pub const Color = common.Color;
 pub const CollectionIterator = common.CollectionIterator;
 pub const EmitWriterConfig = common.EmitWriterConfig;
+pub const IR = common.IR;
+pub const Optimization = common.Optimization;
 pub const SourceSpan = common.SourceSpan;
 pub const Target = common.Target;
 pub const fileNewLines = common.fileNewLines;
 pub const printError = common.printError;
 pub const printSpan = common.printSpan;
+pub const readerToWriter = common.readerToWriter;
+
+const compiler = @import("compiler/lib.zig");
+pub const GCC = compiler.GCC;
+pub const QBE = compiler.QBE;
+pub const IRC = compiler.IRC;
 
 const flow = @import("flow/lib.zig");
 pub const CFG = flow.CFG;

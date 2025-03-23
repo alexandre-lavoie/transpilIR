@@ -544,11 +544,10 @@ pub fn QBEParser(comptime Reader: type) type {
             if (self.previous.token_type != .assign) return error.MissingEqual;
             _ = self.next();
 
-            var alignment: ?ast.StatementIndex = null;
-            switch (self.previous.token_type) {
-                .@"align" => alignment = try self.stackAlignment(),
-                else => {},
-            }
+            const alignment: ?ast.StatementIndex = switch (self.previous.token_type) {
+                .@"align" => try self.stackAlignment(),
+                else => null,
+            };
 
             if (self.previous.token_type != .open_curly_brace) return error.MissingOpenCurlyBrace;
             _ = self.next();
@@ -614,6 +613,7 @@ pub fn QBEParser(comptime Reader: type) type {
             return try self.new(
                 .{ .start = start, .end = end },
                 .{ .data_definition = .{
+                    .alignment = alignment,
                     .linkage = link,
                     .identifier = identifier,
                     .values = value_head orelse return error.EmptyData,
@@ -1113,11 +1113,13 @@ pub fn QBEParser(comptime Reader: type) type {
 
             return self.new(
                 .{ .start = start, .end = end },
-                .{ .allocate = .{
-                    .data_type = data_type,
-                    .alignment = alignment,
-                    .size = size,
-                } },
+                .{
+                    .allocate = .{
+                        .data_type = data_type,
+                        .alignment = alignment,
+                        .size = size,
+                    },
+                },
             );
         }
 

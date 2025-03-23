@@ -2,43 +2,6 @@ const std = @import("std");
 
 const lib = @import("lib.zig");
 
-const Source = enum {
-    none,
-    qbe,
-
-    pub fn isEnabled(s: Source) bool {
-        return switch (s) {
-            .none => false,
-            else => true,
-        };
-    }
-};
-
-const IR = enum {
-    none,
-    c,
-    qbe,
-
-    pub fn isEnabled(t: IR) bool {
-        return switch (t) {
-            .none => false,
-            else => true,
-        };
-    }
-};
-
-const Target = enum {
-    none,
-    ir,
-
-    pub fn isEnabled(t: Target) bool {
-        return switch (t) {
-            .none => false,
-            else => true,
-        };
-    }
-};
-
 const Flag = enum(u8) {
     none = '\x00',
     help = 'h',
@@ -46,6 +9,7 @@ const Flag = enum(u8) {
     source = 's',
     ir = 'r',
     target = 't',
+    optimization = 'z',
     debug = 'd',
 };
 
@@ -58,6 +22,12 @@ const DebugFlag = enum(usize) {
     optimization = 0b100000,
     ir = 0b1000000,
     target = 0b10000000,
+
+    pub fn isEnabled(f: DebugFlag) bool {
+        _ = f;
+
+        return true;
+    }
 };
 
 pub fn main() !void {
@@ -88,25 +58,45 @@ pub fn main() !void {
     );
 }
 
+const Source = enum {
+    none,
+    qbe,
+
+    pub fn isEnabled(s: Source) bool {
+        return switch (s) {
+            .none => false,
+            else => true,
+        };
+    }
+};
+
+const Compiler = enum {
+    gcc,
+    irc,
+    qbe,
+};
+
 const Args = struct {
     allocator: std.mem.Allocator,
     executable: []const u8 = "",
     source: Source = default_source,
     source_path: []const u8 = "",
-    ir: IR = default_ir,
-    target: Target = default_target,
-    target_path: []const u8 = "",
+    ir: lib.IR = default_ir,
+    assembly: lib.Assembly = default_assembly,
+    assembly_path: []const u8 = "",
     arch: lib.Target = .{ .arch = .a64 },
     debug_flags: usize = 0,
     help: bool = false,
     config: lib.EmitWriterConfig = .{ .tty = .escape_codes },
+    optimization: lib.Optimization = default_optimization,
     debug: std.io.AnyWriter,
 
     const Self = @This();
 
     const default_source: Source = getDefault(Source);
-    const default_ir: IR = getDefault(IR);
-    const default_target: Target = getDefault(Target);
+    const default_ir: lib.IR = getDefault(lib.IR);
+    const default_assembly: lib.Assembly = getDefault(lib.Assembly);
+    const default_optimization: lib.Optimization = getDefault(lib.Optimization);
 
     pub fn init(allocator: std.mem.Allocator, debug: std.io.AnyWriter) Args {
         return .{
@@ -163,17 +153,22 @@ const Args = struct {
                         if (!self.source.isEnabled()) return error.InvalidSource;
                     },
                     .ir => {
-                        self.ir = std.meta.stringToEnum(IR, p) orelse return error.InvalidSource;
+                        self.ir = std.meta.stringToEnum(lib.IR, p) orelse return error.InvalidIR;
 
                         if (!self.ir.isEnabled()) return error.InvalidIR;
                     },
                     .target => {
-                        self.target = std.meta.stringToEnum(Target, p) orelse return error.InvalidTarget;
+                        self.assembly = std.meta.stringToEnum(lib.Assembly, p) orelse return error.InvalidTarget;
 
-                        if (!self.target.isEnabled()) return error.InvalidTarget;
+                        if (!self.assembly.isEnabled()) return error.InvalidTarget;
                     },
                     .output => {
-                        self.target_path = p;
+                        self.assembly_path = p;
+                    },
+                    .optimization => {
+                        self.optimization = std.meta.stringToEnum(lib.Optimization, p) orelse return error.InvalidOptimization;
+
+                        if (!self.optimization.isEnabled()) return error.InvalidOptimization;
                     },
                     .debug => {
                         var it = std.mem.split(u8, p, ",");
@@ -223,24 +218,29 @@ pub fn writeHelp(args: Args) !void {
             .ir => {
                 try args.debug.print("\t-r ir\t  target IR\n\t\t  ", .{});
 
-                try writeHelpEnum(args.debug, IR, Args.default_ir);
+                try writeHelpEnum(args.debug, lib.IR, Args.default_ir);
             },
             .target => {
                 try args.debug.print("\t-t out\t  output target\n\t\t  ", .{});
 
-                try writeHelpEnum(args.debug, Target, Args.default_target);
+                try writeHelpEnum(args.debug, lib.Assembly, Args.default_assembly);
+            },
+            .optimization => {
+                try args.debug.print("\t-z opt\t  optimization level to compile with\n\t\t  ", .{});
+
+                try writeHelpEnum(args.debug, lib.Optimization, Args.default_optimization);
             },
             .debug => {
-                try args.debug.print("\t-d\t  enables debug flags\n\t\t  ", .{});
+                try args.debug.print("\t-d flgs\t  comma list of debug flags to activate\n\t\t  ", .{});
 
-                try writeHelpEnum(args.debug, Target, Args.default_target);
+                try writeHelpEnum(args.debug, DebugFlag, null);
             },
             else => {},
         }
     }
 }
 
-fn writeHelpEnum(w: std.io.AnyWriter, @"enum": type, default: @"enum") !void {
+fn writeHelpEnum(w: std.io.AnyWriter, @"enum": type, default: ?@"enum") !void {
     var is_first = true;
     inline for (std.meta.fields(@"enum")) |s| {
         const e: @"enum" = @enumFromInt(s.value);
@@ -302,6 +302,22 @@ const Context = struct {
 fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
     const Reader = std.io.AnyReader;
     const Writer = std.io.AnyWriter;
+
+    const compiler_type: Compiler = l: {
+        if (lib.GCC.isSupported(args.ir, args.assembly)) {
+            break :l .gcc;
+        }
+
+        if (lib.QBE.isSupported(args.ir, args.assembly)) {
+            break :l .qbe;
+        }
+
+        if (lib.IRC.isSupported(args.ir, args.assembly)) {
+            break :l .irc;
+        }
+
+        return error.UnsupportedIRTarget;
+    };
 
     const is_parsed = l: {
         switch (args.source) {
@@ -369,11 +385,41 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
         .none => unreachable,
     }
 
-    try emit(
-        allocator,
-        args,
-        ctx,
-    );
+    switch (compiler_type) {
+        .irc => {
+            var compiler = lib.IRC.init(allocator);
+            compiler.deinit();
+
+            try emit(
+                &compiler,
+                allocator,
+                args,
+                ctx,
+            );
+        },
+        .gcc => {
+            var compiler = lib.GCC.init(allocator, args.optimization);
+            compiler.deinit();
+
+            try emit(
+                &compiler,
+                allocator,
+                args,
+                ctx,
+            );
+        },
+        .qbe => {
+            var compiler = lib.QBE.init(allocator);
+            compiler.deinit();
+
+            try emit(
+                &compiler,
+                allocator,
+                args,
+                ctx,
+            );
+        },
+    }
 }
 
 fn parse(
@@ -398,20 +444,12 @@ fn parse(
     var file_stream: std.io.StreamSource = switch (is_stdin) {
         true => l: {
             const stdin = std.io.getStdIn();
-            var reader = stdin.reader();
+            const reader = stdin.reader();
 
             var buffer = std.ArrayList(u8).init(allocator);
             const writer = buffer.writer();
 
-            var chunk: [1024]u8 = undefined;
-            while (true) {
-                const size = try reader.read(&chunk);
-                _ = try writer.write(chunk[0..size]);
-
-                if (size < 1024) {
-                    break;
-                }
-            }
+            try lib.readerToWriter(reader, writer);
 
             const output: []u8 = try buffer.toOwnedSlice();
 
@@ -1011,6 +1049,7 @@ fn transpile(
 }
 
 fn emit(
+    compiler: anytype,
     allocator: std.mem.Allocator,
     args: *const Args,
     ctx: *Context,
@@ -1019,27 +1058,45 @@ fn emit(
 
     var debug = args.debug;
 
-    const is_stdout = args.target_path.len == 0;
+    if (args.hasDebug(.target)) {
+        _ = try debug.write("=== Target ===\n");
+    }
+
+    const is_stdout = args.assembly_path.len == 0;
 
     const file = switch (is_stdout) {
         true => std.io.getStdOut(),
         false => l: {
             if (args.hasDebug(.target)) {
                 try args.setDebugColor(lib.Color.path);
-                _ = try debug.print("{s}\n", .{args.target_path});
+                _ = try debug.print("{s}\n", .{args.assembly_path});
                 try args.setDebugColor(.reset);
             }
 
-            break :l try std.fs.cwd().createFile(args.target_path, .{});
+            break :l try std.fs.cwd().createFile(args.assembly_path, .{});
         },
     };
     defer file.close();
 
-    if (args.target == .ir) {
-        _ = try file.write(ctx.transpile_buffer.items);
+    var buffer = std.io.fixedBufferStream(ctx.transpile_buffer.items);
+    const reader = buffer.reader().any();
 
-        return;
-    }
+    const writer = file.writer().any();
+
+    const is_stdin = args.source_path.len == 1 and args.source_path[0] == '-';
+
+    const file_path = switch (is_stdin) {
+        true => "<stdin>",
+        else => args.source_path,
+    };
+
+    try compiler.assemble(
+        file_path,
+        args.ir,
+        args.assembly,
+        reader,
+        writer,
+    );
 }
 
 fn debugTokens(tokens: anytype, args: *const Args, newline_offsets: []usize) !void {

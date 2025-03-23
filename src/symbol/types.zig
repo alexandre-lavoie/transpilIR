@@ -150,6 +150,7 @@ pub const SymbolMemoryLinkage = struct {
 };
 
 pub const SymbolMemoryData = struct {
+    alignment: ?usize = null,
     linkage: SymbolMemoryLinkage,
     entries: []const SymbolMemoryDataEntry,
 };

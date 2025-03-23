@@ -1,9 +1,9 @@
-type :opaque = { 32 }
-type :struct = { :opaque, w 10 }
-type :union = { { w } { s } }
-type :t = { 16 }
+type :opaque = align 4 { 32 }
+type :struct = align 8 { :opaque, w 10 }
+type :union = align 16 { { w } { s } }
+type :t = align 4 { 16 }
 
-export thread section ".dsection" data $dlink = { b 0 }
+export thread section ".dsection" data $dlink = align 4 { b 0 }
 data $dptr = { w 0 }
 data $dvals = { b "ABC", b 32, b s_1.23, b d_4.56, z 100, l $dptr + 1 }
 data $d = { w 0 }

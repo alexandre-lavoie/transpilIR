@@ -113,6 +113,7 @@ pub const ASTWalk = struct {
             .data_definition => |*d| {
                 try self.stack.append(.{ .index = d.identifier });
                 try self.stack.append(.{ .index = d.linkage });
+                if (d.alignment) |a| try self.stack.append(.{ .index = a });
                 try self.stack.append(.{ .index = d.values });
             },
             .typed_data => |*d| {

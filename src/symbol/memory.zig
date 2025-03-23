@@ -567,7 +567,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     else => return error.InvalidTypedData,
                 });
             },
-            .data_definition => {
+            .data_definition => |d| {
                 var i: usize = 0;
 
                 if (self.entries.items.len == 0) {
@@ -576,15 +576,30 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 var symbol: *types.Symbol = switch (self.entries.items[i]) {
                     .global => |g| self.symbol_table.getSymbolPtrMut(g) orelse return error.InvalidDataDefinition,
-                    else => return error.InvalidDataDefinition,
+                    else => return error.InvalidDataDefinitionSymbol,
                 };
                 i += 1;
 
                 const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[i]) {
                     .linkage => |l| l,
-                    else => return error.InvalidDataDefinition,
+                    else => return error.InvalidDataDefinitionLinkage,
                 };
                 i += 1;
+
+                const alignment: ?usize = switch (d.alignment != null) {
+                    true => switch (self.entries.items[i]) {
+                        .literal => |l| switch (l.value) {
+                            .integer => |v| @intCast(v),
+                            else => return error.InvalidDataDefinitionAlignment,
+                        },
+                        else => return error.InvalidDataDefinitionAlignment,
+                    },
+                    false => null,
+                };
+
+                if (alignment != null) {
+                    i += 1;
+                }
 
                 var entries = try allocator.alloc(types.SymbolMemoryDataEntry, self.entries.items.len - i);
 
@@ -619,6 +634,7 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 symbol.memory = .{
                     .data = .{
+                        .alignment = alignment,
                         .linkage = linkage,
                         .entries = entries,
                     },
@@ -631,23 +647,28 @@ pub const SymbolMemoryWalkCallback = struct {
                     return error.InvalidFunctionSignatureLength;
                 }
 
-                const symbol_index: usize = switch (self.entries.items[0]) {
+                var i: usize = 0;
+
+                const symbol_index: usize = switch (self.entries.items[i]) {
                     .global => |g| g,
                     else => return error.InvalidFunctionSignatureSymbol,
                 };
+                i += 1;
 
                 const symbol: *types.Symbol = self.symbol_table.getSymbolPtrMut(symbol_index) orelse return error.InvalidFunctionSignatureSymbol;
 
-                const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[1]) {
+                const linkage: types.SymbolMemoryLinkage = switch (self.entries.items[i]) {
                     .linkage => |l| l,
                     else => return error.InvalidFunctionSignatureLinkage,
                 };
+                i += 1;
 
-                const @"return": types.SymbolType = switch (self.entries.items[2]) {
+                const @"return": types.SymbolType = switch (self.entries.items[i]) {
                     .primitive => |p| .{ .primitive = p },
                     .type => |t| .{ .type = t },
                     else => return error.InvalidFunctionSignatureReturn,
                 };
+                i += 1;
 
                 const vararg: bool = switch (self.entries.items[self.entries.items.len - 1]) {
                     .variadic => scope: {
@@ -658,12 +679,12 @@ pub const SymbolMemoryWalkCallback = struct {
                     else => false,
                 };
 
-                const offset = 3;
+                const offset = i;
                 var parameters = try allocator.alloc(types.SymbolMemoryParameterType, self.entries.items.len - offset);
 
-                var i: usize = 0;
-                while (i < parameters.len) : (i += 1) {
-                    parameters[i] = switch (self.entries.items[i + offset]) {
+                var j: usize = 0;
+                while (j < parameters.len) : (j += 1) {
+                    parameters[j] = switch (self.entries.items[j + offset]) {
                         .primitive => |p| .{ .primitive = p },
                         .type => |t| .{ .type = t },
                         .env => .env,

@@ -39,7 +39,7 @@ pub const CEmitWalkCallback = struct {
     tokens: TokenList,
 
     field_index: usize = 0,
-    stored_token: ?token.CToken = null,
+    token_stack: TokenList,
 
     forward_declarations: bool = false,
     function_sym_idx: ?usize = null,
@@ -58,6 +58,8 @@ pub const CEmitWalkCallback = struct {
     const link_identifier = symbol.SymbolIndentifier{ .name = "LINK", .scope = .local };
     const link_flags_identifier = symbol.SymbolIndentifier{ .name = "LINK_FLAGS", .scope = .local };
 
+    const align_identifier = symbol.SymbolIndentifier{ .name = "ALIGN", .scope = .local };
+    const align_default_identifier = symbol.SymbolIndentifier{ .name = "ALIGN_DEFAULT", .scope = .local };
     const allocate_identifier = symbol.SymbolIndentifier{ .name = "ALLOCATE", .scope = .local };
     const blit_identifier = symbol.SymbolIndentifier{ .name = "BLIT", .scope = .local };
 
@@ -78,11 +80,13 @@ pub const CEmitWalkCallback = struct {
             .target = target,
             .symbol_table = symbol_table,
             .tokens = TokenList.init(allocator),
+            .token_stack = TokenList.init(allocator),
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.tokens.deinit();
+        self.token_stack.deinit();
     }
 
     fn push(self: *Self, token_type: token.CTokenType, span: ?common.SourceSpan) !void {
@@ -293,7 +297,7 @@ pub const CEmitWalkCallback = struct {
                 _ = try self.pushSymbol(
                     .type_identifier,
                     null,
-                    "{s}",
+                    "{s}_D",
                     .{sym.identifier.name},
                 );
 
@@ -325,6 +329,19 @@ pub const CEmitWalkCallback = struct {
 
                 try self.push(.close_curly_brace, null);
 
+                if (data.alignment) |a| {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &align_identifier);
+
+                    try self.push(.open_parenthesis, null);
+
+                    var lit = symbol.LiteralValue{ .integer = @intCast(a) };
+                    try self.pushLiteral(&lit);
+
+                    try self.push(.close_parenthesis, null);
+                } else {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &align_default_identifier);
+                }
+
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
             },
@@ -333,11 +350,11 @@ pub const CEmitWalkCallback = struct {
     }
 
     fn storeToken(self: *Self) !void {
-        self.stored_token = try self.pop();
+        try self.token_stack.append(try self.pop());
     }
 
     fn loadToken(self: *Self) !void {
-        if (self.stored_token) |t| {
+        if (self.token_stack.popOrNull()) |t| {
             try self.push(t.token_type, t.span);
         } else {
             return error.NoToken;
@@ -345,8 +362,8 @@ pub const CEmitWalkCallback = struct {
     }
 
     fn clearToken(self: *Self) !void {
-        if (self.stored_token != null) {
-            self.stored_token = null;
+        if (self.token_stack.items.len > 0) {
+            self.token_stack.clearRetainingCapacity();
         } else {
             return error.NoToken;
         }
@@ -576,6 +593,15 @@ pub const CEmitWalkCallback = struct {
         try self.push(.newline, null);
     }
 
+    fn pushOpaqueOpen(self: *Self) !void {
+        try self.push(.open_curly_brace, null);
+        try self.push(.u8, null);
+
+        _ = try self.pushSymbolIdentifier(.local_identifier, &opaque_identifier);
+
+        try self.push(.open_bracket, null);
+    }
+
     pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .module => {
@@ -589,6 +615,8 @@ pub const CEmitWalkCallback = struct {
                 _ = try self.symbol_table.addSymbol(&link_identifier);
                 _ = try self.symbol_table.addSymbol(&link_flags_identifier);
 
+                _ = try self.symbol_table.addSymbol(&align_identifier);
+                _ = try self.symbol_table.addSymbol(&align_default_identifier);
                 _ = try self.symbol_table.addSymbol(&allocate_identifier);
                 _ = try self.symbol_table.addSymbol(&blit_identifier);
 
@@ -649,12 +677,7 @@ pub const CEmitWalkCallback = struct {
                 try self.pushPrimitiveType(primitive);
             },
             .opaque_type => {
-                try self.push(.open_curly_brace, null);
-                try self.push(.u8, null);
-
-                _ = try self.pushSymbolIdentifier(.local_identifier, &opaque_identifier);
-
-                try self.push(.open_bracket, null);
+                try self.pushOpaqueOpen();
             },
             .union_type => {
                 try self.push(.open_curly_brace, null);
@@ -777,17 +800,30 @@ pub const CEmitWalkCallback = struct {
         _ = next;
 
         switch (statement.data) {
-            .union_type => {
-                try self.pushField();
-                try self.push(.semi_colon, null);
-                try self.push(.@"struct", null);
-            },
-            .struct_type => {
-                if ((try self.peek()) != .close_bracket) {
+            .union_type => |u| {
+                if (u.alignment == previous) {
+                    try self.storeToken();
+                } else {
                     try self.pushField();
+                    try self.push(.semi_colon, null);
+                    try self.push(.@"struct", null);
                 }
+            },
+            .struct_type => |s| {
+                if (s.alignment == previous) {
+                    try self.storeToken();
+                } else {
+                    if ((try self.peek()) != .close_bracket) {
+                        try self.pushField();
+                    }
 
-                try self.push(.semi_colon, null);
+                    try self.push(.semi_colon, null);
+                }
+            },
+            .opaque_type => |o| {
+                if (o.alignment == previous) {
+                    try self.storeToken();
+                }
             },
             .array_type => {
                 try self.pushField();
@@ -806,14 +842,19 @@ pub const CEmitWalkCallback = struct {
                     try self.pushDataType(&instance);
 
                     try self.push(identifier.token_type, identifier.span);
+                } else if (d.alignment == previous) {
+                    _ = try self.pop();
                 } else if (d.linkage == previous) {
                     // Add type to data
                     try self.storeToken();
 
-                    const stored_instance = symbol.Instance{ .span = self.stored_token.?.span };
+                    const stored_instance = symbol.Instance{ .span = self.token_stack.getLast().span };
                     const stored_sym = self.symbol_table.getSymbolByInstance(&stored_instance) orelse return error.NotFound;
 
-                    const type_instance = symbol.SymbolIndentifier{ .name = stored_sym.identifier.name, .scope = .type };
+                    const type_name = try std.fmt.allocPrint(self.allocator, "{s}_D", .{stored_sym.identifier.name});
+                    defer self.allocator.free(type_name);
+
+                    const type_instance = symbol.SymbolIndentifier{ .name = type_name, .scope = .type };
                     const type_sym_idx = self.symbol_table.getSymbolIndexByIdentifier(&type_instance) orelse return error.NotFound;
 
                     try self.push(.@"struct", null);
@@ -1060,18 +1101,43 @@ pub const CEmitWalkCallback = struct {
     pub fn exit(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .module => try self.push(.module_end, null),
-            .opaque_type => {
+            .opaque_type => |o| {
                 try self.push(.close_bracket, null);
+
                 try self.push(.semi_colon, null);
                 try self.push(.close_curly_brace, null);
+
+                if (o.alignment == null) {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &align_identifier);
+
+                    try self.push(.open_parenthesis, null);
+
+                    try self.loadToken();
+
+                    try self.push(.close_parenthesis, null);
+                } else {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &align_default_identifier);
+                }
             },
-            .union_type => {
+            .union_type => |u| {
                 try self.pushField();
                 try self.push(.semi_colon, null);
 
                 try self.push(.close_curly_brace, null);
+
+                if (u.alignment != null) {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &align_identifier);
+
+                    try self.push(.open_parenthesis, null);
+
+                    try self.loadToken();
+
+                    try self.push(.close_parenthesis, null);
+                } else {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &align_default_identifier);
+                }
             },
-            .struct_type => {
+            .struct_type => |s| {
                 if ((try self.peek()) != .close_bracket) {
                     try self.pushField();
                 }
@@ -1079,6 +1145,18 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.semi_colon, null);
 
                 try self.push(.close_curly_brace, null);
+
+                if (s.alignment != null) {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &align_identifier);
+
+                    try self.push(.open_parenthesis, null);
+
+                    try self.loadToken();
+
+                    try self.push(.close_parenthesis, null);
+                } else {
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &align_default_identifier);
+                }
             },
             .array_type => {
                 try self.push(.close_bracket, null);
@@ -1190,6 +1268,15 @@ pub const CEmitWalkCallback = struct {
                 try self.push(address.token_type, address.span);
                 try self.push(.assign, null);
                 try self.push(value.token_type, value.span);
+            },
+            .copy => {
+                if ((try self.peek()) == .global_identifier) {
+                    try self.storeToken();
+
+                    try self.push(.dereference, null);
+
+                    try self.loadToken();
+                }
             },
             .comparison => |c| {
                 switch (c.operation_type) {
