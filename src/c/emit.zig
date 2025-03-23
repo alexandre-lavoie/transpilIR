@@ -1405,6 +1405,16 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
             return try self.parse(tok);
         }
 
+        fn getLocalPrefix(self: *Self, name: []const u8) []const u8 {
+            _ = self;
+
+            if (std.meta.stringToEnum(token.CReversedWord, name) != null) {
+                return "_";
+            } else {
+                return "";
+            }
+        }
+
         fn parse(self: *Self, tok: *const token.CToken) !bool {
             switch (tok.token_type) {
                 .module_start => {
@@ -1453,7 +1463,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                             const name = sym.identifier.name;
 
                             try switch (sym.identifier.scope) {
-                                .local => self.print(color, "{s}", .{name}),
+                                .local => self.print(color, "{s}{s}", .{ self.getLocalPrefix(name), name }),
                                 .global => self.print(color, "{s}", .{name}),
                                 .type => self.print(color, "{s}_T", .{name}),
                                 .label => self.print(color, "{s}_L", .{name}),

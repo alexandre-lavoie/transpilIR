@@ -92,6 +92,41 @@ pub const CTokenType = enum(u8) {
     tab,
 };
 
+pub const CReversedWord = enum {
+    auto,
+    @"break",
+    case,
+    char,
+    @"const",
+    @"continue",
+    default,
+    do,
+    double,
+    @"else",
+    @"enum",
+    @"extern",
+    float,
+    @"for",
+    goto,
+    @"if",
+    int,
+    long,
+    register,
+    @"return",
+    short,
+    signed,
+    sizeof,
+    static,
+    @"struct",
+    @"switch",
+    typedef,
+    @"union",
+    unsigned,
+    void,
+    @"volatile",
+    @"while",
+};
+
 pub fn tokenString(token_type: CTokenType) []const u8 {
     return switch (token_type) {
         .@"else" => "else",

@@ -8,6 +8,7 @@ const Flag = enum(u8) {
     output = 'o',
     source = 's',
     ir = 'r',
+    compiler = 'c',
     target = 't',
     optimization = 'z',
     debug = 'd',
@@ -71,10 +72,17 @@ const Source = enum {
 };
 
 const Compiler = enum {
+    auto,
     gcc,
     llvm,
     qbe,
     irc,
+
+    pub fn isEnabled(c: Compiler) bool {
+        _ = c;
+
+        return true;
+    }
 };
 
 const Args = struct {
@@ -90,6 +98,7 @@ const Args = struct {
     help: bool = false,
     config: lib.EmitWriterConfig = .{ .tty = .escape_codes },
     optimization: lib.Optimization = default_optimization,
+    compiler: Compiler = .auto,
     debug: std.io.AnyWriter,
 
     const Self = @This();
@@ -171,6 +180,11 @@ const Args = struct {
 
                         if (!self.optimization.isEnabled()) return error.InvalidOptimization;
                     },
+                    .compiler => {
+                        self.compiler = std.meta.stringToEnum(Compiler, p) orelse return error.InvalidOptimization;
+
+                        if (!self.compiler.isEnabled()) return error.InvalidOptimization;
+                    },
                     .debug => {
                         var it = std.mem.split(u8, p, ",");
 
@@ -230,6 +244,11 @@ pub fn writeHelp(args: Args) !void {
                 try args.debug.print("\t-z opt\t  optimization level of compiler\n\t\t  ", .{});
 
                 try writeHelpEnum(args.debug, lib.Optimization, Args.default_optimization);
+            },
+            .compiler => {
+                try args.debug.print("\t-c cmp\t  IR compiler\n\t\t  ", .{});
+
+                try writeHelpEnum(args.debug, Compiler, .auto);
             },
             .debug => {
                 try args.debug.print("\t-d flgs\t  comma list of debug flags to activate\n\t\t  ", .{});
@@ -305,6 +324,10 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
     const Writer = std.io.AnyWriter;
 
     const compiler_type: Compiler = l: {
+        if (args.compiler != .auto) {
+            break :l args.compiler;
+        }
+
         if (lib.LLVM.isSupported(args.ir, args.assembly)) {
             break :l .llvm;
         }
@@ -435,6 +458,7 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
                 ctx,
             );
         },
+        .auto => unreachable,
     }
 }
 

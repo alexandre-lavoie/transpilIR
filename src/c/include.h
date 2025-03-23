@@ -1,7 +1,6 @@
 #if defined(__unix__) || defined(__APPLE__)
 #include <math.h>
 #include <stdlib.h>
-#include <string.h>
 #endif
 
 #include <stdarg.h>
@@ -26,11 +25,7 @@ extern void *alloca(unsigned long __size);
 #define ALLOCATE(align, size) #error "Unsuppored"
 #endif
 
-#if defined(__unix__) || defined(__APPLE__)
-#define BLIT(dest, src, n) memcpy(dest, src, n)
-#else
 #define BLIT(dest, src, n) for (int __i = 0; __i < (n); __i++) ((char *)(dest))[__i] = ((char *)(src))[__i]
-#endif
 
 #if defined(__unix__) || defined(__APPLE__)
 #define IS_NAN(v) isnan(v)
