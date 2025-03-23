@@ -602,6 +602,22 @@ pub const CEmitWalkCallback = struct {
         try self.push(.open_bracket, null);
     }
 
+    fn wrapDereference(self: *Self) !void {
+        try self.pushCast(.u8, true);
+
+        try self.push(.dereference, null);
+    }
+
+    fn unwrapDereference(self: *Self) !void {
+        try self.storeToken();
+
+        for (0..5) |_| {
+            _ = try self.pop();
+        }
+
+        try self.loadToken();
+    }
+
     pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .module => {
@@ -643,6 +659,8 @@ pub const CEmitWalkCallback = struct {
 
                             self.function_sym_idx = self.symbol_table.getSymbolIndexByInstance(&instance);
                         }
+
+                        try self.wrapDereference();
 
                         break :l .global_identifier;
                     },
@@ -711,7 +729,6 @@ pub const CEmitWalkCallback = struct {
             },
             .offset => {
                 try self.pushCast(.u8, true);
-                try self.push(.dereference, null);
             },
             .function => {
                 self.function_sym_idx = null;
@@ -836,6 +853,8 @@ pub const CEmitWalkCallback = struct {
             },
             .data_definition => |d| {
                 if (d.identifier == previous) {
+                    try self.unwrapDereference();
+
                     const identifier = try self.pop();
 
                     const instance = symbol.Instance{ .span = identifier.span };
@@ -880,10 +899,12 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.plus, null);
             },
             .function_signature => |fs| {
-                if (fs.return_type == previous) {
+                if (fs.name == previous) {
+                    try self.unwrapDereference();
+                } else if (fs.return_type == previous) {
                     try self.swapFunctionReturn();
                     try self.push(.open_parenthesis, null);
-                } else if (fs.name != previous and fs.linkage != previous and (try self.peek()) != .open_parenthesis) {
+                } else if (fs.linkage != previous and (try self.peek()) != .open_parenthesis) {
                     try self.push(.comma, null);
                 }
             },
@@ -1032,7 +1053,9 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.comma, null);
             },
             .call => |c| {
-                if (c.return_type == previous) {
+                if (c.target == previous) {
+                    try self.unwrapDereference();
+                } else if (c.return_type == previous) {
                     if ((try self.peek()) == .void) {
                         _ = try self.pop();
                     } else {
@@ -1042,7 +1065,7 @@ pub const CEmitWalkCallback = struct {
                     }
 
                     try self.push(.open_parenthesis, null);
-                } else if (c.target != previous) {
+                } else {
                     if ((try self.peek()) == .variable_arguments) {
                         _ = try self.pop();
                     } else {
@@ -1268,15 +1291,6 @@ pub const CEmitWalkCallback = struct {
                 try self.push(address.token_type, address.span);
                 try self.push(.assign, null);
                 try self.push(value.token_type, value.span);
-            },
-            .copy => {
-                if ((try self.peek()) == .global_identifier) {
-                    try self.storeToken();
-
-                    try self.push(.dereference, null);
-
-                    try self.loadToken();
-                }
             },
             .comparison => |c| {
                 switch (c.operation_type) {
