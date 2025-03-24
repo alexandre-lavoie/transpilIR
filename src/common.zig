@@ -260,6 +260,15 @@ pub fn readerToWriter(reader: anytype, writer: anytype) !void {
     }
 }
 
+// Add escape characters to string
+pub fn escapeString(allocator: std.mem.Allocator, s: []const u8) ![]const u8 {
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, s.len);
+
+    try std.json.encodeJsonString(s, .{ .escape_unicode = true }, buffer.writer());
+
+    return try buffer.toOwnedSlice();
+}
+
 test "indexToFile" {
     // Arrange
     const offsets = [_]usize{ 0, 10, 20, 30 };

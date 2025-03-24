@@ -1,8 +1,3 @@
-#if defined(__unix__) || defined(__APPLE__)
-#include <math.h>
-#include <stdlib.h>
-#endif
-
 #include <stdarg.h>
 
 #define LINK(sec) __attribute__((section(sec)))
@@ -16,9 +11,7 @@
 #define ALIGN(n) __attribute__((aligned(n)))
 #define ALIGN_DEFAULT ALIGN(1)
 
-#if defined(__unix__) || defined(__APPLE__)
-#define ALLOCATE(align, size) alloca(size)
-#elif defined(__llvm__) || defined(__clang__)
+#if defined(__unix__) || defined(__APPLE__) || defined(__llvm__) || defined(__clang__)
 extern void *alloca(unsigned long __size);
 #define ALLOCATE(align, size) alloca(size)
 #else
@@ -28,6 +21,7 @@ extern void *alloca(unsigned long __size);
 #define BLIT(dest, src, n) for (int __i = 0; __i < (n); __i++) ((char *)(dest))[__i] = ((char *)(src))[__i]
 
 #if defined(__unix__) || defined(__APPLE__)
+extern int isnan(double v);
 #define IS_NAN(v) isnan(v)
 #else
 #define IS_NAN(v) (v) != (v)

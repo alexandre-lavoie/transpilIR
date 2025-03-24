@@ -76,7 +76,7 @@ pub const GCC = struct {
 
         try args.append(executable orelse "gcc");
 
-        try args.append("-Wno-int-conversion");
+        try args.append("-fpermissive");
 
         const optimization = switch (self.optimization) {
             .o1 => "-O1",

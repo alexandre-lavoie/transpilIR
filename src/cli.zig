@@ -4,6 +4,7 @@ const lib = @import("lib.zig");
 
 const Flag = enum(u8) {
     none = '\x00',
+    no_color = 'b',
     help = 'h',
     output = 'o',
     source = 's',
@@ -145,11 +146,17 @@ const Args = struct {
                         self.help = true;
                         flag = .none;
                     },
+                    .no_color => {
+                        self.config.tty = .no_color;
+                        flag = .none;
+                    },
                     else => {},
                 }
             } else {
                 switch (flag) {
-                    .help => {},
+                    .help,
+                    .no_color,
+                    => {},
                     .none => {
                         if (self.source_path.len != 0) {
                             return error.InputAlreadySet;
@@ -225,6 +232,7 @@ pub fn writeHelp(args: Args) !void {
         switch (flag) {
             .help => try args.debug.print("\t-h\t  prints this help message\n", .{}),
             .output => try args.debug.print("\t-o file\t  path to output file\n", .{}),
+            .no_color => try args.debug.print("\t-b\t  disables colors\n", .{}),
             .source => {
                 try args.debug.print("\t-s src\t  source IR\n\t\t  ", .{});
 

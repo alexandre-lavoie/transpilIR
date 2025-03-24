@@ -899,7 +899,14 @@ pub fn QBEEmitWriter(comptime Reader: type, comptime Writer: type) type {
                             .integer => |v| self.print(color, "{}", .{v}),
                             .single => |v| self.print(color, "s_{d:.}", .{v}),
                             .double => |v| self.print(color, "d_{d:.}", .{v}),
-                            .string => |v| self.print(color, "\"{s}\"", .{v}), // TODO: Escape string symbols
+                            .string => |v| {
+                                const allocator = self.symbol_table.allocator;
+
+                                const s = try common.escapeString(allocator, v);
+                                defer allocator.free(s);
+
+                                try self.print(color, "{s}", .{s});
+                            },
                         };
                     },
                     else => unreachable,

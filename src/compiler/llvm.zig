@@ -78,6 +78,7 @@ pub const LLVM = struct {
         try args.append(executable orelse "clang");
 
         try args.append("-Wno-int-conversion");
+        try args.append("-Wno-incompatible-pointer-types");
 
         const optimization = switch (self.optimization) {
             .o1 => "-O1",

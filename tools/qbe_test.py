@@ -5,6 +5,7 @@ import os
 import os.path
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -12,10 +13,18 @@ GCC = os.environ.get("GCC") or "gcc"
 QBE = os.environ.get("QBE") or "qbe"
 TRANSPILIR = os.environ.get("TRANSPILIR") or "transpilir"
 
-GREEN = "\033[32m"
-RED = "\033[31m"
-BLUE = "\033[34m"
-RESET = "\033[0m"
+COLOR = sys.stdout.isatty()
+
+if COLOR:
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    BLUE = "\033[34m"
+    RESET = "\033[0m"
+else:
+    GREEN = ""
+    RED = ""
+    BLUE = ""
+    RESET = ""
 
 PROCESS_COUNT = 8
 SECTION_RE = re.compile(r"^# >>> (.*?)$(.*?)^# <<<$", re.MULTILINE | re.DOTALL)
@@ -29,7 +38,7 @@ class Response:
     error: bool = dataclasses.field(default=False)
     children: list["Response"] = dataclasses.field(default_factory=list)
 
-def main() -> None:
+def cli() -> None:
     test_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "qbe", "test")
     test_files = list(sorted(glob.glob("[!_]*.ssa", root_dir=test_dir)))
 
@@ -191,6 +200,8 @@ def test_gcc(ir_path: str, driver_path: str | None, arch_folder: str, arch: str,
 
         return res
 
+    expected = (expected[0], expected[1].encode(), expected[2].encode())
+
     actual = run_test(arch=arch, exe_path=exe_path)
     if actual != expected:
         res.children += [
@@ -205,13 +216,8 @@ def test_gcc(ir_path: str, driver_path: str | None, arch_folder: str, arch: str,
                     ),
                     Response(
                         scope="out",
-                        message=expected[1] or "<empty>",
+                        message=str(expected[1]) or "<empty>",
                         error=expected[1] != actual[1]
-                    ),
-                    Response(
-                        scope="err",
-                        message=expected[2] or "<empty>",
-                        error=expected[2] != actual[2]
                     )
                 ]
             ),
@@ -226,13 +232,13 @@ def test_gcc(ir_path: str, driver_path: str | None, arch_folder: str, arch: str,
                     ),
                     Response(
                         scope="out",
-                        message=actual[1] or "<empty>",
+                        message=str(actual[1]) or "<empty>",
                         error=expected[1] != actual[1]
                     ),
                     Response(
                         scope="err",
-                        message=actual[2] or "<empty>",
-                        error=expected[2] != actual[2]
+                        message=str(actual[2]) or "<empty>",
+                        error=bool(actual[2])
                     )
                 ]
             ),
@@ -244,7 +250,7 @@ def test_gcc(ir_path: str, driver_path: str | None, arch_folder: str, arch: str,
 
     return res
 
-def run_test(arch: str, exe_path: str) -> tuple[int, str, str]:
+def run_test(arch: str, exe_path: str) -> tuple[int, bytes, bytes]:
     proc = subprocess.Popen(
         [
             exe_path,
@@ -259,7 +265,7 @@ def run_test(arch: str, exe_path: str) -> tuple[int, str, str]:
 
     stdout, stderr = proc.communicate(b"")
 
-    return proc.returncode, stdout.decode().strip(), stderr.decode()
+    return proc.returncode, stdout.strip(), stderr
 
 def transpilir_assemble(ir: str, arch: str, compiler: str, ir_path: str) -> tuple[Response, str]:
     res = Response(scope="transpilir", error=True)
@@ -272,6 +278,7 @@ def transpilir_assemble(ir: str, arch: str, compiler: str, ir_path: str) -> tupl
             "-c", compiler,
             "-t", arch,
             "-d", "ir",
+            *([] if COLOR else ["-b"]),
             ir_path
         ],
         stdin=subprocess.PIPE,
@@ -299,6 +306,7 @@ def gcc_compile(arch: str, lang: str, code: str, out_path: str) -> Response:
         [
             GCC,
             "-Wno-int-conversion",
+            "-Wno-incompatible-pointer-types"
             f"-march={arch}",
             "-o", out_path,
             "-x", lang,
@@ -364,4 +372,4 @@ def gcc_link(arch: str, paths: list[str], out_path: str) -> Response:
     return res
 
 if __name__ == "__main__":
-    main()
+    cli()
