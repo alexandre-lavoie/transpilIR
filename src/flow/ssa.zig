@@ -75,11 +75,11 @@ pub const SSA = struct {
         defer identifier_blocks.deinit();
 
         for (graph.nodes.keys()) |block| {
-            const ident = try ast.utils.getStatementIdentifierByIndex(
+            const ident = ast.utils.getStatementIdentifierByIndex(
                 block,
                 self.ast,
                 self.symbol_table,
-            );
+            ) orelse continue;
 
             try identifier_blocks.put(ident, block);
         }
@@ -363,11 +363,11 @@ pub const SSA = struct {
             var iter = branch_sets.iterator();
             while (iter.next()) |entry| {
                 const branch: usize = entry.key_ptr.*;
-                const branch_label: usize = try ast.utils.getStatementIdentifierByIndex(
+                const branch_label: usize = ast.utils.getStatementIdentifierByIndex(
                     branch,
                     self.ast,
                     self.symbol_table,
-                );
+                ) orelse continue;
 
                 const assignments: BlockSet = entry.value_ptr.*;
 
@@ -433,11 +433,11 @@ pub const SSA = struct {
 
             switch (stat.data) {
                 .phi_parameter => |n| {
-                    const value_ident = try ast.utils.getStatementIdentifierByIndex(
+                    const value_ident = ast.utils.getStatementIdentifierByIndex(
                         n.value,
                         self.ast,
                         self.symbol_table,
-                    );
+                    ) orelse continue;
                     const value_sym = self.symbol_table.getSymbolPtr(value_ident).?;
 
                     // Skip if already converted
@@ -445,11 +445,11 @@ pub const SSA = struct {
 
                     const value_stat = self.ast.getPtr(n.value).?;
 
-                    const ident = try ast.utils.getStatementIdentifierByIndex(
+                    const ident = ast.utils.getStatementIdentifierByIndex(
                         n.identifier,
                         self.ast,
                         self.symbol_table,
-                    );
+                    ) orelse continue;
 
                     var block = identifier_blocks.get(ident) orelse return error.NotFound;
                     while (true) {

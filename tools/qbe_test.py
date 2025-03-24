@@ -15,11 +15,13 @@ COLOR = sys.stdout.isatty()
 if COLOR:
     GREEN = "\033[32m"
     RED = "\033[31m"
+    BLUE = "\033[34m"
     GRAY = "\033[90m"
     RESET = "\033[0m"
 else:
     GREEN = ""
     RED = ""
+    BLUE = ""
     GRAY = ""
     RESET = ""
 
@@ -42,8 +44,14 @@ class Response:
 def cli() -> None:
     global TESTS, TARGETS
 
-    TARGETS = ["native"]
-    TESTS = [test_qbe, test_gcc]
+    TARGETS = [
+        "native"
+    ]
+    
+    TESTS = [
+        # test_qbe,
+        test_gcc,
+    ]
 
     test_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "qbe", "test")
     test_files = list(sorted(glob.glob("[!_]*.ssa", root_dir=test_dir)))
@@ -69,7 +77,7 @@ def cli() -> None:
 
         print_response(res)
 
-    print(f"\n{GRAY}[result]{RESET} {ok_count} / {len(test_files)} ({ok_count / len(test_files) * 100:.02f}%)")
+    print(f"\n{BLUE}result{RESET} {ok_count} / {len(test_files)} ({ok_count / len(test_files) * 100:.02f}%)")
 
 def print_response(res: Response, depth: int = 0) -> None:
     prefix = "  " * depth

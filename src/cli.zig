@@ -873,11 +873,11 @@ fn optimize(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !voi
                 try cfg_walk.start(fn_index);
 
                 while (try cfg_walk.next()) |entry_index| {
-                    const entry_symbol_index = try lib.ast_utils.getStatementIdentifierByIndex(
+                    const entry_symbol_index = lib.ast_utils.getStatementIdentifierByIndex(
                         entry_index,
                         &ctx.ast,
                         &ctx.symbol_table,
-                    );
+                    ) orelse continue;
                     const entry_symbol = ctx.symbol_table.getSymbolPtr(entry_symbol_index).?;
 
                     const entry_node = cfg.nodes.get(entry_index).?;
@@ -896,22 +896,22 @@ fn optimize(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !voi
 
                     switch (entry_node) {
                         .enter, .jump => |next| {
-                            const next_symbol_index = try lib.ast_utils.getStatementIdentifierByIndex(
+                            const next_symbol_index = lib.ast_utils.getStatementIdentifierByIndex(
                                 next,
                                 &ctx.ast,
                                 &ctx.symbol_table,
-                            );
+                            ) orelse continue;
                             const next_symbol = ctx.symbol_table.getSymbolPtr(next_symbol_index).?;
 
                             try args.setDebugColor(lib.Color.label);
                             _ = try debug.write(next_symbol.identifier.name);
                         },
                         .branch => |next| {
-                            const left_symbol_index = try lib.ast_utils.getStatementIdentifierByIndex(
+                            const left_symbol_index = lib.ast_utils.getStatementIdentifierByIndex(
                                 next.left,
                                 &ctx.ast,
                                 &ctx.symbol_table,
-                            );
+                            ) orelse continue;
                             const left_symbol = ctx.symbol_table.getSymbolPtr(left_symbol_index).?;
 
                             try args.setDebugColor(lib.Color.label);
@@ -920,11 +920,11 @@ fn optimize(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !voi
                             try args.setDebugColor(.reset);
                             _ = try debug.write(", ");
 
-                            const right_symbol_index = try lib.ast_utils.getStatementIdentifierByIndex(
+                            const right_symbol_index = lib.ast_utils.getStatementIdentifierByIndex(
                                 next.right,
                                 &ctx.ast,
                                 &ctx.symbol_table,
-                            );
+                            ) orelse continue;
                             const right_symbol = ctx.symbol_table.getSymbolPtr(right_symbol_index).?;
 
                             try args.setDebugColor(lib.Color.label);
@@ -960,11 +960,11 @@ fn optimize(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !voi
                 try cfg_walk.start(fn_index);
 
                 while (try cfg_walk.next()) |entry_index| {
-                    const entry_symbol_index = try lib.ast_utils.getStatementIdentifierByIndex(
+                    const entry_symbol_index = lib.ast_utils.getStatementIdentifierByIndex(
                         entry_index,
                         &ctx.ast,
                         &ctx.symbol_table,
-                    );
+                    ) orelse continue;
                     const entry_symbol = ctx.symbol_table.getSymbolPtr(entry_symbol_index).?;
 
                     const identifier_color = switch (entry_symbol.memory) {
@@ -980,11 +980,11 @@ fn optimize(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !voi
                         try args.setDebugColor(.reset);
                         _ = try debug.write(" <- ");
 
-                        const next_symbol_index = try lib.ast_utils.getStatementIdentifierByIndex(
+                        const next_symbol_index = lib.ast_utils.getStatementIdentifierByIndex(
                             next_index,
                             &ctx.ast,
                             &ctx.symbol_table,
-                        );
+                        ) orelse continue;
                         const next_symbol = ctx.symbol_table.getSymbolPtr(next_symbol_index).?;
 
                         const next_color = switch (next_symbol.memory) {

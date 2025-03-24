@@ -1,6 +1,20 @@
-#include <stdarg.h>
+#ifndef TRANSPILIR
+#define TRANSPILIR
 
-#define SIZE_T unsigned long
+#include <stdarg.h>
+#include <stdint.h>
+
+#define I8 int8_t
+#define U8 uint8_t
+#define I16 int16_t
+#define U16 uint16_t
+#define I32 int32_t
+#define U32 uint32_t
+#define I64 int64_t
+#define U64 uint64_t
+#define F32 float
+#define F64 double
+#define SIZE_T U64
 
 #define LINK(sec) __attribute__((section(sec)))
 #define LINK_FLAGS(sec, flag) LINK(sec)
@@ -35,4 +49,6 @@ extern int isnan(double v);
 #endif
 #define ANY_NAN(l, r) (IS_NAN(l) || IS_NAN(r))
 #define ALL_NAN(l, r) (IS_NAN(l) && IS_NAN(r))
+
+#endif
 

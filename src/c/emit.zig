@@ -47,6 +47,7 @@ pub const CEmitWalkCallback = struct {
     block_sym_idx: ?usize = null,
     phi_token: ?token.CToken = null,
     phi_type: ?token.CToken = null,
+    pointer_offset: usize = 0,
 
     const Self = @This();
     const TokenList = std.ArrayList(token.CToken);
@@ -215,6 +216,11 @@ pub const CEmitWalkCallback = struct {
                 try self.pushSymbolTypePrefix(sym);
 
                 _ = try self.pushSymbolIdentifier(.type_identifier, &sym.identifier);
+            },
+            .child => |c| {
+                const s = self.symbol_table.getSymbolPtr(c.parent) orelse return error.NotFound;
+
+                try self.pushSymbolType(s);
             },
             else => unreachable,
         }
@@ -395,6 +401,16 @@ pub const CEmitWalkCallback = struct {
         while ((try self.peek()) != token_type) {
             _ = try self.pop();
         }
+    }
+
+    fn unsignedToken(tt: token.CTokenType) token.CTokenType {
+        return switch (tt) {
+            .i8 => .u8,
+            .i16 => .u16,
+            .i32 => .u32,
+            .i64 => .u64,
+            else => tt,
+        };
     }
 
     fn binaryOpToToken(op: ast.BinaryOperationType) token.CTokenType {
@@ -673,6 +689,41 @@ pub const CEmitWalkCallback = struct {
         try self.push(.open_parenthesis, null);
     }
 
+    fn convertLiteral(self: *Self) !bool {
+        if (self.tokens.items.len < 3) return false;
+
+        const typ: *token.CToken = &self.tokens.items[self.tokens.items.len - 3];
+
+        const cast: bool = switch (try self.peek()) {
+            .integer_literal => switch (typ.token_type) {
+                .f32,
+                .f64,
+                => true,
+                else => false,
+            },
+            else => false,
+        };
+        if (!cast) {
+            return false;
+        }
+
+        const inst = symbol.Instance{ .span = self.tokens.getLast().span };
+        const lit = self.symbol_table.getLiteralByInstance(&inst) orelse return error.NotFound;
+
+        lit.value = switch (lit.value) {
+            .integer => |v| .{ .double = @bitCast(v) },
+            .double => |v| .{ .integer = @bitCast(v) },
+            .single => |v| l: {
+                const d: f64 = @floatCast(v);
+
+                break :l .{ .integer = @bitCast(d) };
+            },
+            else => lit.value,
+        };
+
+        return true;
+    }
+
     pub fn enter(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
             .module => {
@@ -819,15 +870,19 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.open_parenthesis, null);
             },
             .allocate,
-            .binary_operation,
             .call_parameter,
-            .cast,
             .convert,
-            .copy,
             .negate,
             .load,
             .vaarg,
             => {
+                try self.push(.open_parenthesis, null);
+            },
+            .cast,
+            .copy,
+            => {
+                self.pointer_offset = self.tokens.items.len;
+
                 try self.push(.open_parenthesis, null);
             },
             .store,
@@ -998,6 +1053,12 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.close_parenthesis, null);
                     try self.push(.open_parenthesis, null);
                 } else if (c.to_type == previous) {
+                    if (!c.signed) {
+                        const tok = try self.pop();
+
+                        try self.push(Self.unsignedToken(tok.token_type), tok.span);
+                    }
+
                     try self.push(.close_parenthesis, null);
                     try self.push(.open_parenthesis, null);
                 } else if (c.from_type == previous) {
@@ -1013,10 +1074,32 @@ pub const CEmitWalkCallback = struct {
             },
             .binary_operation => |op| {
                 if (op.data_type == previous) {
-                    try self.push(.close_parenthesis, null);
+                    const tok = try self.pop();
+
                     try self.push(.open_parenthesis, null);
+
+                    const tt = switch (op.operation_type) {
+                        .divide_unsigned,
+                        .remainder_unsigned,
+                        .logical_shift_right,
+                        => Self.unsignedToken(tok.token_type),
+                        else => tok.token_type,
+                    };
+
+                    try self.push(tt, tok.span);
+
+                    try self.dupe();
+                    try self.storeToken();
+
+                    try self.push(.close_parenthesis, null);
                 } else if (op.left == previous) {
+                    _ = try self.convertLiteral();
+
                     try self.push(Self.binaryOpToToken(op.operation_type), null);
+
+                    try self.push(.open_parenthesis, null);
+                    try self.loadToken();
+                    try self.push(.close_parenthesis, null);
                 }
             },
             .allocate => |a| {
@@ -1109,17 +1192,16 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.open_parenthesis, null);
                 } else if (c.comparison_type == previous) {
                     try self.dupe();
-                    try self.push(.close_parenthesis, null);
-                    try self.rot2();
-                } else if (c.left == previous) {
-                    try self.rot2();
+                    try self.storeToken();
 
-                    const typ = try self.pop();
+                    try self.push(.close_parenthesis, null);
+                } else if (c.left == previous) {
+                    _ = try self.convertLiteral();
 
                     try self.push(Self.comparisonOpToToken(c.operation_type), null);
 
                     try self.push(.open_parenthesis, null);
-                    try self.push(typ.token_type, typ.span);
+                    try self.loadToken();
                     try self.push(.close_parenthesis, null);
                 }
             },
@@ -1390,7 +1472,6 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.close_parenthesis, null);
                 try self.push(.close_parenthesis, null);
             },
-            .binary_operation,
             .blit,
             .negate,
             .vaarg,
@@ -1415,7 +1496,36 @@ pub const CEmitWalkCallback = struct {
 
                 try self.loadToken();
             },
+            .cast, .copy => {
+                switch (try self.peek()) {
+                    .local_identifier,
+                    .global_identifier,
+                    => {
+                        // Change type of variable
+
+                        const tok = token.CToken{ .token_type = .pointer, .span = self.symbol_table.nextSpan() };
+                        try self.tokens.insert(self.pointer_offset, tok);
+
+                        _ = try self.unwrapDereference();
+
+                        try self.storeToken();
+
+                        try self.push(.pointer, null);
+                        try self.rot2();
+
+                        try self.push(.dereference, null);
+
+                        try self.loadToken();
+                    },
+                    else => {},
+                }
+            },
+            .binary_operation => {
+                _ = try self.convertLiteral();
+            },
             .comparison => |c| {
+                _ = try self.convertLiteral();
+
                 switch (c.operation_type) {
                     .any_nan,
                     .all_nan,
@@ -1527,7 +1637,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
 
         const Self = @This();
 
-        const include_prefix = @embedFile("./include.h");
+        const include_prefix = @embedFile("./transpilir.h");
 
         fn reader_next(self: *Self) *const token.CToken {
             return self.reader.next();

@@ -1290,13 +1290,15 @@ pub fn QBEParser(comptime Reader: type) type {
 
             return self.new(
                 .{ .start = start, .end = end },
-                .{ .convert = .{
-                    .signed = signed,
-                    .data_type = data_type,
-                    .to_type = to_type,
-                    .from_type = from_type,
-                    .value = value,
-                } },
+                .{
+                    .convert = .{
+                        .signed = signed,
+                        .data_type = data_type,
+                        .to_type = to_type,
+                        .from_type = from_type,
+                        .value = value,
+                    },
+                },
             );
         }
 
