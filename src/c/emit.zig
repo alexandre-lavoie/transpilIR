@@ -1114,12 +1114,12 @@ pub const CEmitWalkCallback = struct {
                 } else if (c.left == previous) {
                     try self.rot2();
 
-                    const t = try self.pop();
+                    const typ = try self.pop();
 
                     try self.push(Self.comparisonOpToToken(c.operation_type), null);
 
                     try self.push(.open_parenthesis, null);
-                    try self.push(t.token_type, t.span);
+                    try self.push(typ.token_type, typ.span);
                     try self.push(.close_parenthesis, null);
                 }
             },
@@ -1369,6 +1369,12 @@ pub const CEmitWalkCallback = struct {
                                     try self.push(.close_parenthesis, null);
 
                                     try self.loadToken();
+
+                                    // TODO: Globals might need to always be dereferenced?
+                                    if ((try self.peek()) == .global_identifier) {
+                                        try self.push(.dereference, null);
+                                        try self.rot2();
+                                    }
                                 },
                                 else => {},
                             }
@@ -1400,6 +1406,12 @@ pub const CEmitWalkCallback = struct {
             },
             .store => {
                 try self.push(.assign, null);
+
+                if (self.token_stack.getLastOrNull()) |v| {
+                    if (v.token_type == .global_identifier) {
+                        _ = try self.wrapDereference();
+                    }
+                }
 
                 try self.loadToken();
             },

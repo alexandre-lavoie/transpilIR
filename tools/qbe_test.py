@@ -7,29 +7,30 @@ import re
 import subprocess
 import sys
 import tempfile
-import threading
+
+TARGETS = []
+TESTS = []
+
+COLOR = sys.stdout.isatty()
+if COLOR:
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    GRAY = "\033[90m"
+    RESET = "\033[0m"
+else:
+    GREEN = ""
+    RED = ""
+    GRAY = ""
+    RESET = ""
+
+PROCESS_COUNT = 8
 
 GCC = os.environ.get("GCC") or "gcc"
 QBE = os.environ.get("QBE") or "qbe"
 TRANSPILIR = os.environ.get("TRANSPILIR") or "transpilir"
 
-COLOR = sys.stdout.isatty()
-
-if COLOR:
-    GREEN = "\033[32m"
-    RED = "\033[31m"
-    BLUE = "\033[34m"
-    RESET = "\033[0m"
-else:
-    GREEN = ""
-    RED = ""
-    BLUE = ""
-    RESET = ""
-
-PROCESS_COUNT = 8
 SECTION_RE = re.compile(r"^# >>> (.*?)$(.*?)^# <<<$", re.MULTILINE | re.DOTALL)
 LINE_RE = re.compile(r"(^# |#$)", re.MULTILINE | re.DOTALL)
-OUT_LOCK = threading.Lock()
 
 @dataclasses.dataclass
 class Response:
@@ -39,6 +40,11 @@ class Response:
     children: list["Response"] = dataclasses.field(default_factory=list)
 
 def cli() -> None:
+    global TESTS, TARGETS
+
+    TARGETS = ["native"]
+    TESTS = [test_qbe, test_gcc]
+
     test_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "qbe", "test")
     test_files = list(sorted(glob.glob("[!_]*.ssa", root_dir=test_dir)))
 
@@ -63,12 +69,12 @@ def cli() -> None:
 
         print_response(res)
 
-    print(f"\n{BLUE}[result]{RESET} {ok_count} / {len(test_files)} ({ok_count / len(test_files) * 100:.02f}%)")
+    print(f"\n{GRAY}[result]{RESET} {ok_count} / {len(test_files)} ({ok_count / len(test_files) * 100:.02f}%)")
 
 def print_response(res: Response, depth: int = 0) -> None:
     prefix = "  " * depth
 
-    print(f"{prefix}{BLUE}[{res.scope}]{RESET} ", end="")
+    print(f"{prefix}{GRAY}{res.scope}{RESET} ", end="")
 
     if not res.error:
         print(f"{GREEN}OK{RESET}")
@@ -83,7 +89,10 @@ def print_response(res: Response, depth: int = 0) -> None:
             print("")
 
             for line in msg.split("\n"):
-                print(f"{prefix}  {line}")
+                if line.strip():
+                    print(f"{prefix}  {line}")
+                else:
+                    print("")
         else:
             print(msg)
 
@@ -102,7 +111,7 @@ def test(ir_path: str) -> Response:
         sections[match.group(1)] = LINE_RE.sub("", match.group(2)).strip()
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        for arch in ["native"]:
+        for arch in TARGETS:
             res.children.append(
                 test_arch(
                     ir_path=ir_path,
@@ -143,13 +152,14 @@ def test_arch(ir_path: str, root_dir: str, arch: str, sections: dict[str, str]) 
     expected = (0, sections.get("output", ""), "")
 
     res.children += [
-        test_gcc(
+        t(
             ir_path,
             driver_path=driver_path,
             arch_folder=arch_folder,
             arch=arch,
             expected=expected
         )
+        for t in TESTS
     ]
 
     res.error = any(r.error for r in res.children)
@@ -200,11 +210,79 @@ def test_gcc(ir_path: str, driver_path: str | None, arch_folder: str, arch: str,
 
         return res
 
+    res.children.append(
+        test_result(
+            expected,
+            run_test(arch=arch, exe_path=exe_path)
+        )
+    )
+
+    res.error = any(r.error for r in res.children)
+
+    return res
+
+def test_qbe(ir_path: str, driver_path: str | None, arch_folder: str, arch: str, expected: tuple[int, str, str]) -> Response:
+    res = Response(scope="qbe", error=True)
+
+    out, asm = transpilir_assemble(
+        ir="qbe",
+        arch=arch,
+        compiler="qbe",
+        ir_path=ir_path,
+    )
+    if out.error:
+        res.children.append(out)
+
+        return res
+
+    obj = os.path.join(arch_folder, "qbe.o")
+    out = gcc_compile(
+        arch=arch,
+        lang="assembler",
+        code=asm,
+        out_path=obj,
+    )
+    if out.error:
+        res.children.append(out)
+
+        return res
+
+    paths = []
+
+    paths.append(obj)
+
+    if driver_path:
+        paths.append(driver_path)
+
+    exe_path = os.path.join(arch_folder, "test_qbe")
+    out = gcc_link(
+        arch=arch,
+        paths=paths,
+        out_path=exe_path
+    )
+    if out.error:
+        res.children.append(out)
+
+        return res
+
+    res.children.append(
+        test_result(
+            expected,
+            run_test(arch=arch, exe_path=exe_path)
+        )
+    )
+
+    res.error = any(r.error for r in res.children)
+
+    return res
+
+def test_result(expected: tuple[int, str, str], actual: tuple[int, bytes, bytes]) -> Response:
     expected = (expected[0], expected[1].encode(), expected[2].encode())
 
-    actual = run_test(arch=arch, exe_path=exe_path)
-    if actual != expected:
-        res.children += [
+    return Response(
+        scope="result",
+        error=actual != expected,
+        children=[
             Response(
                 scope="expected",
                 error=True,
@@ -243,12 +321,7 @@ def test_gcc(ir_path: str, driver_path: str | None, arch_folder: str, arch: str,
                 ]
             ),
         ]
-
-        return res
-
-    res.error = False
-
-    return res
+    )
 
 def run_test(arch: str, exe_path: str) -> tuple[int, bytes, bytes]:
     proc = subprocess.Popen(
