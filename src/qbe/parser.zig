@@ -1409,11 +1409,13 @@ pub fn QBEParser(comptime Reader: type) type {
 
             return try self.new(
                 .{ .start = start, .end = end },
-                .{ .load = .{
-                    .memory_type = memory_type,
-                    .data_type = data_type,
-                    .address = address,
-                } },
+                .{
+                    .load = .{
+                        .memory_type = memory_type,
+                        .data_type = data_type,
+                        .address = address,
+                    },
+                },
             );
         }
 
