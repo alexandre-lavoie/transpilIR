@@ -726,8 +726,9 @@ pub const SymbolMemoryWalkCallback = struct {
                 }
 
                 const symbol: ?*types.Symbol = switch (self.entries.items[i]) {
-                    .global => |g| self.symbol_table.getSymbolPtrMut(g),
-                    .local => null,
+                    .global,
+                    .local,
+                    => |s| self.symbol_table.getSymbolPtrMut(s),
                     else => return error.InvalidCallSymbol,
                 };
                 i += 1;
@@ -762,23 +763,29 @@ pub const SymbolMemoryWalkCallback = struct {
                     parameters = try allocator.realloc(parameters, j);
                 }
 
-                const memory: types.SymbolMemory = .{
-                    .function = .{
-                        .linkage = .{},
-                        .@"return" = @"return",
-                        .vararg = vararg,
-                        .parameters = parameters,
-                        .external = true,
-                    },
+                const memory: types.SymbolMemoryFunction = .{
+                    .linkage = .{},
+                    .@"return" = @"return",
+                    .vararg = vararg,
+                    .parameters = parameters,
+                    .external = true,
                 };
 
                 if (symbol) |function_symbol| {
                     switch (function_symbol.memory) {
-                        .empty => {
-                            function_symbol.memory = memory;
+                        .empty,
+                        => {
+                            function_symbol.memory = .{
+                                .function = memory,
+                            };
+                        },
+                        .primitive,
+                        => {
+                            function_symbol.memory = .{
+                                .function_pointer = memory,
+                            };
                         },
                         .function,
-                        .primitive,
                         => {
                             allocator.free(parameters);
                         },
@@ -1406,7 +1413,15 @@ test "call function pointer" {
                 .function = 0,
             },
             .memory = .{
-                .primitive = .i64,
+                .function_pointer = .{
+                    .linkage = .{},
+                    .@"return" = .{
+                        .primitive = .i32,
+                    },
+                    .vararg = false,
+                    .external = true,
+                    .parameters = &[_]types.SymbolMemoryParameterType{},
+                },
             },
         },
         .{

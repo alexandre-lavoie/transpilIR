@@ -48,6 +48,7 @@ pub const CEmitWalkCallback = struct {
     phi_token: ?token.CToken = null,
     phi_type: ?token.CToken = null,
     pointer_offset: usize = 0,
+    env_call: bool = false,
 
     const Self = @This();
     const TokenList = std.ArrayList(token.CToken);
@@ -200,7 +201,9 @@ pub const CEmitWalkCallback = struct {
             .primitive => |p| {
                 try self.pushPrimitiveType(p);
             },
-            .env => {
+            .env,
+            .function_pointer,
+            => {
                 try self.pushPrimitiveType(.ptr);
             },
             .type => |t| {
@@ -505,62 +508,91 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.static, null);
                 }
 
-                switch (f.@"return") {
-                    .primitive => |v| {
-                        const t: ast.PrimitiveType = switch (v) {
-                            .void => .i8, // Force to always have a return type
-                            else => v,
-                        };
-
-                        try self.pushPrimitiveType(t);
-                    },
-                    .type => |v| {
-                        const instance = try self.pushSymbolInstance(.type_identifier, v);
-
-                        try self.storeToken();
-                        try self.pushTypePrefix(&instance);
-                        try self.loadToken();
-                    },
-                }
+                try self.pushFunctionReturn(f);
 
                 _ = try self.pushSymbolIdentifier(.global_identifier, &sym.identifier);
 
-                try self.push(.open_parenthesis, null);
+                try self.pushFunctionParameters(f);
 
-                for (f.parameters) |p| {
-                    switch (p) {
-                        .primitive => |v| try self.pushPrimitiveType(v),
-                        .env => try self.pushPrimitiveType(.ptr),
-                        .type => |v| {
-                            const instance = try self.pushSymbolInstance(.type_identifier, v);
-
-                            try self.storeToken();
-                            try self.pushTypePrefix(&instance);
-                            try self.loadToken();
-                        },
-                    }
-
-                    try self.push(.comma, null);
-                }
-
-                if ((try self.peek()) == .comma) {
-                    _ = try self.pop();
-                }
-
-                if (f.vararg) {
-                    if (f.parameters.len > 0) {
-                        try self.push(.comma, null);
-                    }
-
-                    try self.push(.variable_arguments, null);
-                }
-
-                try self.push(.close_parenthesis, null);
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
             },
             else => {},
         }
+    }
+
+    fn pushFunctionPointerType(self: *Self, f: *const symbol.SymbolMemoryFunction) !void {
+        try self.push(.open_parenthesis, null);
+
+        try self.pushFunctionReturn(f);
+
+        try self.push(.open_parenthesis, null);
+        try self.push(.pointer, null);
+        try self.push(.close_parenthesis, null);
+
+        try self.pushFunctionParameters(f);
+
+        try self.push(.close_parenthesis, null);
+    }
+
+    fn pushFunctionReturn(self: *Self, f: *const symbol.SymbolMemoryFunction) !void {
+        switch (f.@"return") {
+            .primitive => |v| {
+                const t: ast.PrimitiveType = switch (v) {
+                    .void => .i8, // Force to always have a return type
+                    else => v,
+                };
+
+                try self.pushPrimitiveType(t);
+            },
+            .type => |v| {
+                const instance = try self.pushSymbolInstance(.type_identifier, v);
+
+                try self.storeToken();
+                try self.pushTypePrefix(&instance);
+                try self.loadToken();
+            },
+        }
+    }
+
+    fn pushFunctionParameters(self: *Self, f: *const symbol.SymbolMemoryFunction) !void {
+        try self.push(.open_parenthesis, null);
+
+        for (f.parameters) |p| {
+            switch (p) {
+                .primitive => |v| try self.pushPrimitiveType(v),
+                .env => {
+                    if (!f.external) {
+                        try self.pushPrimitiveType(.ptr);
+                    } else {
+                        continue;
+                    }
+                },
+                .type => |v| {
+                    const instance = try self.pushSymbolInstance(.type_identifier, v);
+
+                    try self.storeToken();
+                    try self.pushTypePrefix(&instance);
+                    try self.loadToken();
+                },
+            }
+
+            try self.push(.comma, null);
+        }
+
+        if ((try self.peek()) == .comma) {
+            _ = try self.pop();
+        }
+
+        if (f.vararg) {
+            if (f.parameters.len > 0) {
+                try self.push(.comma, null);
+            }
+
+            try self.push(.variable_arguments, null);
+        }
+
+        try self.push(.close_parenthesis, null);
     }
 
     fn pushLocalVariables(self: *Self) !void {
@@ -670,7 +702,26 @@ pub const CEmitWalkCallback = struct {
             try self.push(.close_parenthesis, null);
         }
 
-        try self.loadToken();
+        const tok = self.token_stack.getLastOrNull() orelse return error.NotFound;
+        const inst = symbol.Instance{ .span = tok.span };
+        const sym = self.symbol_table.getSymbolByInstance(&inst) orelse return error.NotFound;
+
+        switch (sym.memory) {
+            .function_pointer => |*f| {
+                self.env_call = false;
+
+                try self.push(.open_parenthesis, null);
+                try self.pushFunctionPointerType(f);
+                try self.loadToken();
+                try self.push(.close_parenthesis, null);
+            },
+            .function => |*f| {
+                self.env_call = !f.external and f.parameters.len > 0 and f.parameters[0] == .env;
+
+                try self.loadToken();
+            },
+            else => return error.InvalidType,
+        }
 
         try self.push(.open_parenthesis, null);
     }
@@ -804,7 +855,7 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.colon, null);
             },
             .env_type => {
-                try self.pushPrimitiveType(.ptr);
+                try self.push(.colon, null);
             },
             .variadic_parameter => {
                 try self.push(.variable_arguments, null);
@@ -1227,10 +1278,10 @@ pub const CEmitWalkCallback = struct {
                 } else if (c.return_type == previous) {
                     try self.pushCallOpen();
                 } else {
-                    if ((try self.peek()) == .variable_arguments) {
-                        _ = try self.pop();
-                    } else {
-                        _ = try self.push(.comma, null);
+                    switch (try self.peek()) {
+                        .variable_arguments => _ = try self.pop(),
+                        .open_parenthesis => {},
+                        else => _ = try self.push(.comma, null),
                     }
                 }
             },
@@ -1409,12 +1460,18 @@ pub const CEmitWalkCallback = struct {
                 try self.pushLocalVariables();
             },
             .function_parameter => {
-                if ((try self.peek()) == .colon) {
-                    _ = try self.pop();
-                    try self.clearToken();
-                } else {
-                    try self.loadToken();
+                switch (try self.peek()) {
+                    .colon => {
+                        // If colon, type is env
+                        // This is a pointer type
+
+                        _ = try self.pop();
+                        try self.pushPrimitiveType(.ptr);
+                    },
+                    else => {},
                 }
+
+                try self.loadToken();
             },
             .line,
             .jump,
@@ -1496,7 +1553,9 @@ pub const CEmitWalkCallback = struct {
 
                 try self.loadToken();
             },
-            .cast, .copy => {
+            .cast,
+            .copy,
+            => {
                 switch (try self.peek()) {
                     .local_identifier,
                     .global_identifier,
@@ -1558,6 +1617,20 @@ pub const CEmitWalkCallback = struct {
                 };
 
                 switch (try self.peek()) {
+                    .colon => {
+                        // If colon, type was an env
+                        _ = try self.pop();
+
+                        if (self.env_call) {
+                            // Add pointer if it is an env call
+                            try self.pushPrimitiveType(.ptr);
+                            try self.push(.close_parenthesis, null);
+                        } else {
+                            // Otherwise, pop the open bracket and exit early
+                            _ = try self.pop();
+                            return;
+                        }
+                    },
                     .type_identifier => l: {
                         // Handle struct param type
 

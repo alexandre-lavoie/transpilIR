@@ -183,6 +183,7 @@ pub const SymbolMemory = union(enum) {
     empty,
     env,
     function: SymbolMemoryFunction,
+    function_pointer: SymbolMemoryFunction,
     label,
     primitive: ast.PrimitiveType,
     type: usize,

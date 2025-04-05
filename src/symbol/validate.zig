@@ -215,6 +215,7 @@ pub const SymbolValidateWalkCallback = struct {
 
                         try self.types.append(.ptr);
                     },
+                    .function_pointer => try self.types.append(.ptr),
                     else => {},
                 }
             },
@@ -459,6 +460,22 @@ test "call no arguments" {
     const allocator = std.testing.allocator;
 
     const file = "function $f() {@s %v =w call $no_arg() ret}";
+
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act + Assert
+    try test_lib.testValidate(allocator, file, &tree, &symbol_table, &test_lib.test_target);
+}
+
+test "call pointer" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $f() {@s %f =l load 0 call %f() ret}";
 
     var tree = try test_lib.testAST(allocator, file);
     defer tree.deinit();

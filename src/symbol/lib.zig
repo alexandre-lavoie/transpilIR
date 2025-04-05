@@ -5,6 +5,7 @@ const types = @import("types.zig");
 pub const Symbol = types.Symbol;
 pub const SymbolIndentifier = types.SymbolIdentifier;
 pub const SymbolMemory = types.SymbolMemory;
+pub const SymbolMemoryFunction = types.SymbolMemoryFunction;
 pub const Instance = types.Instance;
 pub const LiteralValue = types.LiteralValue;
 pub const LiteralValueType = types.LiteralValueType;
