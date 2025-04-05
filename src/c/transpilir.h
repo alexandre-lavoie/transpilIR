@@ -47,8 +47,8 @@ extern int isnan(double v);
 #else
 #define IS_NAN(v) (v) != (v)
 #endif
+#define NOT_NAN(l, r) (!IS_NAN(l) && !IS_NAN(r))
 #define ANY_NAN(l, r) (IS_NAN(l) || IS_NAN(r))
-#define ALL_NAN(l, r) (IS_NAN(l) && IS_NAN(r))
 
 #endif
 

@@ -65,7 +65,7 @@ pub const CEmitWalkCallback = struct {
     const allocate_identifier = symbol.SymbolIndentifier{ .name = "ALLOCATE", .scope = .global };
     const blit_identifier = symbol.SymbolIndentifier{ .name = "BLIT", .scope = .global };
 
-    const all_nan_identifier = symbol.SymbolIndentifier{ .name = "ALL_NAN", .scope = .global };
+    const not_nan_identifier = symbol.SymbolIndentifier{ .name = "NOT_NAN", .scope = .global };
     const any_nan_identifier = symbol.SymbolIndentifier{ .name = "ANY_NAN", .scope = .global };
 
     const vastart_identifier = symbol.SymbolIndentifier{ .name = "VA_START", .scope = .global };
@@ -81,7 +81,7 @@ pub const CEmitWalkCallback = struct {
         align_default_identifier,
         allocate_identifier,
         blit_identifier,
-        all_nan_identifier,
+        not_nan_identifier,
         any_nan_identifier,
         vastart_identifier,
         vaarg_identifier,
@@ -1225,12 +1225,12 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.open_parenthesis, null);
 
                     switch (c.operation_type) {
+                        .not_nan,
                         .any_nan,
-                        .all_nan,
                         => {
                             const identifier: *const symbol.SymbolIndentifier = switch (c.operation_type) {
                                 .any_nan => &any_nan_identifier,
-                                .all_nan => &all_nan_identifier,
+                                .not_nan => &not_nan_identifier,
                                 else => unreachable,
                             };
 
@@ -1587,7 +1587,7 @@ pub const CEmitWalkCallback = struct {
 
                 switch (c.operation_type) {
                     .any_nan,
-                    .all_nan,
+                    .not_nan,
                     => {
                         try self.push(.close_parenthesis, null);
                     },

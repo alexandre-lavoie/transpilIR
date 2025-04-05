@@ -388,6 +388,6 @@ pub const ComparisonOperationType = enum {
     not_equal,
 
     // Float
-    all_nan,
+    not_nan,
     any_nan,
 };
