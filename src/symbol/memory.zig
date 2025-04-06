@@ -13,6 +13,7 @@ const SymbolMemoryEntry = union(enum) {
     global: usize,
     literal: *types.Literal,
     primitive: ast.PrimitiveType,
+    stack_allocation: types.SymbolMemoryStackAllocation,
     type: usize,
     env,
     @"struct",
@@ -200,11 +201,29 @@ pub const SymbolMemoryWalkCallback = struct {
                 self.entries.clearAndFree();
             },
             .allocate => {
-                if (self.entries.items.len < 2) {
+                if (self.entries.items.len < 3) {
                     return error.InvalidAllocate;
                 }
 
-                switch (self.entries.items[1]) {
+                const size = switch (self.entries.pop()) {
+                    .literal => |lit| switch (lit.value) {
+                        .integer => |v| v,
+                        else => return error.InvalidAllocate,
+                    },
+                    else => return error.InvalidAllocate,
+                };
+
+                const alignment = switch (self.entries.pop()) {
+                    .literal => |lit| switch (lit.value) {
+                        .integer => |v| v,
+                        else => return error.InvalidAllocate,
+                    },
+                    else => return error.InvalidAllocate,
+                };
+
+                const typ = &self.entries.items[1];
+
+                switch (typ.*) {
                     .primitive => |p| switch (p) {
                         .bool,
                         .i8,
@@ -216,9 +235,12 @@ pub const SymbolMemoryWalkCallback = struct {
                         .i64,
                         .u64,
                         => {
-                            // TODO: Check that previous is pointer size.
-                            self.entries.items[1] = .{
-                                .primitive = .ptr,
+                            // TODO: Check that previous is pointer size?
+                            typ.* = .{
+                                .stack_allocation = .{
+                                    .alignment = @intCast(alignment),
+                                    .size = @intCast(size),
+                                },
                             };
                         },
                         .ptr => {},
@@ -335,6 +357,7 @@ pub const SymbolMemoryWalkCallback = struct {
                     symbol.memory = switch (self.entries.items[1]) {
                         .primitive => |v| .{ .primitive = v },
                         .type => |v| .{ .type = v },
+                        .stack_allocation => |v| .{ .stack_allocation = v },
                         else => return error.InvalidAssignment,
                     };
                 }
@@ -1173,7 +1196,10 @@ test "allocate" {
                 .function = 0,
             },
             .memory = .{
-                .primitive = .ptr,
+                .stack_allocation = .{
+                    .alignment = 4,
+                    .size = 16,
+                },
             },
         },
     };

@@ -203,6 +203,7 @@ pub const CEmitWalkCallback = struct {
             },
             .env,
             .function_pointer,
+            .stack_allocation,
             => {
                 try self.pushPrimitiveType(.ptr);
             },
@@ -220,12 +221,13 @@ pub const CEmitWalkCallback = struct {
 
                 _ = try self.pushSymbolIdentifier(.type_identifier, &sym.identifier);
             },
-            .child => |c| {
+            .child,
+            => |c| {
                 const s = self.symbol_table.getSymbolPtr(c.parent) orelse return error.NotFound;
 
                 try self.pushSymbolType(s);
             },
-            else => unreachable,
+            else => return error.InvalidSymbolType,
         }
     }
 
@@ -629,12 +631,38 @@ pub const CEmitWalkCallback = struct {
 
             try self.push(.tab, null);
 
-            try self.pushSymbolType(sym);
-            if ((try self.peek()) == .pointer) {
-                _ = try self.pop();
-            }
+            switch (sym.memory) {
+                .stack_allocation => |sa| {
+                    try self.push(.u8, null);
 
-            _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
+                    _ = try self.pushSymbolIdentifier(.global_identifier, &align_identifier);
+
+                    try self.push(.open_parenthesis, null);
+
+                    const alignment = symbol.LiteralValue{ .integer = @intCast(sa.alignment) };
+                    try self.pushLiteral(&alignment);
+
+                    try self.push(.close_parenthesis, null);
+
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
+
+                    try self.push(.open_bracket, null);
+
+                    const size = symbol.LiteralValue{ .integer = @intCast(sa.size) };
+                    try self.pushLiteral(&size);
+
+                    try self.push(.close_bracket, null);
+                },
+                else => {
+                    try self.pushSymbolType(sym);
+
+                    if ((try self.peek()) == .pointer) {
+                        _ = try self.pop();
+                    }
+
+                    _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
+                },
+            }
 
             try self.push(.semi_colon, null);
             try self.push(.newline, null);
@@ -920,7 +948,6 @@ pub const CEmitWalkCallback = struct {
                 _ = try self.pushSymbolIdentifier(.global_identifier, &blit_identifier);
                 try self.push(.open_parenthesis, null);
             },
-            .allocate,
             .call_parameter,
             .convert,
             .negate,
@@ -930,10 +957,13 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.open_parenthesis, null);
             },
             .cast,
-            .copy,
             => {
                 self.pointer_offset = self.tokens.items.len;
 
+                try self.push(.open_parenthesis, null);
+            },
+            .copy,
+            => {
                 try self.push(.open_parenthesis, null);
             },
             .store,
@@ -1151,17 +1181,6 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.open_parenthesis, null);
                     try self.loadToken();
                     try self.push(.close_parenthesis, null);
-                }
-            },
-            .allocate => |a| {
-                if (a.data_type == previous) {
-                    try self.push(.close_parenthesis, null);
-                    try self.push(.open_parenthesis, null);
-
-                    _ = try self.pushSymbolIdentifier(.global_identifier, &allocate_identifier);
-                    try self.push(.open_parenthesis, null);
-                } else if (a.alignment == previous) {
-                    try self.push(.comma, null);
                 }
             },
             .blit => {
@@ -1473,13 +1492,25 @@ pub const CEmitWalkCallback = struct {
 
                 try self.loadToken();
             },
-            .line,
             .jump,
             .branch,
             .halt,
             => {
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
+            },
+            .line,
+            => {
+                // Only close line if there is data
+                switch (try self.peek()) {
+                    .tab,
+                    => _ = try self.pop(),
+                    .semi_colon => {},
+                    else => {
+                        try self.push(.semi_colon, null);
+                        try self.push(.newline, null);
+                    },
+                }
             },
             .@"return" => |ret| {
                 if (ret.value == null) {
@@ -1526,8 +1557,9 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.newline, null);
             },
             .allocate => {
-                try self.push(.close_parenthesis, null);
-                try self.push(.close_parenthesis, null);
+                for (0..5) |_| {
+                    _ = try self.pop();
+                }
             },
             .blit,
             .negate,
@@ -1553,8 +1585,9 @@ pub const CEmitWalkCallback = struct {
 
                 try self.loadToken();
             },
-            .cast,
             .copy,
+            => {},
+            .cast,
             => {
                 switch (try self.peek()) {
                     .local_identifier,

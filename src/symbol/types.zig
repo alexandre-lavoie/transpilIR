@@ -174,6 +174,11 @@ pub const SymbolMemoryChild = struct {
     index: usize,
 };
 
+pub const SymbolMemoryStackAllocation = struct {
+    alignment: usize,
+    size: usize,
+};
+
 pub const SymbolMemory = union(enum) {
     @"opaque": SymbolMemoryOpaque,
     @"struct": SymbolMemoryStruct,
@@ -184,6 +189,7 @@ pub const SymbolMemory = union(enum) {
     env,
     function: SymbolMemoryFunction,
     function_pointer: SymbolMemoryFunction,
+    stack_allocation: SymbolMemoryStackAllocation,
     label,
     primitive: ast.PrimitiveType,
     type: usize,

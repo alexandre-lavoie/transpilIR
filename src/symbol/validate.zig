@@ -215,7 +215,9 @@ pub const SymbolValidateWalkCallback = struct {
 
                         try self.types.append(.ptr);
                     },
-                    .function_pointer => try self.types.append(.ptr),
+                    .function_pointer,
+                    .stack_allocation,
+                    => try self.types.append(.ptr),
                     else => {},
                 }
             },
