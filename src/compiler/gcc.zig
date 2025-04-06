@@ -77,15 +77,19 @@ pub const GCC = struct {
 
         try args.append(executable orelse "gcc");
 
-        // Permissive and no warnings
-        try args.append("-fpermissive");
+        // Configs
+        try args.append("-fno-builtin");
+        try args.append("-fno-stack-protector");
+
+        // Remove warnings
         try args.append("-w");
+        try args.append("-fpermissive");
 
         const optimization = switch (self.optimization) {
+            .o0 => "-O0",
             .o1 => "-O1",
             .o2 => "-O2",
             .o3 => "-O3",
-            else => "",
         };
 
         if (optimization.len > 0) {

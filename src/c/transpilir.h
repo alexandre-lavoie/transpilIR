@@ -16,14 +16,7 @@
 #define F64 double
 #define SIZE_T U64
 
-#if defined(__GNUC__) || defined(__clang__)
-#define LINK(sec) __attribute__((section(sec)))
-#else
-#define LINK(sec)
-#endif
-
-#define LINK_FLAGS(sec, flag) LINK(sec)
-
+#define LOCAL static
 #define EXPORT
 
 #ifdef __STDC_NO_THREADS__
@@ -31,6 +24,14 @@
 #else
 #define THREAD _Thread_local
 #endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define LINK(sec) __attribute__((section(sec)))
+#else
+#define LINK(sec)
+#endif
+
+#define LINK_FLAGS(sec, flag) LINK(sec)
 
 #define VA_START(ap, paramN) va_start(*(va_list*)(ap), paramN)
 #define VA_ARG(T, ap) va_arg(*(va_list*)(ap), T)
@@ -43,12 +44,7 @@
 
 #define ALIGN_DEFAULT ALIGN(1)
 
-#if defined(__unix__) || defined(__APPLE__)
-extern void *memcpy(void *dest, const void *src, SIZE_T n);
-#define BLIT(src, dest, n) memcpy(dest, src, n)
-#else
-#define BLIT(src, dest, n) for (int __i = 0; __i < (n); __i++) ((char *)(dest))[__i] = ((char *)(src))[__i]
-#endif
+#define BLIT(src, dest, n) for (int __i = 0; __i < (n); __i++) ((char *)(dest))[__i] = ((char *)(src))[__i];
 
 #if defined(__unix__) || defined(__APPLE__)
 extern int isnan(double v);

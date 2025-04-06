@@ -78,14 +78,22 @@ pub const LLVM = struct {
 
         try args.append(executable orelse "clang");
 
+        // Configs
+        try args.append("-fno-builtin");
+        try args.append("-ffreestanding");
+        try args.append("-disable-simplify-libcalls");
+        try args.append("-fno-stack-protector");
+
+        // Remove warnings
+        try args.append("-w");
         try args.append("-Wno-int-conversion");
         try args.append("-Wno-incompatible-pointer-types");
 
         const optimization = switch (self.optimization) {
+            .o0 => "-O0",
             .o1 => "-O1",
             .o2 => "-O2",
             .o3 => "-O3",
-            else => "",
         };
 
         if (optimization.len > 0) {

@@ -192,9 +192,9 @@ const Args = struct {
                         if (!self.optimization.isEnabled()) return error.InvalidOptimization;
                     },
                     .compiler => {
-                        self.compiler = std.meta.stringToEnum(Compiler, p) orelse return error.InvalidOptimization;
+                        self.compiler = std.meta.stringToEnum(Compiler, p) orelse return error.InvalidCompiler;
 
-                        if (!self.compiler.isEnabled()) return error.InvalidOptimization;
+                        if (!self.compiler.isEnabled()) return error.InvalidCompiler;
                     },
                     .debug => {
                         var it = std.mem.split(u8, p, ",");

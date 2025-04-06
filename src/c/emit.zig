@@ -58,6 +58,7 @@ pub const CEmitWalkCallback = struct {
 
     const opaque_identifier = symbol.SymbolIndentifier{ .name = "opaque", .scope = .global };
 
+    const link_local_identifier = symbol.SymbolIndentifier{ .name = "LOCAL", .scope = .global };
     const link_export_identifier = symbol.SymbolIndentifier{ .name = "EXPORT", .scope = .global };
     const link_thread_identifier = symbol.SymbolIndentifier{ .name = "THREAD", .scope = .global };
     const link_identifier = symbol.SymbolIndentifier{ .name = "LINK", .scope = .global };
@@ -76,6 +77,7 @@ pub const CEmitWalkCallback = struct {
 
     const emit_identifiers = [_]symbol.SymbolIndentifier{
         opaque_identifier,
+        link_local_identifier,
         link_export_identifier,
         link_thread_identifier,
         link_identifier,
@@ -399,7 +401,7 @@ pub const CEmitWalkCallback = struct {
                 }
 
                 if (!data.linkage.@"export") {
-                    try self.push(.static, null);
+                    _ = try self.pushSymbolIdentifier(.global_identifier, &link_local_identifier);
                 }
 
                 try self.push(.@"struct", null);
@@ -550,7 +552,7 @@ pub const CEmitWalkCallback = struct {
         switch (sym.memory) {
             .function => |*f| {
                 if (!f.external and !f.linkage.@"export") {
-                    try self.push(.static, null);
+                    _ = try self.pushSymbolIdentifier(.global_identifier, &link_local_identifier);
                 }
 
                 try self.pushFunctionReturn(f);
@@ -1545,7 +1547,7 @@ pub const CEmitWalkCallback = struct {
                 if (l.@"export") {
                     _ = try self.pushSymbolIdentifier(.global_identifier, &link_export_identifier);
                 } else {
-                    _ = try self.push(.static, null);
+                    _ = try self.pushSymbolIdentifier(.global_identifier, &link_local_identifier);
                 }
             },
             .function => {
@@ -1728,18 +1730,6 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.close_parenthesis, null);
             },
             .call_parameter => {
-                const val_sym: ?*const symbol.Symbol = l: {
-                    const tok = self.token_stack.getLastOrNull() orelse return error.NotFound;
-
-                    if (tok.token_type != .local_identifier) {
-                        break :l null;
-                    }
-
-                    const inst = symbol.Instance{ .span = tok.span };
-
-                    break :l self.symbol_table.getSymbolByInstance(&inst) orelse return error.NotFound;
-                };
-
                 switch (try self.peek()) {
                     .colon => {
                         // If colon, type was an env
@@ -1755,18 +1745,17 @@ pub const CEmitWalkCallback = struct {
                             return;
                         }
                     },
-                    .type_identifier => l: {
+                    .type_identifier => {
                         // Handle struct param type
 
-                        const t = try self.pop(); // Pop type
+                        // Pop type
+                        const t = try self.pop();
 
-                        const p = try self.pop(); // Pop struct/union
-                        _ = try self.pop(); // Pop open parenthesis
+                        // Pop struct/union
+                        const p = try self.pop();
 
-                        // Skip if value is type
-                        if (val_sym) |sym| {
-                            if (sym.memory == .type) break :l;
-                        }
+                        // Pop open parenthesis
+                        _ = try self.pop();
 
                         try self.push(.pointer, null);
 
@@ -1782,17 +1771,12 @@ pub const CEmitWalkCallback = struct {
                     else => {
                         // Handle base param type
                         try self.push(.close_parenthesis, null);
-
-                        // Dereference if struct
-                        if (val_sym) |sym| {
-                            if (sym.memory == .type) try self.push(.dereference, null);
-                        }
                     },
                 }
 
                 try self.loadToken();
 
-                if ((try self.peek()) == .global_identifier) {
+                if (self.last_unwrap_dereference) {
                     try self.storeToken();
 
                     try self.wrapDereference();
@@ -1892,7 +1876,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
         fn parse(self: *Self, tok: *const token.CToken) !bool {
             switch (tok.token_type) {
                 .module_start => {
-                    try self.print(common.Color.identifier, Self.include_prefix, .{});
+                    try self.print(common.Color.identifier, "{s}", .{Self.include_prefix});
 
                     return true;
                 },
