@@ -64,6 +64,8 @@ pub const CEmitWalkCallback = struct {
     const link_identifier = symbol.SymbolIndentifier{ .name = "LINK", .scope = .global };
     const link_flags_identifier = symbol.SymbolIndentifier{ .name = "LINK_FLAGS", .scope = .global };
 
+    const tag_identifier = symbol.SymbolIndentifier{ .name = "TAG", .scope = .global };
+
     const align_identifier = symbol.SymbolIndentifier{ .name = "ALIGN", .scope = .global };
     const align_default_identifier = symbol.SymbolIndentifier{ .name = "ALIGN_DEFAULT", .scope = .global };
     const allocate_identifier = symbol.SymbolIndentifier{ .name = "ALLOCATE", .scope = .global };
@@ -82,6 +84,7 @@ pub const CEmitWalkCallback = struct {
         link_thread_identifier,
         link_identifier,
         link_flags_identifier,
+        tag_identifier,
         align_identifier,
         align_default_identifier,
         allocate_identifier,
@@ -409,6 +412,8 @@ pub const CEmitWalkCallback = struct {
 
                 _ = try self.pushSymbolIdentifier(.global_identifier, &sym.identifier);
 
+                try self.pushTag(sym);
+
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
             },
@@ -512,6 +517,17 @@ pub const CEmitWalkCallback = struct {
         try self.push(.newline, null);
     }
 
+    fn pushTag(self: *Self, sym: *const symbol.Symbol) !void {
+        _ = try self.pushSymbolIdentifier(.global_identifier, &tag_identifier);
+
+        try self.push(.open_parenthesis, null);
+
+        const lit = symbol.LiteralValue{ .string = sym.identifier.name };
+        try self.pushLiteral(&lit);
+
+        try self.push(.close_parenthesis, null);
+    }
+
     fn pushForwardDeclarations(self: *Self) !void {
         // Separate previous section
         _ = try self.push(.newline, null);
@@ -535,6 +551,8 @@ pub const CEmitWalkCallback = struct {
                         try self.pushPrimitiveType(.ptr);
 
                         _ = try self.pushSymbolIdentifier(.global_identifier, &sym.identifier);
+
+                        try self.pushTag(sym);
 
                         try self.push(.semi_colon, null);
                         try self.push(.newline, null);
@@ -560,6 +578,8 @@ pub const CEmitWalkCallback = struct {
                 _ = try self.pushSymbolIdentifier(.global_identifier, &sym.identifier);
 
                 try self.pushFunctionParameters(f);
+
+                try self.pushTag(sym);
 
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
@@ -953,14 +973,14 @@ pub const CEmitWalkCallback = struct {
                 try self.pushCast(.u8, true);
             },
             .function => {
+                self.function_sym_idx = null;
+
                 if (self.function_first) {
                     self.function_first = false;
 
                     // First function in file has extra spacing
                     _ = try self.push(.newline, null);
                 }
-
-                self.function_sym_idx = null;
 
                 if (!self.forward_declarations) {
                     self.forward_declarations = true;

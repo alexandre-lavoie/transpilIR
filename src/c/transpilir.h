@@ -16,6 +16,8 @@
 #define F64 double
 #define SIZE_T U64
 
+#define TAG(label) __asm__(label)
+
 #define LOCAL static
 #define EXPORT
 
