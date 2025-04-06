@@ -32,6 +32,7 @@ pub const QBE = struct {
         return switch (assembly) {
             .native => "",
             .amd64,
+            .amd64_sysv,
             .x86_64,
             => "amd64_sysv",
             else => error.UnsupportedTarget,
@@ -59,7 +60,7 @@ pub const QBE = struct {
         assembly: common.Assembly,
         reader: std.io.AnyReader,
         writer: std.io.AnyWriter,
-    ) !void {
+    ) !bool {
         _ = file_path;
         _ = ir;
 
@@ -103,6 +104,8 @@ pub const QBE = struct {
             try common.readerToWriter(stdout, writer);
         }
 
-        _ = try cmd.wait();
+        const term = try cmd.wait();
+
+        return term.Exited == 0;
     }
 };

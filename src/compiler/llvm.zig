@@ -36,6 +36,7 @@ pub const LLVM = struct {
         return switch (assembly) {
             .native => "",
             .amd64,
+            .amd64_sysv,
             .x86_64,
             => "--target=x86_64",
             .wasm32 => "--target=wasm32",
@@ -64,7 +65,7 @@ pub const LLVM = struct {
         assembly: common.Assembly,
         reader: std.io.AnyReader,
         writer: std.io.AnyWriter,
-    ) !void {
+    ) !bool {
         var args = std.ArrayList([]const u8).init(self.allocator);
         defer args.deinit();
 
@@ -138,6 +139,8 @@ pub const LLVM = struct {
             try common.readerToWriter(stdout, writer);
         }
 
-        _ = try cmd.wait();
+        const term = try cmd.wait();
+
+        return term.Exited == 0;
     }
 };

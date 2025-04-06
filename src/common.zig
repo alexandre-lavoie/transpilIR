@@ -69,6 +69,7 @@ pub const Assembly = enum {
     ir,
     wasm32,
     amd64,
+    amd64_sysv,
     x86_64,
 
     pub fn isEnabled(t: Assembly) bool {

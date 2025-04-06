@@ -53,11 +53,15 @@ pub fn main() !void {
     var ctx = Context.init(allocator);
     defer ctx.deinit();
 
-    try run(
+    const success = try run(
         allocator,
         &args,
         &ctx,
     );
+
+    if (!success) {
+        std.process.exit(1);
+    }
 }
 
 const Source = enum {
@@ -327,7 +331,7 @@ const Context = struct {
     }
 };
 
-fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
+fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !bool {
     const Reader = std.io.AnyReader;
     const Writer = std.io.AnyWriter;
 
@@ -378,7 +382,7 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
     };
 
     if (!is_parsed) {
-        return;
+        return false;
     }
 
     try optimize(
@@ -426,7 +430,7 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
             var compiler = lib.IRC.init(allocator);
             compiler.deinit();
 
-            try emit(
+            return try emit(
                 &compiler,
                 allocator,
                 args,
@@ -437,7 +441,7 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
             var compiler = lib.GCC.init(allocator, args.optimization);
             compiler.deinit();
 
-            try emit(
+            return try emit(
                 &compiler,
                 allocator,
                 args,
@@ -448,7 +452,7 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
             var compiler = lib.LLVM.init(allocator, args.optimization);
             compiler.deinit();
 
-            try emit(
+            return try emit(
                 &compiler,
                 allocator,
                 args,
@@ -459,14 +463,14 @@ fn run(allocator: std.mem.Allocator, args: *const Args, ctx: *Context) !void {
             var compiler = lib.QBE.init(allocator);
             compiler.deinit();
 
-            try emit(
+            return try emit(
                 &compiler,
                 allocator,
                 args,
                 ctx,
             );
         },
-        .auto => unreachable,
+        .auto => return false,
     }
 }
 
@@ -669,6 +673,7 @@ fn parse(
             &ctx.symbol_table,
             &file_stream,
         );
+        defer callback.deinit();
 
         var ast_walk = lib.ASTWalk.init(allocator, &ctx.ast);
         defer ast_walk.deinit();
@@ -1101,7 +1106,7 @@ fn emit(
     allocator: std.mem.Allocator,
     args: *const Args,
     ctx: *Context,
-) !void {
+) !bool {
     _ = allocator;
 
     var debug = args.debug;
@@ -1138,7 +1143,7 @@ fn emit(
         else => args.source_path,
     };
 
-    try compiler.assemble(
+    return try compiler.assemble(
         file_path,
         args.ir,
         args.assembly,

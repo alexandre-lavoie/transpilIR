@@ -20,16 +20,23 @@ pub const SymbolSourceWalkCallback = struct {
     stream: *std.io.StreamSource,
 
     state: SymbolSourceWalkState = .default,
+    unique_set: UniqueSet,
     function: ?usize = null,
 
     const Self = @This();
+    const UniqueSet = std.AutoArrayHashMap(usize, void);
 
     pub fn init(allocator: std.mem.Allocator, symbol_table: *table.SymbolTable, stream: *std.io.StreamSource) Self {
         return .{
             .allocator = allocator,
             .symbol_table = symbol_table,
             .stream = stream,
+            .unique_set = UniqueSet.init(allocator),
         };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.unique_set.deinit();
     }
 
     pub fn enter(self: *Self, statement: ast.Statement) !void {
@@ -62,11 +69,22 @@ pub const SymbolSourceWalkCallback = struct {
 
                 if (self.symbol_table.containsSymbolIdentifier(&symbol_identifier)) {
                     switch (self.state) {
-                        .unique => return error.SymbolReuse,
+                        .unique => {
+                            if (self.unique_set.contains(try symbol_identifier.key(self.allocator))) {
+                                return error.SymbolReuse;
+                            }
+                        },
                         .default, .function, .call => {},
                     }
                 } else if (identifier.scope != .type or self.state != .default) {
                     _ = try self.symbol_table.addSymbol(&symbol_identifier);
+                }
+
+                if (self.state == .unique) {
+                    try self.unique_set.put(
+                        try symbol_identifier.key(self.allocator),
+                        undefined,
+                    );
                 }
 
                 const instance: types.Instance = .{
@@ -93,7 +111,19 @@ pub const SymbolSourceWalkCallback = struct {
                 _ = try self.stream.read(buffer);
 
                 const value: types.LiteralValue = switch (literal.type) {
-                    .integer => .{ .integer = try std.fmt.parseInt(isize, buffer, 10) },
+                    .integer => b: {
+                        const is_negative = switch (buffer.len > 0) {
+                            true => buffer[0] == '-',
+                            false => false,
+                        };
+
+                        const value: usize = switch (is_negative) {
+                            true => @bitCast(try std.fmt.parseInt(isize, buffer, 10)),
+                            false => try std.fmt.parseInt(usize, buffer, 10),
+                        };
+
+                        break :b .{ .integer = value };
+                    },
                     .single => .{ .single = try std.fmt.parseFloat(f32, buffer) },
                     .double => .{ .double = try std.fmt.parseFloat(f64, buffer) },
                     .string => .{ .string = try common.parseString(buffer, output) },
@@ -392,7 +422,7 @@ test "data" {
         },
         .{
             .value = .{
-                .integer = -1,
+                .integer = @bitCast(@as(isize, -1)),
             },
         },
         .{
@@ -419,6 +449,39 @@ test "data" {
     // Assert
     try std.testing.expectEqualDeep(&expected_symbols, symbol_table.symbols.items);
     try std.testing.expectEqualDeep(&expected_literals, symbol_table.literals.items);
+}
+
+test "data use before declaration" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "data $a = { l $b } data $b = { b 0 }";
+    const expected = [_]types.Symbol{
+        .{
+            .identifier = .{
+                .name = "a",
+                .scope = .global,
+            },
+        },
+        .{
+            .identifier = .{
+                .name = "b",
+                .scope = .global,
+            },
+        },
+    };
+
+    var tree = try test_lib.testAST(allocator, file);
+    defer tree.deinit();
+
+    var symbol_table = table.SymbolTable.init(allocator);
+    defer symbol_table.deinit();
+
+    // Act
+    try test_lib.testSource(allocator, file, &tree, &symbol_table);
+
+    // Assert
+    try std.testing.expectEqualDeep(&expected, symbol_table.symbols.items);
 }
 
 //

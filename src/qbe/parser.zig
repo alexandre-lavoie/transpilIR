@@ -104,8 +104,14 @@ pub fn QBEParser(comptime Reader: type) type {
                 const def_start = self.previous.span.start;
                 const def_value = try switch (self.previous.token_type) {
                     .module_end => break,
-                    .@"export", .thread, .section, .function, .data => self.linkageDefinition(&token_type),
+                    .@"export",
+                    .thread,
+                    .section,
+                    .function,
+                    .data,
+                    => self.linkageDefinition(&token_type),
                     .type => self.typeDefinition(),
+                    .debug_file => self.debugFile(),
                     else => return error.ModuleInvalidToken,
                 };
                 const def_end = self.previous_previous.span.end;
@@ -314,31 +320,53 @@ pub fn QBEParser(comptime Reader: type) type {
 
             var t = self.previous;
 
-            const @"export": bool = switch (t.token_type) {
-                .@"export" => true,
-                else => false,
-            };
-            if (@"export") t = self.next();
+            var @"export": bool = false;
+            var thread: bool = false;
+            var section: ?ast.StatementIndex = null;
+            var flags: ?ast.StatementIndex = null;
 
-            const thread: bool = switch (t.token_type) {
-                .thread => true,
-                else => false,
-            };
-            if (thread) t = self.next();
+            while (true) {
+                switch (t.token_type) {
+                    .function,
+                    .data,
+                    => break,
+                    .@"export" => {
+                        if (@"export") {
+                            return error.DuplicateExport;
+                        }
 
-            const section: ?ast.StatementIndex = switch (t.token_type) {
-                .section => scope: {
-                    _ = self.next();
+                        @"export" = true;
 
-                    break :scope try self.string();
-                },
-                else => null,
-            };
+                        t = self.next();
+                    },
+                    .thread => {
+                        if (thread) {
+                            return error.DuplicateThread;
+                        }
 
-            const flags: ?ast.StatementIndex = switch (section != null and self.previous.token_type == .string_literal) {
-                true => try self.string(),
-                false => null,
-            };
+                        thread = true;
+
+                        t = self.next();
+                    },
+                    .section => {
+                        if (section != null) {
+                            return error.DuplicateSection;
+                        }
+
+                        _ = self.next();
+
+                        section = try self.string();
+
+                        flags = switch (self.previous.token_type == .string_literal) {
+                            true => try self.string(),
+                            false => null,
+                        };
+
+                        t = self.previous;
+                    },
+                    else => return error.UnexpectedLinkageArgument,
+                }
+            }
 
             const span: common.SourceSpan = scope: {
                 if (self.previous.span.start == start) {
@@ -350,12 +378,60 @@ pub fn QBEParser(comptime Reader: type) type {
 
             return try self.new(
                 span,
-                .{ .linkage = .{
-                    .@"export" = @"export",
-                    .thread = thread,
-                    .section = section,
-                    .flags = flags,
-                } },
+                .{
+                    .linkage = .{
+                        .@"export" = @"export",
+                        .thread = thread,
+                        .section = section,
+                        .flags = flags,
+                    },
+                },
+            );
+        }
+
+        fn debugFile(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .debug_file) return error.MissingDebugFile;
+            _ = self.next();
+
+            const path = try self.string();
+
+            const end = self.previous_previous.span.end;
+
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{
+                    .debug_file = .{
+                        .path = path,
+                    },
+                },
+            );
+        }
+
+        fn debugLocation(self: *Self) !ast.StatementIndex {
+            const start = self.previous.span.start;
+
+            if (self.previous.token_type != .debug_location) return error.MissingDebugLocation;
+            _ = self.next();
+
+            const line = try self.integer();
+
+            if (self.previous.token_type != .comma) return error.MissingComma;
+            _ = self.next();
+
+            const column = try self.integer();
+
+            const end = self.previous_previous.span.end;
+
+            return try self.new(
+                .{ .start = start, .end = end },
+                .{
+                    .debug_location = .{
+                        .line = line,
+                        .column = column,
+                    },
+                },
             );
         }
 
@@ -376,10 +452,12 @@ pub fn QBEParser(comptime Reader: type) type {
 
             return try self.new(
                 .{ .start = start, .end = end },
-                .{ .type_definition = .{
-                    .identifier = identifier,
-                    .type = body,
-                } },
+                .{
+                    .type_definition = .{
+                        .identifier = identifier,
+                        .type = body,
+                    },
+                },
             );
         }
 
@@ -498,7 +576,7 @@ pub fn QBEParser(comptime Reader: type) type {
                 .{ .start = start, .end = end },
                 .{ .struct_type = .{
                     .alignment = alignment,
-                    .members = member_head orelse return error.EmptyStruct,
+                    .members = member_head,
                 } },
             );
         }
@@ -932,6 +1010,7 @@ pub fn QBEParser(comptime Reader: type) type {
                 .blit => self.blit(),
                 .call => self.call(null),
                 .vastart => self.vastart(),
+                .debug_location => self.debugLocation(),
                 .byte_store,
                 .double_store,
                 .half_word_store,
@@ -3372,6 +3451,50 @@ test "call varargs" {
     try assertParserType(allocator, file, &expected);
 }
 
+test "debug file" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "dbgfile \"test\"";
+    const expected = [_]ast.StatementType{
+        .literal,
+        .debug_file,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParserType(allocator, file, &expected);
+}
+
+test "debug location" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "function $fun() {@s dbgloc 1, 2 ret}";
+    const expected = [_]ast.StatementType{
+        .linkage,
+        .primitive_type,
+        .identifier,
+        .function_signature,
+        .identifier,
+        .literal,
+        .literal,
+        .debug_location,
+        .line,
+        .node,
+        .@"return",
+        .block,
+        .node,
+        .function,
+        .node,
+        .module,
+    };
+
+    // Act + Assert
+    try assertParserType(allocator, file, &expected);
+}
+
 //
 // Error Tests
 //
@@ -3424,6 +3547,48 @@ test "data error.InvalidPrimitiveType" {
 
     const file = "data $d = {1}";
     const expected = error.InvalidPrimitiveType;
+
+    // Act
+    const res = testParser(allocator, file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "data error.DuplicateExport" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "export export data $d = {1}";
+    const expected = error.DuplicateExport;
+
+    // Act
+    const res = testParser(allocator, file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "data error.DuplicateThread" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "thread thread data $d = {1}";
+    const expected = error.DuplicateThread;
+
+    // Act
+    const res = testParser(allocator, file);
+
+    // Assert
+    try std.testing.expectError(expected, res);
+}
+
+test "data error.DuplicateSection" {
+    // Arrange
+    const allocator = std.testing.allocator;
+
+    const file = "section \"a\" section \"b\" data $d = {1}";
+    const expected = error.DuplicateSection;
 
     // Act
     const res = testParser(allocator, file);

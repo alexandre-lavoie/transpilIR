@@ -163,6 +163,8 @@ pub const QBEEmitWalkCallback = struct {
             .comparison,
             .typed_data,
             => {},
+            .debug_file => try self.push(.debug_file, null),
+            .debug_location => try self.push(.debug_location, null),
             .assignment => self.state = .assignment_enter,
             .module => try self.push(.module_start, null),
             .line => try self.push(.tab, null),
@@ -378,6 +380,11 @@ pub const QBEEmitWalkCallback = struct {
                     try self.push(.open_curly_brace, null);
                 }
             },
+            .debug_location => |d| {
+                if (d.line == previous) {
+                    try self.push(.comma, null);
+                }
+            },
             else => {},
         }
     }
@@ -394,6 +401,8 @@ pub const QBEEmitWalkCallback = struct {
             .halt,
             .jump,
             .@"return",
+            .debug_file,
+            .debug_location,
             => {},
             .module => try self.push(.module_end, null),
             .block,

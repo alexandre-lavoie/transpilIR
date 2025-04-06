@@ -19,6 +19,7 @@ pub fn testSource(allocator: std.mem.Allocator, file: []const u8, tree: *ast.AST
         symbol_table,
         &file_stream,
     );
+    defer callback.deinit();
 
     var walk = ast.ASTWalk.init(allocator, tree);
     defer walk.deinit();

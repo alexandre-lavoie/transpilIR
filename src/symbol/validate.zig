@@ -186,6 +186,8 @@ pub const SymbolValidateWalkCallback = struct {
             .binary_operation,
             .comparison,
             .negate,
+            .debug_file,
+            .debug_location,
             => {},
             .identifier => |identifier| {
                 const symbol = self.symbol_table.getSymbolByInstance(&instance) orelse return error.IdentifierNotFound;
@@ -257,6 +259,8 @@ pub const SymbolValidateWalkCallback = struct {
             .allocate,
             .halt,
             .jump,
+            .debug_file,
+            .debug_location,
             => {},
             .block,
             .data_definition,

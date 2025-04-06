@@ -36,6 +36,7 @@ pub const GCC = struct {
         return switch (assembly) {
             .native => "",
             .amd64,
+            .amd64_sysv,
             .x86_64,
             => "-march=x86-64",
             else => error.UnsupportedTarget,
@@ -63,7 +64,7 @@ pub const GCC = struct {
         assembly: common.Assembly,
         reader: std.io.AnyReader,
         writer: std.io.AnyWriter,
-    ) !void {
+    ) !bool {
         var args = std.ArrayList([]const u8).init(self.allocator);
         defer args.deinit();
 
@@ -76,7 +77,9 @@ pub const GCC = struct {
 
         try args.append(executable orelse "gcc");
 
+        // Permissive and no warnings
         try args.append("-fpermissive");
+        try args.append("-w");
 
         const optimization = switch (self.optimization) {
             .o1 => "-O1",
@@ -136,6 +139,8 @@ pub const GCC = struct {
             try common.readerToWriter(stdout, writer);
         }
 
-        _ = try cmd.wait();
+        const term = try cmd.wait();
+
+        return term.Exited == 0;
     }
 };

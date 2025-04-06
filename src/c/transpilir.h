@@ -60,5 +60,11 @@ extern int isnan(double v);
 #define NOT_NAN(l, r) (!IS_NAN(l) && !IS_NAN(r))
 #define ANY_NAN(l, r) (IS_NAN(l) || IS_NAN(r))
 
+#if !defined(INFINITY)
+#define INFINITY (1.0f / 0.0f)
+#endif
+
+#define inf INFINITY
+
 #endif
 

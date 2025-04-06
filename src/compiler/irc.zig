@@ -30,12 +30,14 @@ pub const IRC = struct {
         assembly: common.Assembly,
         reader: std.io.AnyReader,
         writer: std.io.AnyWriter,
-    ) !void {
+    ) !bool {
         _ = self;
         _ = file_path;
         _ = ir;
         _ = assembly;
 
         try common.readerToWriter(reader, writer);
+
+        return true;
     }
 };

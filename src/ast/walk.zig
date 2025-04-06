@@ -91,8 +91,9 @@ pub const ASTWalk = struct {
 
         var exit_after = true;
         switch (stat.data) {
-            .identifier => {},
-            .literal => {},
+            .identifier,
+            .literal,
+            => {},
             .linkage => |*d| {
                 if (d.section) |section| try self.stack.append(.{ .index = section });
                 if (d.flags) |flags| try self.stack.append(.{ .index = flags });
@@ -136,7 +137,7 @@ pub const ASTWalk = struct {
             .primitive_type => {},
             .struct_type => |*d| {
                 if (d.alignment) |alignment| try self.stack.append(.{ .index = alignment });
-                try self.stack.append(.{ .index = d.members });
+                if (d.members) |members| try self.stack.append(.{ .index = members });
             },
             .type_definition => |*d| {
                 try self.stack.append(.{ .index = d.identifier });
@@ -152,6 +153,13 @@ pub const ASTWalk = struct {
                 if (d.phis) |phis| try self.stack.append(.{ .index = phis });
                 if (d.lines) |lines| try self.stack.append(.{ .index = lines });
                 try self.stack.append(.{ .index = d.flow });
+            },
+            .debug_file => |*d| {
+                try self.stack.append(.{ .index = d.path });
+            },
+            .debug_location => |*d| {
+                try self.stack.append(.{ .index = d.line });
+                try self.stack.append(.{ .index = d.column });
             },
             .line => |d| {
                 try self.stack.append(.{ .index = d });

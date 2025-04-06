@@ -101,6 +101,8 @@ pub const SymbolMemoryWalkCallback = struct {
             .binary_operation,
             .comparison,
             .negate,
+            .debug_file,
+            .debug_location,
             => {},
             .struct_type => {
                 try self.entries.append(.@"struct");
@@ -194,9 +196,11 @@ pub const SymbolMemoryWalkCallback = struct {
             .variadic_parameter,
             .vastart,
             .zero_type,
+            .debug_location,
             => {},
             .block,
             .line,
+            .debug_file,
             => {
                 self.entries.clearAndFree();
             },
@@ -205,17 +209,17 @@ pub const SymbolMemoryWalkCallback = struct {
                     return error.InvalidAllocate;
                 }
 
-                const size = switch (self.entries.pop()) {
+                const size: usize = switch (self.entries.pop()) {
                     .literal => |lit| switch (lit.value) {
-                        .integer => |v| v,
+                        .integer => |i| i,
                         else => return error.InvalidAllocate,
                     },
                     else => return error.InvalidAllocate,
                 };
 
-                const alignment = switch (self.entries.pop()) {
+                const alignment: usize = switch (self.entries.pop()) {
                     .literal => |lit| switch (lit.value) {
-                        .integer => |v| v,
+                        .integer => |i| i,
                         else => return error.InvalidAllocate,
                     },
                     else => return error.InvalidAllocate,
@@ -238,8 +242,8 @@ pub const SymbolMemoryWalkCallback = struct {
                             // TODO: Check that previous is pointer size?
                             typ.* = .{
                                 .stack_allocation = .{
-                                    .alignment = @intCast(alignment),
-                                    .size = @intCast(size),
+                                    .alignment = alignment,
+                                    .size = size,
                                 },
                             };
                         },
@@ -287,7 +291,7 @@ pub const SymbolMemoryWalkCallback = struct {
             .array_type => {
                 const count: usize = switch (self.entries.pop()) {
                     .literal => |literal| switch (literal.value) {
-                        .integer => |integer| @as(usize, @intCast(integer)),
+                        .integer => |i| i,
                         else => unreachable,
                     },
                     else => return error.InvalidArrayType,
@@ -370,7 +374,7 @@ pub const SymbolMemoryWalkCallback = struct {
 
                 const symbol: *types.Symbol = switch (self.entries.items[i]) {
                     .type => |index| self.symbol_table.getSymbolPtrMut(index) orelse return error.InvalidTypeDefinition,
-                    else => return error.InvalidTypeDefinition,
+                    else => return error.InvalidTypeMemory,
                 };
                 i += 1;
 
@@ -385,7 +389,7 @@ pub const SymbolMemoryWalkCallback = struct {
                                 .integer => |integer| {
                                     i += 1;
 
-                                    break :scope @as(usize, @intCast(integer));
+                                    break :scope integer;
                                 },
                                 else => unreachable,
                             }
@@ -402,7 +406,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         };
 
                         const size: usize = switch (literal.value) {
-                            .integer => |s_size| @as(usize, @intCast(s_size)),
+                            .integer => |integer| integer,
                             else => unreachable,
                         };
 
@@ -551,7 +555,7 @@ pub const SymbolMemoryWalkCallback = struct {
                         },
                         .offset = switch (offset) {
                             .literal => |literal| switch (literal.value) {
-                                .integer => |v| v,
+                                .integer => |v| @bitCast(v),
                                 else => return error.InvalidOffset,
                             },
                             else => return error.InvalidOffset,
@@ -570,8 +574,9 @@ pub const SymbolMemoryWalkCallback = struct {
                                 .primitive = primitive,
                                 .value = switch (value) {
                                     .literal => |v| .{ .literal = v },
+                                    .global => |v| .{ .symbol = .{ .index = v, .offset = 0 } },
                                     .data_offset => |v| .{ .symbol = v },
-                                    else => return error.InvalidTypedData,
+                                    else => return error.InvalidTypedDataValue,
                                 },
                             },
                         },
@@ -580,14 +585,14 @@ pub const SymbolMemoryWalkCallback = struct {
                         .data_entry = .{
                             .zero = switch (value) {
                                 .literal => |literal| switch (literal.value) {
-                                    .integer => |v| @intCast(v),
+                                    .integer => |v| v,
                                     else => return error.InvalidSize,
                                 },
                                 else => return error.InvalidSize,
                             },
                         },
                     },
-                    else => return error.InvalidTypedData,
+                    else => return error.InvalidTypedDataType,
                 });
             },
             .data_definition => |d| {
@@ -612,7 +617,7 @@ pub const SymbolMemoryWalkCallback = struct {
                 const alignment: ?usize = switch (d.alignment != null) {
                     true => switch (self.entries.items[i]) {
                         .literal => |l| switch (l.value) {
-                            .integer => |v| @intCast(v),
+                            .integer => |v| v,
                             else => return error.InvalidDataDefinitionAlignment,
                         },
                         else => return error.InvalidDataDefinitionAlignment,
@@ -953,7 +958,7 @@ test "data_definition" {
                             .init = .{
                                 .type = .i8,
                                 .value = .{
-                                    .integer = -1,
+                                    .integer = @bitCast(@as(isize, -1)),
                                 },
                             },
                         },
@@ -969,7 +974,7 @@ test "data_definition" {
                             .init = .{
                                 .type = .i32,
                                 .value = .{
-                                    .integer = -1,
+                                    .integer = @bitCast(@as(isize, -1)),
                                 },
                             },
                         },

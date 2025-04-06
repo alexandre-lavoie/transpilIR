@@ -86,7 +86,7 @@ pub const LiteralValueType = enum {
 };
 
 pub const LiteralValue = union(LiteralValueType) {
-    integer: isize,
+    integer: usize,
     single: f32,
     double: f64,
     string: []const u8,
@@ -127,7 +127,7 @@ pub const SymbolMemoryDataOffset = struct {
 };
 
 pub const SymbolMemoryDataValue = union(enum) {
-    integer: isize,
+    integer: usize,
     single: f32,
     double: f64,
     string: []const u8,

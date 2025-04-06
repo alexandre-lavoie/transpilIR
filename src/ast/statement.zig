@@ -33,6 +33,11 @@ pub const StatementType = enum {
 
     module,
 
+    // Debug
+
+    debug_file,
+    debug_location,
+
     // Data
 
     data_definition,
@@ -127,6 +132,17 @@ pub const StatementData = union(StatementType) {
         functions: ?StatementIndex,
     },
 
+    // Debug
+
+    debug_file: struct {
+        path: StatementIndex,
+    },
+
+    debug_location: struct {
+        line: StatementIndex,
+        column: StatementIndex,
+    },
+
     // Data
 
     data_definition: struct {
@@ -164,7 +180,7 @@ pub const StatementData = union(StatementType) {
 
     struct_type: struct {
         alignment: ?StatementIndex,
-        members: StatementIndex,
+        members: ?StatementIndex,
     },
 
     type_definition: struct {
