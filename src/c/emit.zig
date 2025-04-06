@@ -1205,7 +1205,8 @@ pub const CEmitWalkCallback = struct {
                             _ = try self.pop();
                         }
 
-                        const t = try self.pop(); // Pop type
+                        // Pop type
+                        const t = try self.pop();
 
                         // Pop struct / union
                         const s: ?token.CToken = switch (t.token_type == .type_identifier) {
@@ -1278,14 +1279,16 @@ pub const CEmitWalkCallback = struct {
             .vaarg => {
                 try self.dupe();
 
-                try self.storeToken(); // TODO: struct/union type?
+                // TODO: struct/union type?
+                try self.storeToken();
 
                 try self.push(.close_parenthesis, null);
 
                 _ = try self.pushSymbolIdentifier(.global_identifier, &vaarg_identifier);
                 try self.push(.open_parenthesis, null);
 
-                try self.loadToken(); // TODO: struct/union type?
+                // TODO: struct/union type?
+                try self.loadToken();
 
                 try self.push(.comma, null);
             },
@@ -1585,10 +1588,7 @@ pub const CEmitWalkCallback = struct {
 
                 try self.loadToken();
             },
-            .copy,
-            => {},
-            .cast,
-            => {
+            .cast => {
                 switch (try self.peek()) {
                     .local_identifier,
                     .global_identifier,

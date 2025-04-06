@@ -16,15 +16,31 @@
 #define F64 double
 #define SIZE_T U64
 
+#if defined(__GNUC__) || defined(__clang__)
 #define LINK(sec) __attribute__((section(sec)))
+#else
+#define LINK(sec)
+#endif
+
 #define LINK_FLAGS(sec, flag) LINK(sec)
+
 #define EXPORT
+
+#ifdef __STDC_NO_THREADS__
 #define THREAD
+#else
+#define THREAD _Thread_local
+#endif
 
 #define VA_START(ap, paramN) va_start(*(va_list*)(ap), paramN)
 #define VA_ARG(T, ap) va_arg(*(va_list*)(ap), T)
 
+#if defined(__GNUC__) || defined(__clang__)
 #define ALIGN(n) __attribute__((aligned(n)))
+#else
+#define ALIGN(n)
+#endif
+
 #define ALIGN_DEFAULT ALIGN(1)
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -40,6 +56,7 @@ extern int isnan(double v);
 #else
 #define IS_NAN(v) (v) != (v)
 #endif
+
 #define NOT_NAN(l, r) (!IS_NAN(l) && !IS_NAN(r))
 #define ANY_NAN(l, r) (IS_NAN(l) || IS_NAN(r))
 
