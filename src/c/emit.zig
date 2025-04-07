@@ -1818,10 +1818,13 @@ pub const CEmitWalkCallback = struct {
                     },
                     else => {},
                 }
+
+                _ = try self.convertLiteral();
             },
             .binary_operation,
             .convert,
             .negate,
+            .copy,
             => {
                 _ = try self.convertLiteral();
             },
@@ -2068,8 +2071,10 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                         switch (literal.value) {
                             .integer => |v| try self.print(color, "{}", .{v}),
                             .single => |v| {
-                                if (std.math.isInf(v)) {
+                                if (std.math.isPositiveInf(v)) {
                                     try self.print(color, "INFINITY", .{});
+                                } else if (std.math.isNegativeInf(v)) {
+                                    try self.print(color, "-INFINITY", .{});
                                 } else if (std.math.isNan(v)) {
                                     try self.print(color, "NAN", .{});
                                 } else if (@trunc(v) == v) {
@@ -2079,8 +2084,10 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                                 }
                             },
                             .double => |v| {
-                                if (std.math.isInf(v)) {
+                                if (std.math.isPositiveInf(v)) {
                                     try self.print(color, "INFINITY", .{});
+                                } else if (std.math.isNegativeInf(v)) {
+                                    try self.print(color, "-INFINITY", .{});
                                 } else if (std.math.isNan(v)) {
                                     try self.print(color, "NAN", .{});
                                 } else if (@trunc(v) == v) {
