@@ -51,6 +51,7 @@ pub const CEmitWalkCallback = struct {
     phi_type: ?token.CToken = null,
     pointer_offset: usize = 0,
     env_call: bool = false,
+    last_memory_type: token.CTokenType = token.CTokenType.void,
     last_unwrap_dereference: bool = false,
 
     const Self = @This();
@@ -457,6 +458,13 @@ pub const CEmitWalkCallback = struct {
         };
     }
 
+    fn isPrimitiveTokenType(tt: token.CTokenType) bool {
+        return switch (tt) {
+            .i8, .u8, .i16, .u16, .i32, .u32, .i64, .u64, .f32, .f64 => true,
+            else => false,
+        };
+    }
+
     fn binaryOpToToken(op: ast.BinaryOperationType) token.CTokenType {
         return switch (op) {
             .addition => .plus,
@@ -834,9 +842,26 @@ pub const CEmitWalkCallback = struct {
     }
 
     fn convertLiteral(self: *Self) !bool {
-        if (self.tokens.items.len < 3) return false;
+        var type_off: usize = 0;
 
-        const typ: *token.CToken = &self.tokens.items[self.tokens.items.len - 3];
+        for (3..6) |i| {
+            if (i == 6) {
+                return false;
+            }
+
+            if (i >= self.tokens.items.len) {
+                return false;
+            }
+
+            const o = self.tokens.items.len - i;
+
+            if (Self.isPrimitiveTokenType(self.tokens.items[o].token_type)) {
+                type_off = o;
+                break;
+            }
+        }
+
+        const typ: *token.CToken = &self.tokens.items[type_off];
 
         const cast: bool = switch (try self.peek()) {
             .integer_literal => switch (typ.token_type) {
@@ -855,14 +880,18 @@ pub const CEmitWalkCallback = struct {
         const lit = self.symbol_table.getLiteralByInstance(&inst) orelse return error.NotFound;
 
         lit.value = switch (lit.value) {
-            .integer => |v| .{ .double = @bitCast(v) },
+            .integer => |v| switch (typ.token_type) {
+                .f32 => .{ .single = @bitCast(@as(u32, @intCast(v))) },
+                .f64 => .{ .double = @bitCast(@as(u64, @intCast(v))) },
+                else => return error.UnsupportedType,
+            },
             .double => |v| .{ .integer = @bitCast(v) },
             .single => |v| b: {
                 const d: f64 = @floatCast(v);
 
                 break :b .{ .integer = @bitCast(d) };
             },
-            else => lit.value,
+            else => return error.UnsupportedType,
         };
 
         return true;
@@ -1149,9 +1178,13 @@ pub const CEmitWalkCallback = struct {
             },
             .typed_data => |d| {
                 if (d.type == previous) {
-                    if ((try self.peek()) != .colon) {
-                        _ = try self.pop(); // TODO: Remove struct/union?
-                    }
+                    try self.storeToken();
+
+                    try self.push(.open_parenthesis, null);
+
+                    try self.loadToken();
+
+                    try self.push(.close_parenthesis, null);
                 }
             },
             .offset => {
@@ -1226,7 +1259,6 @@ pub const CEmitWalkCallback = struct {
             .negate => |n| {
                 if (n.data_type == previous) {
                     try self.push(.close_parenthesis, null);
-                    try self.push(.open_parenthesis, null);
                     try self.push(.minus, null);
                 }
             },
@@ -1308,6 +1340,8 @@ pub const CEmitWalkCallback = struct {
             },
             .store => |s| {
                 if (s.memory_type == previous) {
+                    self.last_memory_type = self.tokens.getLast().token_type;
+
                     try self.push(.pointer, null);
                     try self.push(.close_parenthesis, null);
                 } else if (s.value == previous) {
@@ -1533,21 +1567,58 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.newline, null);
             },
             .typed_data => {
+                const is_wrapped = try self.unwrapDereference();
                 const val = try self.pop();
 
-                if ((try self.peek()) == .colon) {
-                    // Zero data
+                switch (try self.peek()) {
+                    .plus, .minus => {
+                        // Offset
 
-                    _ = try self.pop();
+                        try self.push(val.token_type, val.span);
+                    },
+                    else => switch (self.tokens.items[self.tokens.items.len - 2].token_type) {
+                        .colon => {
+                            // Zero data
 
-                    try self.push(.open_curly_brace, null);
+                            // Pop type
+                            for (0..3) |_| {
+                                _ = try self.pop();
+                            }
 
-                    var lit = symbol.LiteralValue{ .integer = 0 };
-                    try self.pushLiteral(&lit);
+                            try self.push(.open_curly_brace, null);
 
-                    try self.push(.close_curly_brace, null);
-                } else {
-                    try self.push(val.token_type, val.span);
+                            var lit = symbol.LiteralValue{ .integer = 0 };
+                            try self.pushLiteral(&lit);
+
+                            try self.push(.close_curly_brace, null);
+                        },
+                        else => switch (val.token_type) {
+                            .integer_literal,
+                            .single_literal,
+                            .double_literal,
+                            => {
+                                try self.push(val.token_type, val.span);
+
+                                _ = try self.convertLiteral();
+                            },
+                            else => {
+                                // All other types
+                                // Should be string or global
+
+                                // Pop type
+                                // TODO: Struct / union?
+                                for (0..3) |_| {
+                                    _ = try self.pop();
+                                }
+
+                                if (is_wrapped) {
+                                    try self.wrapDereference();
+                                }
+
+                                try self.push(val.token_type, val.span);
+                            },
+                        },
+                    },
                 }
             },
             .type_definition,
@@ -1664,7 +1735,25 @@ pub const CEmitWalkCallback = struct {
                                         try self.rot2();
                                     }
                                 },
-                                else => {},
+                                .primitive => |p| {
+                                    switch (try self.peek()) {
+                                        .integer_literal,
+                                        .single_literal,
+                                        .double_literal,
+                                        => {
+                                            try self.storeToken();
+
+                                            try self.push(.open_parenthesis, null);
+                                            try self.pushPrimitiveType(p);
+                                            try self.push(.close_parenthesis, null);
+
+                                            try self.loadToken();
+
+                                            _ = try self.convertLiteral();
+                                        },
+                                        else => {},
+                                    }
+                                },
                             }
                         },
                         else => unreachable,
@@ -1680,7 +1769,6 @@ pub const CEmitWalkCallback = struct {
                 }
             },
             .blit,
-            .negate,
             .vaarg,
             => {
                 try self.push(.close_parenthesis, null);
@@ -1695,11 +1783,17 @@ pub const CEmitWalkCallback = struct {
             .store => {
                 try self.push(.assign, null);
 
+                try self.push(.open_parenthesis, null);
+                try self.push(self.last_memory_type, null);
+                try self.push(.close_parenthesis, null);
+
                 if (self.last_unwrap_dereference) {
                     _ = try self.wrapDereference();
                 }
 
                 try self.loadToken();
+
+                _ = try self.convertLiteral();
             },
             .cast => {
                 switch (try self.peek()) {
@@ -1725,7 +1819,10 @@ pub const CEmitWalkCallback = struct {
                     else => {},
                 }
             },
-            .binary_operation => {
+            .binary_operation,
+            .convert,
+            .negate,
+            => {
                 _ = try self.convertLiteral();
             },
             .comparison => |c| {
@@ -1803,6 +1900,8 @@ pub const CEmitWalkCallback = struct {
 
                     try self.loadToken();
                 }
+
+                _ = try self.convertLiteral();
             },
             .phi => {
                 try self.push(.tab, null);
@@ -1966,10 +2065,30 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
                     => {
                         const literal = self.symbol_table.getLiteralByInstance(&instance) orelse return error.NotFound;
 
-                        try switch (literal.value) {
-                            .integer => |v| self.print(color, "{}", .{v}),
-                            .single => |v| self.print(color, "{d:.}f", .{v}),
-                            .double => |v| self.print(color, "{d:.}", .{v}),
+                        switch (literal.value) {
+                            .integer => |v| try self.print(color, "{}", .{v}),
+                            .single => |v| {
+                                if (std.math.isInf(v)) {
+                                    try self.print(color, "INFINITY", .{});
+                                } else if (std.math.isNan(v)) {
+                                    try self.print(color, "NAN", .{});
+                                } else if (@trunc(v) == v) {
+                                    try self.print(color, "{d:.}.0f", .{v});
+                                } else {
+                                    try self.print(color, "{d:.}", .{v});
+                                }
+                            },
+                            .double => |v| {
+                                if (std.math.isInf(v)) {
+                                    try self.print(color, "INFINITY", .{});
+                                } else if (std.math.isNan(v)) {
+                                    try self.print(color, "NAN", .{});
+                                } else if (@trunc(v) == v) {
+                                    try self.print(color, "{d:.}.0", .{v});
+                                } else {
+                                    try self.print(color, "{d:.}", .{v});
+                                }
+                            },
                             .string => |v| {
                                 const allocator = self.symbol_table.allocator;
 
@@ -1978,7 +2097,7 @@ pub fn CEmitWriter(comptime Reader: type, comptime Writer: type) type {
 
                                 try self.print(color, "{s}", .{s});
                             },
-                        };
+                        }
                     },
                     else => unreachable,
                 }

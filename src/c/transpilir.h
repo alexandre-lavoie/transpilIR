@@ -48,6 +48,14 @@
 
 #define BLIT(src, dest, n) for (int __i = 0; __i < (n); __i++) ((char *)(dest))[__i] = ((char *)(src))[__i];
 
+#if !defined(INFINITY)
+#define INFINITY 1e5000f
+#endif
+
+#if !defined(NAN)
+#define NAN (0.0f/0.0f)
+#endif
+
 #if defined(__unix__) || defined(__APPLE__)
 extern int isnan(double v);
 #define IS_NAN(v) isnan(v)
@@ -57,12 +65,6 @@ extern int isnan(double v);
 
 #define NOT_NAN(l, r) (!IS_NAN(l) && !IS_NAN(r))
 #define ANY_NAN(l, r) (IS_NAN(l) || IS_NAN(r))
-
-#if !defined(INFINITY)
-#define INFINITY (1.0f / 0.0f)
-#endif
-
-#define inf INFINITY
 
 #endif
 
