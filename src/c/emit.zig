@@ -97,7 +97,9 @@ pub const CEmitWalkCallback = struct {
     };
 
     const block_variable = "__block__";
-    const BlockVariableType = u8; // TODO: Possibly could collide?
+
+    // TODO: Possibly could collide?
+    const BlockVariableType = u8;
 
     const va_variable = "__va_param__";
 
@@ -342,7 +344,9 @@ pub const CEmitWalkCallback = struct {
     }
 
     fn pushDataForwardDeclaration(self: *Self, sym: *const symbol.Symbol) !void {
-        switch (sym.memory) {
+        const sym_copy = sym.*;
+
+        switch (sym_copy.memory) {
             .data => |data| {
                 // Define type
                 self.struct_field_index = 0;
@@ -352,7 +356,7 @@ pub const CEmitWalkCallback = struct {
                     .type_identifier,
                     null,
                     "{s}_D",
-                    .{sym.identifier.name},
+                    .{sym_copy.identifier.name},
                 );
 
                 try self.push(.open_curly_brace, null);
@@ -411,9 +415,9 @@ pub const CEmitWalkCallback = struct {
                 try self.push(.@"struct", null);
                 try self.push(.type_identifier, inst.span);
 
-                _ = try self.pushSymbolIdentifier(.global_identifier, &sym.identifier);
+                _ = try self.pushSymbolIdentifier(.global_identifier, &sym_copy.identifier);
 
-                try self.pushTag(sym);
+                try self.pushTag(&sym_copy);
 
                 try self.push(.semi_colon, null);
                 try self.push(.newline, null);
@@ -536,17 +540,13 @@ pub const CEmitWalkCallback = struct {
         try self.push(.close_parenthesis, null);
     }
 
-    fn pushForwardDeclarations(self: *Self) !void {
+    fn pushGlobalForwardDeclarations(self: *Self) !void {
         // Separate previous section
         _ = try self.push(.newline, null);
 
-        // TODO: Possibly hacky way to iterate over mutable items
-        const symbols = try self.allocator.alloc(symbol.Symbol, self.symbol_table.symbols.items.len);
-        defer self.allocator.free(symbols);
+        for (self.symbol_table.globals.items) |idx| {
+            const sym = self.symbol_table.getSymbolPtr(idx).?;
 
-        @memcpy(symbols, self.symbol_table.symbols.items);
-
-        for (symbols) |*sym| {
             switch (sym.memory) {
                 .function => try self.pushFunctionForwardDeclaration(sym),
                 .data => try self.pushDataForwardDeclaration(sym),
@@ -671,7 +671,9 @@ pub const CEmitWalkCallback = struct {
     }
 
     fn pushLocalVariables(self: *Self) !void {
-        const function_sym = self.symbol_table.getSymbolPtr(self.function_sym_idx.?) orelse return error.NotFound;
+        const function_idx = self.function_sym_idx.?;
+
+        const function_sym = self.symbol_table.getSymbolPtr(function_idx) orelse return error.NotFound;
         const is_vararg: bool = switch (function_sym.memory) {
             .function => |f| f.vararg,
             else => false,
@@ -685,60 +687,55 @@ pub const CEmitWalkCallback = struct {
         var idx: usize = 0;
         var last_param: ?*const symbol.Symbol = null;
 
-        // TODO: This algo should be possible with less duplicate checks
-        for (self.symbol_table.symbols.items) |*sym| {
-            if (sym.identifier.function != self.function_sym_idx) {
-                continue;
+        if (self.symbol_table.function_locals.getPtr(function_idx)) |function_locals| {
+            for (function_locals.items) |sidx| {
+                const sym = self.symbol_table.getSymbolPtr(sidx).?;
+
+                idx += 1;
+
+                if (idx <= param_count) {
+                    last_param = sym;
+                    continue;
+                }
+
+                try self.push(.tab, null);
+
+                switch (sym.memory) {
+                    .stack_allocation => |sa| {
+                        try self.push(.u8, null);
+
+                        _ = try self.pushSymbolIdentifier(.global_identifier, &align_identifier);
+
+                        try self.push(.open_parenthesis, null);
+
+                        const alignment = symbol.LiteralValue{ .integer = sa.alignment };
+                        try self.pushLiteral(&alignment);
+
+                        try self.push(.close_parenthesis, null);
+
+                        _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
+
+                        try self.push(.open_bracket, null);
+
+                        const size = symbol.LiteralValue{ .integer = sa.size };
+                        try self.pushLiteral(&size);
+
+                        try self.push(.close_bracket, null);
+                    },
+                    else => {
+                        try self.pushSymbolType(sym);
+
+                        if ((try self.peek()) == .pointer) {
+                            _ = try self.pop();
+                        }
+
+                        _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
+                    },
+                }
+
+                try self.push(.semi_colon, null);
+                try self.push(.newline, null);
             }
-
-            if (sym.identifier.scope != .local) {
-                continue;
-            }
-
-            idx += 1;
-
-            if (idx <= param_count) {
-                last_param = sym;
-                continue;
-            }
-
-            try self.push(.tab, null);
-
-            switch (sym.memory) {
-                .stack_allocation => |sa| {
-                    try self.push(.u8, null);
-
-                    _ = try self.pushSymbolIdentifier(.global_identifier, &align_identifier);
-
-                    try self.push(.open_parenthesis, null);
-
-                    const alignment = symbol.LiteralValue{ .integer = sa.alignment };
-                    try self.pushLiteral(&alignment);
-
-                    try self.push(.close_parenthesis, null);
-
-                    _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
-
-                    try self.push(.open_bracket, null);
-
-                    const size = symbol.LiteralValue{ .integer = sa.size };
-                    try self.pushLiteral(&size);
-
-                    try self.push(.close_bracket, null);
-                },
-                else => {
-                    try self.pushSymbolType(sym);
-
-                    if ((try self.peek()) == .pointer) {
-                        _ = try self.pop();
-                    }
-
-                    _ = try self.pushSymbolIdentifier(.local_identifier, &sym.identifier);
-                },
-            }
-
-            try self.push(.semi_colon, null);
-            try self.push(.newline, null);
         }
 
         if (is_vararg) {
@@ -750,7 +747,9 @@ pub const CEmitWalkCallback = struct {
         }
 
         try self.push(.tab, null);
-        try self.push(.u8, null); // TODO: Make sure that it matches BlockVariableType
+
+        // TODO: Create a function to always match BlockVariableType
+        try self.push(.u8, null);
 
         _ = try self.pushSymbol(
             .global_identifier,
@@ -1014,14 +1013,14 @@ pub const CEmitWalkCallback = struct {
                 if (!self.forward_declarations) {
                     self.forward_declarations = true;
 
-                    try self.pushForwardDeclarations();
+                    try self.pushGlobalForwardDeclarations();
                 }
             },
             .data_definition => {
                 if (!self.forward_declarations) {
                     self.forward_declarations = true;
 
-                    try self.pushForwardDeclarations();
+                    try self.pushGlobalForwardDeclarations();
                 }
             },
             .block => {

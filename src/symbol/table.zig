@@ -9,35 +9,55 @@ pub const SymbolTable = struct {
     allocator: std.mem.Allocator,
 
     symbols: SymbolList,
-    symbol_identifier_map: SymbolIdentifierMap,
-    symbol_instance_map: SymbolInstanceMap,
+    symbol_identifier_map: IndexMap,
+    symbol_instance_map: IndexMap,
 
     literals: LiteralList,
-    literal_instance_map: LiteralInstanceMap,
+    literal_instance_map: IndexMap,
+
+    types: IndexList,
+    globals: IndexList,
+    function_locals: IndexMapList,
 
     span: usize = 0,
 
     const Self = @This();
 
     const SymbolList = std.ArrayList(types.Symbol);
-    const SymbolIdentifierMap = std.AutoArrayHashMap(usize, usize);
-    const SymbolInstanceMap = std.AutoArrayHashMap(usize, usize);
-
     const LiteralList = std.ArrayList(types.Literal);
-    const LiteralInstanceMap = std.AutoArrayHashMap(usize, usize);
+
+    const IndexList = std.ArrayList(usize);
+    const IndexMap = std.AutoArrayHashMap(usize, usize);
+    const IndexMapList = std.AutoArrayHashMap(usize, IndexList);
+
+    // Function should always have some locals
+    // Specifying a large enough size to reduce re-allocations
+    const DEFAULT_FUNCTION_LOCAL_CAPACITY = 32;
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
             .allocator = allocator,
             .symbols = SymbolList.init(allocator),
-            .symbol_identifier_map = SymbolIdentifierMap.init(allocator),
-            .symbol_instance_map = SymbolInstanceMap.init(allocator),
+            .symbol_identifier_map = IndexMap.init(allocator),
+            .symbol_instance_map = IndexMap.init(allocator),
             .literals = LiteralList.init(allocator),
-            .literal_instance_map = LiteralInstanceMap.init(allocator),
+            .literal_instance_map = IndexMap.init(allocator),
+            .types = IndexList.init(allocator),
+            .globals = IndexList.init(allocator),
+            .function_locals = IndexMapList.init(allocator),
         };
     }
 
     pub fn deinit(self: *Self) void {
+        self.types.deinit();
+        self.globals.deinit();
+
+        for (self.function_locals.values()) |*list| {
+            list.deinit();
+        }
+
+        self.function_locals.deinit();
+
         for (self.symbols.items) |*symbol| {
             self.allocator.free(symbol.identifier.name);
 
@@ -94,6 +114,27 @@ pub const SymbolTable = struct {
         try self.symbols.append(.{
             .identifier = identifier_copy,
         });
+
+        switch (identifier.scope) {
+            .global => try self.globals.append(index),
+            .type => try self.types.append(index),
+            .local => {
+                if (identifier.function) |func| {
+                    if (!self.function_locals.contains(func)) {
+                        const list = try IndexList.initCapacity(
+                            self.allocator,
+                            DEFAULT_FUNCTION_LOCAL_CAPACITY,
+                        );
+
+                        try self.function_locals.put(func, list);
+                    }
+
+                    const list = self.function_locals.getPtr(func).?;
+                    try list.append(index);
+                }
+            },
+            .label => {},
+        }
 
         try self.symbol_identifier_map.put(key, index);
 
