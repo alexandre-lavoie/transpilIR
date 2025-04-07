@@ -46,12 +46,51 @@ pub const LLVM = struct {
     fn getTarget(assembly: common.Assembly) ![]const u8 {
         return switch (assembly) {
             .native => "",
+
+            .aarch64 => "aarch64",
+            .aarch64_32 => "aarch64_32",
+            .aarch64_be => "aarch64_be",
+
+            .arm => "arm",
+            .armeb => "armeb",
+
+            .arm64,
+            .arm64_apple,
+            => "arm64",
+
+            .arm64_32 => "arm64_32",
+
+            .mips => "mips",
+            .mipsel => "mipsel",
+
+            .mips64 => "mips64",
+            .mips64el => "mips64el",
+
+            .riscv32,
+            .rv32,
+            => "riscv32",
+
+            .riscv64,
+            .rv64,
+            => "riscv64",
+
+            .thumb => "thumb",
+            .thumbeb => "thumbeb",
+
+            .wasm,
+            .wasm32,
+            => "wasm32",
+            .wasm64 => "wasm64",
+
+            .x86_64,
             .amd64,
             .amd64_sysv,
-            .x86_64,
-            => "--target=x86_64",
-            .wasm32 => "--target=wasm32",
-            else => error.UnsupportedTarget,
+            .amd64_apple,
+            => "x86-64",
+
+            .none,
+            .ir,
+            => error.UnsupportedTarget,
         };
     }
 
@@ -112,8 +151,16 @@ pub const LLVM = struct {
         try args.append(extension);
 
         const arch = try Self.getTarget(assembly);
-        if (arch.len > 0) {
-            try args.append(arch);
+        const target: ?[]const u8 = switch (arch.len > 0) {
+            true => try std.fmt.allocPrint(self.allocator, "--target={s}", .{arch}),
+            false => null,
+        };
+        defer if (target) |t| {
+            self.allocator.free(t);
+        };
+
+        if (target) |t| {
+            try args.append(t);
         }
 
         const file_map = try std.fmt.allocPrint(

@@ -67,10 +67,53 @@ pub const Assembly = enum {
     none,
     native,
     ir,
+
+    // aarch64
+    aarch64,
+    aarch64_32,
+    aarch64_be,
+
+    // arm
+    arm,
+    armeb,
+
+    // arm64
+    arm64,
+    arm64_apple,
+    arm64_32,
+
+    // mips
+    mips,
+    mipsel,
+
+    // mips64
+    mips64,
+    mips64el,
+
+    // riscv32
+    riscv32,
+    rv32,
+
+    // riscv64
+    riscv64,
+    rv64,
+
+    // thumb
+    thumb,
+    thumbeb,
+
+    // wasm32
+    wasm,
     wasm32,
+
+    // wasm64
+    wasm64,
+
+    // x86_64
+    x86_64,
     amd64,
     amd64_sysv,
-    x86_64,
+    amd64_apple,
 
     pub fn isEnabled(t: Assembly) bool {
         return switch (t) {

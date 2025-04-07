@@ -35,19 +35,11 @@ pub const GCC = struct {
             => return false,
         }
 
-        _ = Self.getTarget(assembly) catch return false;
-
-        return true;
-    }
-
-    fn getTarget(assembly: common.Assembly) ![]const u8 {
         return switch (assembly) {
-            .native => "",
-            .amd64,
-            .amd64_sysv,
-            .x86_64,
-            => "-march=x86-64",
-            else => error.UnsupportedTarget,
+            .none,
+            .ir,
+            => false,
+            else => true,
         };
     }
 
@@ -73,6 +65,8 @@ pub const GCC = struct {
         reader: std.io.AnyReader,
         writer: std.io.AnyWriter,
     ) !bool {
+        _ = assembly;
+
         var args = std.ArrayList([]const u8).init(self.allocator);
         defer args.deinit();
 
@@ -106,11 +100,6 @@ pub const GCC = struct {
 
         try args.append("-x");
         try args.append(extension);
-
-        const arch = try Self.getTarget(assembly);
-        if (arch.len > 0) {
-            try args.append(arch);
-        }
 
         const file_map = try std.fmt.allocPrint(
             self.allocator,
