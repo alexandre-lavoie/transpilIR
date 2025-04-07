@@ -59,6 +59,9 @@ pub const CEmitWalkCallback = struct {
 
     const opaque_identifier = symbol.SymbolIndentifier{ .name = "opaque", .scope = .global };
 
+    const not_nan_identifier = symbol.SymbolIndentifier{ .name = "NOT_NAN", .scope = .global };
+    const any_nan_identifier = symbol.SymbolIndentifier{ .name = "ANY_NAN", .scope = .global };
+
     const link_local_identifier = symbol.SymbolIndentifier{ .name = "LOCAL", .scope = .global };
     const link_export_identifier = symbol.SymbolIndentifier{ .name = "EXPORT", .scope = .global };
     const link_thread_identifier = symbol.SymbolIndentifier{ .name = "THREAD", .scope = .global };
@@ -72,14 +75,15 @@ pub const CEmitWalkCallback = struct {
     const allocate_identifier = symbol.SymbolIndentifier{ .name = "ALLOCATE", .scope = .global };
     const blit_identifier = symbol.SymbolIndentifier{ .name = "BLIT", .scope = .global };
 
-    const not_nan_identifier = symbol.SymbolIndentifier{ .name = "NOT_NAN", .scope = .global };
-    const any_nan_identifier = symbol.SymbolIndentifier{ .name = "ANY_NAN", .scope = .global };
-
     const vastart_identifier = symbol.SymbolIndentifier{ .name = "VA_START", .scope = .global };
     const vaarg_identifier = symbol.SymbolIndentifier{ .name = "VA_ARG", .scope = .global };
 
+    const halt_identifier = symbol.SymbolIndentifier{ .name = "HALT", .scope = .global };
+
     const emit_identifiers = [_]symbol.SymbolIndentifier{
         opaque_identifier,
+        not_nan_identifier,
+        any_nan_identifier,
         link_local_identifier,
         link_export_identifier,
         link_thread_identifier,
@@ -90,10 +94,9 @@ pub const CEmitWalkCallback = struct {
         align_default_identifier,
         allocate_identifier,
         blit_identifier,
-        not_nan_identifier,
-        any_nan_identifier,
         vastart_identifier,
         vaarg_identifier,
+        halt_identifier,
     };
 
     const block_variable = "__block__";
@@ -1048,12 +1051,9 @@ pub const CEmitWalkCallback = struct {
             },
             .halt => {
                 try self.push(.tab, null);
-                try self.push(.@"while", null);
+
+                _ = try self.pushSymbolIdentifier(.global_identifier, &halt_identifier);
                 try self.push(.open_parenthesis, null);
-
-                const val = symbol.LiteralValue{ .integer = 1 };
-                try self.pushLiteral(&val);
-
                 try self.push(.close_parenthesis, null);
             },
             .blit => {
