@@ -86,7 +86,7 @@ pub const LLVM = struct {
             .amd64,
             .amd64_sysv,
             .amd64_apple,
-            => "x86-64",
+            => "x86_64",
 
             .none,
             .ir,

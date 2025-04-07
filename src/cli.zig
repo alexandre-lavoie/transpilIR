@@ -53,6 +53,10 @@ pub fn main() !void {
     var ctx = Context.init(allocator);
     defer ctx.deinit();
 
+    if (args.assembly.getArchitecture()) |arch| {
+        args.target.arch = arch;
+    }
+
     const success = try run(
         allocator,
         &args,
@@ -98,7 +102,7 @@ const Args = struct {
     ir: lib.IR = default_ir,
     assembly: lib.Assembly = default_assembly,
     assembly_path: []const u8 = "",
-    arch: lib.Target = .{ .arch = .a64 },
+    target: lib.Target = .{ .arch = .a64 },
     debug_flags: usize = 0,
     help: bool = false,
     config: lib.EmitWriterConfig = .{ .tty = .escape_codes },
@@ -783,7 +787,7 @@ fn parse(
         }
     }
 
-    {
+    if (false) {
         if (args.hasDebug(.typing)) {
             _ = try debug.write("=== Typing ===\n");
         }
@@ -793,7 +797,7 @@ fn parse(
         var callback = lib.SymbolValidateWalkCallback.init(
             allocator,
             &ctx.symbol_table,
-            &args.arch,
+            &args.target,
         );
         defer callback.deinit();
 
@@ -1046,7 +1050,7 @@ fn transpile(
 
     var callback = EmitWalkCallback.init(
         allocator,
-        &args.arch,
+        &args.target,
         &ctx.symbol_table,
     );
     defer callback.deinit();

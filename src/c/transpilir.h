@@ -46,15 +46,6 @@ extern int isnan(double v);
 #define TAG(label)
 #endif
 
-#define LOCAL static
-#define EXPORT
-
-#ifdef __STDC_NO_THREADS__
-#define THREAD
-#else
-#define THREAD _Thread_local
-#endif
-
 #if defined(__GNUC__) || defined(__clang__)
 #define LINK(sec) __attribute__((section(sec)))
 #else
@@ -63,10 +54,47 @@ extern int isnan(double v);
 
 #define LINK_FLAGS(sec, flag) LINK(sec)
 
-// Variable Arguments
+// Data
+
+#define CONSTRUCTOR __attribute__((constructor))
+
+#if defined(__wasm__)
+#define DATA_LOCAL static
+#define DATA_EXPORT static
+#else
+#define DATA_LOCAL static
+#define DATA_EXPORT
+#endif
+
+#ifdef __STDC_NO_THREADS__
+#define THREAD
+#else
+#define THREAD _Thread_local
+#endif
+
+#if defined(__wasm__)
+#define DATA_START CONSTRUCTOR static void init_data() {
+#define DATA_END }
+#define DATA_ASSIGN(link, type, ident) ident = (type)
+#else
+#define DATA_START
+#define DATA_END
+#define DATA_ASSIGN(link, type, ident) link type ident =
+#endif
+
+// Function
+
+#define FN_LOCAL static
+#define FN_EXPORT
 
 #define VA_START(ap, paramN) va_start(*(va_list*)(ap), paramN)
 #define VA_ARG(T, ap) va_arg(*(va_list*)(ap), T)
+
+#if defined(__GNUC__) || defined(__clang__)
+#define HALT() __builtin_unreachable()
+#else
+#define HALT()
+#endif
 
 // Memory
 
@@ -82,14 +110,6 @@ extern int isnan(double v);
 #define BLIT(src, dst, n) __builtin_memcpy(dst, src, n)
 #else
 #define BLIT(src, dst, n) for (int __i = 0; __i < (n); __i++) ((char *)(dst))[__i] = ((char *)(src))[__i];
-#endif
-
-// Flow
-
-#if defined(__GNUC__) || defined(__clang__)
-#define HALT() __builtin_unreachable()
-#else
-#define HALT()
 #endif
 
 #endif

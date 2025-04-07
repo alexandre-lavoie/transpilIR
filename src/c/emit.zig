@@ -46,6 +46,7 @@ pub const CEmitWalkCallback = struct {
     function_first: bool = true,
     function_sym_idx: ?usize = null,
     function_last_param_token: ?token.CToken = null,
+    data_first: bool = true,
     block_sym_idx: ?usize = null,
     phi_token: ?token.CToken = null,
     phi_type: ?token.CToken = null,
@@ -62,40 +63,58 @@ pub const CEmitWalkCallback = struct {
     const not_nan_identifier = symbol.SymbolIndentifier{ .name = "NOT_NAN", .scope = .global };
     const any_nan_identifier = symbol.SymbolIndentifier{ .name = "ANY_NAN", .scope = .global };
 
-    const link_local_identifier = symbol.SymbolIndentifier{ .name = "LOCAL", .scope = .global };
-    const link_export_identifier = symbol.SymbolIndentifier{ .name = "EXPORT", .scope = .global };
     const link_thread_identifier = symbol.SymbolIndentifier{ .name = "THREAD", .scope = .global };
     const link_identifier = symbol.SymbolIndentifier{ .name = "LINK", .scope = .global };
     const link_flags_identifier = symbol.SymbolIndentifier{ .name = "LINK_FLAGS", .scope = .global };
 
     const tag_identifier = symbol.SymbolIndentifier{ .name = "TAG", .scope = .global };
 
+    const data_start_identifier = symbol.SymbolIndentifier{ .name = "DATA_START", .scope = .global };
+    const data_end_identifier = symbol.SymbolIndentifier{ .name = "DATA_END", .scope = .global };
+    const data_local_identifier = symbol.SymbolIndentifier{ .name = "DATA_LOCAL", .scope = .global };
+    const data_export_identifier = symbol.SymbolIndentifier{ .name = "DATA_EXPORT", .scope = .global };
+    const data_assign_identifier = symbol.SymbolIndentifier{ .name = "DATA_ASSIGN", .scope = .global };
+
+    const function_local_identifier = symbol.SymbolIndentifier{ .name = "FN_LOCAL", .scope = .global };
+    const function_export_identifier = symbol.SymbolIndentifier{ .name = "FN_EXPORT", .scope = .global };
+    const vastart_identifier = symbol.SymbolIndentifier{ .name = "VA_START", .scope = .global };
+    const vaarg_identifier = symbol.SymbolIndentifier{ .name = "VA_ARG", .scope = .global };
+
     const align_identifier = symbol.SymbolIndentifier{ .name = "ALIGN", .scope = .global };
     const align_default_identifier = symbol.SymbolIndentifier{ .name = "ALIGN_DEFAULT", .scope = .global };
     const allocate_identifier = symbol.SymbolIndentifier{ .name = "ALLOCATE", .scope = .global };
     const blit_identifier = symbol.SymbolIndentifier{ .name = "BLIT", .scope = .global };
 
-    const vastart_identifier = symbol.SymbolIndentifier{ .name = "VA_START", .scope = .global };
-    const vaarg_identifier = symbol.SymbolIndentifier{ .name = "VA_ARG", .scope = .global };
-
     const halt_identifier = symbol.SymbolIndentifier{ .name = "HALT", .scope = .global };
 
     const emit_identifiers = [_]symbol.SymbolIndentifier{
         opaque_identifier,
+
         not_nan_identifier,
         any_nan_identifier,
-        link_local_identifier,
-        link_export_identifier,
-        link_thread_identifier,
+
         link_identifier,
         link_flags_identifier,
+
+        data_start_identifier,
+        data_end_identifier,
+        data_local_identifier,
+        data_export_identifier,
+        link_thread_identifier,
+        data_assign_identifier,
+
         tag_identifier,
+
+        function_local_identifier,
+        function_export_identifier,
+        vastart_identifier,
+        vaarg_identifier,
+
         align_identifier,
         align_default_identifier,
         allocate_identifier,
         blit_identifier,
-        vastart_identifier,
-        vaarg_identifier,
+
         halt_identifier,
     };
 
@@ -241,6 +260,7 @@ pub const CEmitWalkCallback = struct {
             },
             .@"struct",
             .@"union",
+            .@"opaque",
             => {
                 try self.pushSymbolTypePrefix(sym);
 
@@ -412,7 +432,7 @@ pub const CEmitWalkCallback = struct {
                 }
 
                 if (!data.linkage.@"export") {
-                    _ = try self.pushSymbolIdentifier(.global_identifier, &link_local_identifier);
+                    _ = try self.pushSymbolIdentifier(.global_identifier, &data_local_identifier);
                 }
 
                 try self.push(.@"struct", null);
@@ -581,7 +601,7 @@ pub const CEmitWalkCallback = struct {
         switch (sym.memory) {
             .function => |*f| {
                 if (!f.external and !f.linkage.@"export") {
-                    _ = try self.pushSymbolIdentifier(.global_identifier, &link_local_identifier);
+                    _ = try self.pushSymbolIdentifier(.global_identifier, &data_local_identifier);
                 }
 
                 try self.pushFunctionReturn(f);
@@ -843,6 +863,16 @@ pub const CEmitWalkCallback = struct {
         try self.push(.open_parenthesis, null);
     }
 
+    fn pushDataStart(self: *Self) !void {
+        _ = try self.pushSymbolIdentifier(.global_identifier, &data_start_identifier);
+        try self.push(.newline, null);
+    }
+
+    fn pushDataEnd(self: *Self) !void {
+        _ = try self.pushSymbolIdentifier(.global_identifier, &data_end_identifier);
+        try self.push(.newline, null);
+    }
+
     fn convertLiteral(self: *Self) !bool {
         var type_off: usize = 0;
 
@@ -1003,23 +1033,37 @@ pub const CEmitWalkCallback = struct {
             .offset => {
                 try self.pushCast(.u8, true);
             },
+            .data_definition => {
+                if (!self.forward_declarations) {
+                    self.forward_declarations = true;
+
+                    try self.pushGlobalForwardDeclarations();
+                }
+
+                if (self.data_first) {
+                    self.data_first = false;
+
+                    try self.pushDataStart();
+                }
+
+                _ = try self.pushSymbolIdentifier(.global_identifier, &data_assign_identifier);
+                try self.push(.open_parenthesis, null);
+            },
             .function => {
                 self.function_sym_idx = null;
 
                 if (self.function_first) {
                     self.function_first = false;
 
+                    // First function should be after data (if there is any)
+                    if (!self.data_first) {
+                        try self.pushDataEnd();
+                    }
+
                     // First function in file has extra spacing
                     _ = try self.push(.newline, null);
                 }
 
-                if (!self.forward_declarations) {
-                    self.forward_declarations = true;
-
-                    try self.pushGlobalForwardDeclarations();
-                }
-            },
-            .data_definition => {
                 if (!self.forward_declarations) {
                     self.forward_declarations = true;
 
@@ -1150,6 +1194,8 @@ pub const CEmitWalkCallback = struct {
                 } else if (d.alignment == previous) {
                     _ = try self.pop();
                 } else if (d.linkage == previous) {
+                    try self.push(.comma, null);
+
                     // Add type to data
 
                     // Identifier should be stored on stack at this point
@@ -1166,10 +1212,13 @@ pub const CEmitWalkCallback = struct {
                     try self.push(.@"struct", null);
                     _ = try self.pushSymbolInstance(.type_identifier, type_sym_idx);
 
+                    try self.push(.comma, null);
+
                     try self.loadToken();
 
-                    // Open assign
-                    try self.push(.assign, null);
+                    try self.push(.close_parenthesis, null);
+
+                    // Open data curly
                     try self.push(.open_curly_brace, null);
                 } else {
                     try self.push(.comma, null);
@@ -1469,7 +1518,14 @@ pub const CEmitWalkCallback = struct {
 
     pub fn exit(self: *Self, statement: *const ast.Statement) !void {
         switch (statement.data) {
-            .module => try self.push(.module_end, null),
+            .module => {
+                // Close data if defined but no functions
+                if (!self.data_first and self.function_first) {
+                    try self.pushDataEnd();
+                }
+
+                try self.push(.module_end, null);
+            },
             .opaque_type => |o| {
                 {
                     const tok = try self.pop();
@@ -1634,10 +1690,18 @@ pub const CEmitWalkCallback = struct {
                     _ = try self.pushSymbolIdentifier(.global_identifier, &link_thread_identifier);
                 }
 
+                const is_function = !self.function_first;
+
                 if (l.@"export") {
-                    _ = try self.pushSymbolIdentifier(.global_identifier, &link_export_identifier);
+                    _ = try self.pushSymbolIdentifier(.global_identifier, switch (is_function) {
+                        true => &function_export_identifier,
+                        false => &data_export_identifier,
+                    });
                 } else {
-                    _ = try self.pushSymbolIdentifier(.global_identifier, &link_local_identifier);
+                    _ = try self.pushSymbolIdentifier(.global_identifier, switch (is_function) {
+                        true => &function_local_identifier,
+                        false => &data_local_identifier,
+                    });
                 }
             },
             .function => {

@@ -121,6 +121,59 @@ pub const Assembly = enum {
             else => true,
         };
     }
+
+    pub fn getArchitecture(t: Assembly) ?Architecture {
+        return switch (t) {
+            .none,
+            .native,
+            .ir,
+            => null,
+
+            .aarch64 => .a64,
+            .aarch64_32 => .a64,
+            .aarch64_be => .a64,
+
+            .arm => .a32,
+            .armeb => .a32,
+
+            .arm64,
+            .arm64_apple,
+            .arm64_32,
+            => .a64,
+
+            .mips,
+            .mipsel,
+            => .a32,
+
+            .mips64,
+            .mips64el,
+            => .a64,
+
+            .riscv32,
+            .rv32,
+            => .a32,
+
+            .riscv64,
+            .rv64,
+            => .a64,
+
+            .thumb,
+            .thumbeb,
+            => .a32,
+
+            .wasm,
+            .wasm32,
+            => .a32,
+
+            .wasm64 => .a64,
+
+            .x86_64,
+            .amd64,
+            .amd64_sysv,
+            .amd64_apple,
+            => .a64,
+        };
+    }
 };
 
 // Optimization level for compiler
