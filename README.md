@@ -23,7 +23,7 @@ A transpiler for compiler IRs. The goal of the tool is to let you use fast/simpl
 Currently, QBE to C is passing most unit tests for linux amd64. It should be stable enough to test it out.
 
 - [QBE](https://c9x.me/compile/): 54 passed, 2 failed, 56 total (phi ordering and argument match count)
-- [Hare](https://harelang.org/): 495 passed, 71 failed, 8 skipped, 574 total (mostly floating point math)
+- [Hare](https://harelang.org/): all passing
 
 ## 🚩 Getting Started
 
