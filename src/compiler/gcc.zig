@@ -8,6 +8,14 @@ pub const GCC = struct {
 
     const Self = @This();
 
+    const FLAGS = [_][]const u8{
+        "-fno-builtin",
+        "-fno-stack-protector",
+
+        "-w",
+        "-fpermissive",
+    };
+
     pub fn init(allocator: std.mem.Allocator, optimization: common.Optimization) Self {
         return .{
             .allocator = allocator,
@@ -77,24 +85,16 @@ pub const GCC = struct {
 
         try args.append(executable orelse "gcc");
 
-        // Configs
-        try args.append("-fno-builtin");
-        try args.append("-fno-stack-protector");
+        for (FLAGS) |flag| {
+            try args.append(flag);
+        }
 
-        // Remove warnings
-        try args.append("-w");
-        try args.append("-fpermissive");
-
-        const optimization = switch (self.optimization) {
+        try args.append(switch (self.optimization) {
             .o0 => "-O0",
             .o1 => "-O1",
             .o2 => "-O2",
             .o3 => "-O3",
-        };
-
-        if (optimization.len > 0) {
-            try args.append(optimization);
-        }
+        });
 
         try args.append("-S");
         try args.append("-o-");

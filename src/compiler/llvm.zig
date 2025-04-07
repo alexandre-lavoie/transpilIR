@@ -8,6 +8,17 @@ pub const LLVM = struct {
 
     const Self = @This();
 
+    const FLAGS = [_][]const u8{
+        "-fno-builtin",
+        "-ffreestanding",
+        "-disable-simplify-libcalls",
+        "-fno-stack-protector",
+
+        "-w",
+        "-Wno-int-conversion",
+        "-Wno-incompatible-pointer-types",
+    };
+
     pub fn init(allocator: std.mem.Allocator, optimization: common.Optimization) Self {
         return .{
             .allocator = allocator,
@@ -78,27 +89,16 @@ pub const LLVM = struct {
 
         try args.append(executable orelse "clang");
 
-        // Configs
-        try args.append("-fno-builtin");
-        try args.append("-ffreestanding");
-        try args.append("-disable-simplify-libcalls");
-        try args.append("-fno-stack-protector");
+        for (FLAGS) |flag| {
+            try args.append(flag);
+        }
 
-        // Remove warnings
-        try args.append("-w");
-        try args.append("-Wno-int-conversion");
-        try args.append("-Wno-incompatible-pointer-types");
-
-        const optimization = switch (self.optimization) {
+        try args.append(switch (self.optimization) {
             .o0 => "-O0",
             .o1 => "-O1",
             .o2 => "-O2",
             .o3 => "-O3",
-        };
-
-        if (optimization.len > 0) {
-            try args.append(optimization);
-        }
+        });
 
         try args.append("-S");
         try args.append("-o-");
