@@ -12,10 +12,19 @@
 #define U16 uint16_t
 #define I32 int32_t
 #define U32 uint32_t
+#if defined(__wasm32__)
+#define I64 int32_t
+#define U64 uint32_t
+#else
 #define I64 int64_t
 #define U64 uint64_t
+#endif
 #define F32 float
+#if defined(__wasm32__)
+#define F64 float
+#else
 #define F64 double
+#endif
 #define SIZE_T U64
 
 // Floating-point
@@ -106,7 +115,7 @@ extern int isnan(double v);
 
 #define ALIGN_DEFAULT ALIGN(1)
 
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__clang__) || defined(__GNUC__)
 #define BLIT(src, dst, n) __builtin_memcpy(dst, src, n)
 #else
 #define BLIT(src, dst, n) for (int __i = 0; __i < (n); __i++) ((char *)(dst))[__i] = ((char *)(src))[__i];
